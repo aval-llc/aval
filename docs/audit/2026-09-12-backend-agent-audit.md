@@ -2,6 +2,8 @@
 
 Review branch: `khas`, based on `6eb8765` (`Merge Supabase cutover`). This is a source-review release. No production deployment, database mutation, external message, payment, or desktop release was performed.
 
+Later incident follow-up: the first-login migration was applied to production and the signed-in page recovered. See [live login repair](2026-09-12-live-login-repair.md) for evidence and the migrations still pending; the original audit below describes its earlier source-review scope.
+
 ## Verdict
 
 The checked-in migration had functional blockers that schema installation and typechecking did not reveal. This audit reproduced and fixed first-login/invitation SQL failures, broken JSONB transcript writes, transaction failure handling, unsupported provider redirect settings, and worker permissions/ownership problems.
