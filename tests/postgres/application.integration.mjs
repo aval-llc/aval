@@ -6,6 +6,7 @@ import { Client } from "pg";
 import { and, eq } from "drizzle-orm";
 import { properties } from "../../db/postgres/schema.ts";
 import { withDbSession } from "../../db/postgres/session.ts";
+import { createItem, createProject, readPlanning } from "../../lib/planning/store.ts";
 import { runAuditCases } from "./audit-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
 
@@ -115,6 +116,27 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await session(userB, async (dbSession) => {
       const invisible = await dbSession.db.select().from(properties).where(eq(properties.id, propertyId));
       assert.equal(invisible.length, 0, "another organization cannot read the row");
+    });
+
+    await t.test("planning saves current epoch-millisecond dates", async () => {
+      const now = Date.now();
+      await session(userA, async (dbSession) => {
+        const project = await createProject(dbSession, dbSession.identity.organizationId, "Live planning check", "", "blue");
+        const item = await createItem(dbSession, dbSession.identity.organizationId, userA, {
+          title: "Create a real task",
+          description: "",
+          kind: "task",
+          status: "planned",
+          projectId: project.id,
+          assigneeId: userA,
+          startsAt: now,
+          endsAt: now + 3_600_000,
+        });
+        const planning = await readPlanning(dbSession, dbSession.identity.organizationId);
+        assert.equal(planning.projects.find((row) => row.id === project.id)?.createdAt, project.createdAt);
+        assert.equal(planning.items.find((row) => row.id === item.id)?.startsAt, now);
+        assert.equal(typeof planning.items.find((row) => row.id === item.id)?.startsAt, "number");
+      });
     });
     await assert.rejects(
       session(userB, (dbSession) =>

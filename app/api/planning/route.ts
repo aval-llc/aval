@@ -18,6 +18,13 @@ import {
 } from "@/lib/planning/types";
 const error = (message: string, status: number) =>
   Response.json({ error: message }, { status });
+function logPlanningFailure(operation: string, cause: unknown) {
+  const code =
+    cause && typeof cause === "object" && "code" in cause
+      ? String((cause as { code?: unknown }).code ?? "unknown")
+      : "unknown";
+  console.error(JSON.stringify({ event: "planning_request_failed", operation, code }));
+}
 async function GETWithSession(dbSession: DbSession, request: Request) {
   const identity = await getApiIdentity(dbSession, request);
   if (!identity || isGuestIdentity(identity))
@@ -43,7 +50,8 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
       { ...data, members: roster },
       { headers: { "cache-control": "no-store" } },
     );
-  } catch {
+  } catch (cause) {
+    logPlanningFailure("read", cause);
     return error("Planning is unavailable. Please try again.", 503);
   }
 }
@@ -145,7 +153,8 @@ async function mutate(dbSession: DbSession, request: Request) {
           "This item changed or is no longer available. Refresh and try again.",
           409,
         );
-  } catch {
+  } catch (cause) {
+    logPlanningFailure(request.method.toLowerCase(), cause);
     return error("Your changes could not be saved. Please try again.", 503);
   }
 }
