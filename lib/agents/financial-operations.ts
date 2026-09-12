@@ -1,8 +1,9 @@
 /** Durable financial operation ledger and scheduled reconciliation. */
 
-import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { agentFinancialEvents, agentFinancialOperations } from "@/db/postgres/schema";
+import { providerJson, ProviderHttpError } from "@/lib/integrations/http";
 import { digestPayload } from "@/lib/audit/chain";
 import { fingerprintAccount } from "./execution-policy.ts";
 import { financialReservationStatement, type FinancialReservationRow } from "./financial-reservation-sql.ts";
@@ -58,7 +59,7 @@ export async function reserveFinancialOperation(dbSession: DbSession, input: {
     updatedAt: now,
     settledAt: null,
   };
-  await dbSession.db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.organizationId}, 0))`);
+  await dbSession.db.execute(sql`select aval_private.lock_organization(${input.organizationId})`);
   const inserted = await dbSession.db.execute(financialReservationStatement(row, { dailyLimitCents: input.dailyLimitCents, since }));
   if (inserted.rowCount !== 1) {
     // The cap predicate is evaluated before the unique index can object, so a
@@ -157,12 +158,12 @@ export async function reconcileDueFinancialOperations(dbSession: DbSession, env:
   let checked = 0;
 
   for (const operation of operations) {
-    if (!(await claimReconciliation(dbSession, operation, workerId, now))) continue;
+    if (!(await claimReconciliation(dbSession, operation, workerId, new Date()))) continue;
     checked++;
     const adapter = adapterFor(operation, env);
     if (!adapter || !operation.externalTransactionId) {
       deferred++;
-      await deferReconciliation(dbSession, operation, adapter ? "external_id_missing" : "provider_unavailable", now);
+      await deferReconciliation(dbSession, operation, workerId, adapter ? "external_id_missing" : "provider_unavailable", new Date());
       continue;
     }
     try {
@@ -170,19 +171,20 @@ export async function reconcileDueFinancialOperations(dbSession: DbSession, env:
       // transaction to record the independently observed state.
       const observed = await dbSession.outsideTransaction(() => adapter.lookup(operation));
       if (observed === "not_found") {
-        discrepancies++;
-        await writeReconciliation(dbSession, operation, { status: "mismatch", code: "external_transaction_not_found" }, now);
+        if (await writeReconciliation(dbSession, operation, workerId, { status: "mismatch", code: "external_transaction_not_found" }, new Date())) discrepancies++;
+        else deferred++;
         continue;
       }
       const verdict = compareFinancialState(operation, observed);
-      if (verdict.status === "matched") matched++;
+      const recorded = await writeReconciliation(dbSession, operation, workerId, verdict, new Date(), observed.externalTransactionId);
+      if (!recorded) deferred++;
+      else if (verdict.status === "matched") matched++;
       else if (verdict.status === "mismatch" || verdict.status === "manual_review") discrepancies++;
       else deferred++;
-      await writeReconciliation(dbSession, operation, verdict, now, observed.externalTransactionId);
     } catch (error) {
       deferred++;
       console.error("agent_reconciliation_provider_error", { operationId: operation.id, tool: operation.toolName, error });
-      await deferReconciliation(dbSession, operation, "provider_error", now);
+      await deferReconciliation(dbSession, operation, workerId, "provider_error", new Date());
     }
   }
   return { checked, matched, discrepancies, deferred };
@@ -199,12 +201,15 @@ export function stripeTransferAdapter(secret: string): ReconciliationAdapter {
     async lookup(operation) {
       const id = operation.externalTransactionId;
       if (!id || !/^tr_[A-Za-z0-9]+$/.test(id)) return "not_found";
-      const response = await fetch(`https://api.stripe.com/v1/transfers/${encodeURIComponent(id)}`, {
-        headers: { authorization: `Bearer ${secret}`, "stripe-version": "2025-08-27.basil" },
-      });
-      if (response.status === 404) return "not_found";
-      if (!response.ok) throw new Error(`Stripe reconciliation lookup failed (${response.status}).`);
-      const value = await response.json() as { id?: unknown; amount?: unknown; currency?: unknown; destination?: unknown; reversed?: unknown };
+      let value: { id?: unknown; amount?: unknown; currency?: unknown; destination?: unknown; reversed?: unknown };
+      try {
+        value = await providerJson(`https://api.stripe.com/v1/transfers/${encodeURIComponent(id)}`, {
+          headers: { authorization: `Bearer ${secret}`, "stripe-version": "2025-08-27.basil" },
+        }) as typeof value;
+      } catch (error) {
+        if (error instanceof ProviderHttpError && error.status === 404) return "not_found";
+        throw error;
+      }
       if (typeof value.id !== "string" || typeof value.amount !== "number" || typeof value.currency !== "string" || typeof value.destination !== "string") {
         throw new Error("Stripe reconciliation response was malformed.");
       }
@@ -219,10 +224,10 @@ export function stripeTransferAdapter(secret: string): ReconciliationAdapter {
   };
 }
 
-async function deferReconciliation(dbSession: DbSession, operation: FinancialOperationRecord, code: string, now: Date): Promise<void> {
+async function deferReconciliation(dbSession: DbSession, operation: FinancialOperationRecord, workerId: string, code: string, now: Date): Promise<void> {
   const attempt = operation.reconcileAttempts + 1;
   const tooOld = now.getTime() - operation.createdAt.getTime() > 24 * 60 * 60 * 1000;
-  await dbSession.db.update(agentFinancialOperations).set({
+  const saved = await dbSession.db.update(agentFinancialOperations).set({
     status: operation.status === "reserved" ? "unknown" : operation.status,
     reconciliationStatus: tooOld ? "manual_review" : "provider_unavailable",
     discrepancyCode: code,
@@ -232,20 +237,25 @@ async function deferReconciliation(dbSession: DbSession, operation: FinancialOpe
     reconcileLeaseOwner: null,
     reconcileLeaseExpiresAt: null,
     updatedAt: now,
-  }).where(eq(agentFinancialOperations.id, operation.id));
+  }).where(and(eq(agentFinancialOperations.id, operation.id),
+    eq(agentFinancialOperations.reconcileLeaseOwner, workerId),
+    gt(agentFinancialOperations.reconcileLeaseExpiresAt, now),
+    eq(agentFinancialOperations.reconcileAttempts, operation.reconcileAttempts)));
+  if (affectedRows(saved) !== 1) return;
   await appendFinancialEvent(dbSession, operation.id, operation.organizationId, tooOld ? "manual_review_required" : "reconciliation_deferred", await digestPayload(code), operation.externalTransactionId ?? undefined);
 }
 
 async function writeReconciliation(dbSession: DbSession,
   operation: FinancialOperationRecord,
+  workerId: string,
   verdict: ReturnType<typeof compareFinancialState> | { status: "mismatch"; code: "external_transaction_not_found" },
   now: Date,
   externalTransactionId?: string
-): Promise<void> {
+): Promise<boolean> {
   const attempt = operation.reconcileAttempts + 1;
   const pending = verdict.status === "pending";
   const operationStatus = "operationStatus" in verdict ? verdict.operationStatus : operation.status;
-  await dbSession.db.update(agentFinancialOperations).set({
+  const saved = await dbSession.db.update(agentFinancialOperations).set({
     status: operationStatus,
     reconciliationStatus: verdict.status,
     discrepancyCode: "code" in verdict ? verdict.code : null,
@@ -256,8 +266,13 @@ async function writeReconciliation(dbSession: DbSession,
     reconcileLeaseExpiresAt: null,
     updatedAt: now,
     ...(verdict.status === "matched" ? { settledAt: now } : {}),
-  }).where(eq(agentFinancialOperations.id, operation.id));
+  }).where(and(eq(agentFinancialOperations.id, operation.id),
+    eq(agentFinancialOperations.reconcileLeaseOwner, workerId),
+    gt(agentFinancialOperations.reconcileLeaseExpiresAt, now),
+    eq(agentFinancialOperations.reconcileAttempts, operation.reconcileAttempts)));
+  if (affectedRows(saved) !== 1) return false;
   await appendFinancialEvent(dbSession, operation.id, operation.organizationId, pending ? "reconciliation_pending" : `reconciliation_${verdict.status}`, await digestPayload(verdict), externalTransactionId);
+  return true;
 }
 
 async function claimReconciliation(dbSession: DbSession, operation: FinancialOperationRecord, workerId: string, now: Date): Promise<boolean> {
@@ -268,6 +283,7 @@ async function claimReconciliation(dbSession: DbSession, operation: FinancialOpe
   }).where(and(
     eq(agentFinancialOperations.id, operation.id),
     eq(agentFinancialOperations.reconciliationStatus, operation.reconciliationStatus),
+    eq(agentFinancialOperations.reconcileAttempts, operation.reconcileAttempts),
     lte(agentFinancialOperations.nextReconcileAt, now),
     or(isNull(agentFinancialOperations.reconcileLeaseExpiresAt), lt(agentFinancialOperations.reconcileLeaseExpiresAt, now)),
   ));
@@ -280,7 +296,7 @@ function affectedRows(result: unknown): number {
 }
 
 async function appendFinancialEvent(dbSession: DbSession, operationId: string, organizationId: string, kind: string, payloadDigest: string, externalTransactionId?: string): Promise<void> {
-  await dbSession.db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${operationId}, 2))`);
+  await dbSession.db.execute(sql`select id from ${agentFinancialOperations} where ${agentFinancialOperations.id} = ${operationId} for no key update`);
   const [head] = await dbSession.db.select({ sequence: agentFinancialEvents.sequence }).from(agentFinancialEvents)
     .where(eq(agentFinancialEvents.operationId, operationId))
     .orderBy(sql`${agentFinancialEvents.sequence} desc`).limit(1);

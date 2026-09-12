@@ -3,6 +3,10 @@ on:
   pull_request:
     paths:
       - 'db/**'
+      - 'lib/**'
+      - 'app/**'
+      - 'worker/**'
+      - 'tests/**'
       - 'drizzle/**'
       - 'supabase/**'
       - 'infra/benchmark/**'
@@ -10,6 +14,8 @@ on:
       - 'tests/migration/**'
       - 'tests/postgres/**'
       - 'package*.json'
+      - 'desktop/package*.json'
+      - 'desktop/test/**'
       - '.github/workflows/postgres-foundation.yml'
       - 'eslint.config.mjs'
       - '.node-version'
@@ -41,7 +47,11 @@ jobs:
           node-version-file: '.node-version'
           cache: npm
       - run: npm ci
+      # The root unit suite includes desktop tests that validate the
+      # electron-builder schema from desktop's own dependencies.
+      - run: npm ci --prefix desktop
       - run: npm run typecheck
+      - run: npm run test:unit
       - run: npm run lint:migration
       - run: npm run test:migration
       - run: npm run db:inventory

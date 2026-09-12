@@ -262,7 +262,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
     const fresh = await getTask(dbSession, organizationId, taskId);
     const timeout = Math.min(25_000, deadline - Date.now(), (fresh?.deadlineAt?.getTime() ?? 0) - Date.now());
     const remaining = (fresh?.maxTokens ?? 0) - task!.tokensUsed - inputTokens - outputTokens;
-    if (!fresh || fresh.cancelRequested || fresh.leaseOwner !== workerId || timeout <= 0 ||
+    if (!fresh || fresh.cancelRequested || fresh.leaseOwner !== workerId || fresh.leaseGeneration !== task!.leaseGeneration || (fresh.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || timeout <= 0 ||
         byteCount(params) + params.max_tokens > Math.min(MAX_CONTEXT_BYTES, remaining) ||
         await checkUsageBlocked(dbSession, env, { orgId: organizationId, userId: task!.userId })) {
       return { ...scope, exitCode: 1, problems: ['Semantic review could not run within the available lease, time, context, or token budget.'] };
@@ -280,7 +280,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'model_call', toolName: 'semantic_verdict', modelProvider: response.routing?.providerId, modelName: response.routing?.model, resultDigest: await digestPayload(response.content) });
       audit.push({ kind: 'model_call', label: 'semantic_verdict', payloadDigest: await digestPayload(response.content), count: stepIndex });
       const current = await getTask(dbSession, organizationId, taskId);
-      if (!current || current.cancelRequested || current.leaseOwner !== workerId || Date.now() >= Math.min(deadline, current.deadlineAt?.getTime() ?? 0) || task!.tokensUsed + inputTokens + outputTokens > current.maxTokens)
+      if (!current || current.cancelRequested || current.leaseOwner !== workerId || current.leaseGeneration !== task!.leaseGeneration || (current.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || Date.now() >= Math.min(deadline, current.deadlineAt?.getTime() ?? 0) || task!.tokensUsed + inputTokens + outputTokens > current.maxTokens)
         return { ...scope, exitCode: 1, problems: ['The task stopped or exhausted its budget during semantic review.'] };
       return { ...scope, ...parseSemanticVerdict(response, packet) };
     } catch (err) {
@@ -418,6 +418,15 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       inputTokens += res.usage.input_tokens;
       outputTokens += res.usage.output_tokens;
       stepsRun++;
+      // Inference committed the claim and released the transaction. Re-check
+      // ownership before saving a response or executing anything it proposed.
+      const afterModel = await getTask(dbSession, organizationId, taskId);
+      if (!afterModel || afterModel.leaseOwner !== workerId ||
+          afterModel.leaseGeneration !== task.leaseGeneration ||
+          (afterModel.leaseExpiresAt?.getTime() ?? 0) <= Date.now()) {
+        return { taskId, status: afterModel?.status ?? "FAILED", stepsRun, error: "Lease lost during inference." };
+      }
+      if (afterModel.cancelRequested) return finish("CANCELLED");
       const responseJson=JSON.stringify({kind:"model_response",response:res});
       await dbSession.db.insert(agentModelContexts).values({id:crypto.randomUUID(),organizationId,taskId,stepIndex,contextJson:responseJson,digest:await digestPayload(responseJson),createdAt:new Date()});
       if(Date.now()>=(fresh.deadlineAt?.getTime()??Infinity))return finish("FAILED",{error:"The task reached its total wall-clock limit before its proposed actions could run."});

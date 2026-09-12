@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { Client } from "pg";
 import { and, eq } from "drizzle-orm";
 import { properties } from "../../db/postgres/schema.ts";
 import { withDbSession } from "../../db/postgres/session.ts";
+import { runAuditCases } from "./audit-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
 
 const url = process.env.AVAL_TEST_DATABASE_URL;
@@ -15,7 +17,7 @@ if (!["127.0.0.1", "localhost", "[::1]", "::1"].includes(new URL(url).hostname))
 
 const personalOrganization = (subject) => `org_${createHash("sha256").update(subject).digest("hex").slice(0, 24)}`;
 
-test("clean Supabase migrations support auth bootstrap, RLS isolation and rollback", async () => {
+test("clean Supabase migrations support auth bootstrap, RLS isolation and rollback", async (t) => {
   const admin = new Client({ connectionString: url });
   await admin.connect();
   const existing = await admin.query("SELECT to_regclass('public.properties') AS table_name");
@@ -23,7 +25,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
   await admin.end();
 
   const first = await applySupabaseMigrations(url);
-  assert.equal(first.discovered, 7);
+  assert.ok(first.discovered >= 8);
   assert.equal(first.applied.length, first.discovered);
   const replay = await applySupabaseMigrations(url);
   assert.deepEqual(replay.applied, [], "migration replay must be a no-op");
@@ -64,6 +66,36 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
         );
         return { ...identity, organizationId: result.rows[0].organization_id };
       },
+    });
+
+    await t.test("upgrading the deployed auth function repairs first login and repeat login", async () => {
+      const originalMigration = await readFile(new URL("../../supabase/migrations/20260911000100_supabase_auth_runtime.sql", import.meta.url), "utf8");
+      const originalFunction = originalMigration.match(/CREATE OR REPLACE FUNCTION aval_private\.bootstrap_supabase_identity\([\s\S]*?END \$\$;/)?.[0];
+      assert.ok(originalFunction, "the deployed function is present in migration history");
+      const repair = await readFile(new URL("../../supabase/migrations/20260912000200_auth_identity_conflict.sql", import.meta.url), "utf8");
+      const subject = `upgrade_${randomUUID()}`;
+      const organization = personalOrganization(subject);
+      const bootstrap = "SELECT aval_private.bootstrap_supabase_identity($1, $2, $3, true, $4, NULL) AS organization_id";
+      const values = [subject, `${subject}@example.test`, "Auth upgrade check", organization];
+      await administrator.query("BEGIN");
+      try {
+        await administrator.query(originalFunction);
+        await administrator.query("SET LOCAL ROLE aval_app");
+        await administrator.query("SELECT set_config('aval.principal_id', $1, true), set_config('aval.organization_id', $2, true)", [subject, organization]);
+        await administrator.query("SAVEPOINT before_login");
+        await assert.rejects(administrator.query(bootstrap, values), { code: "42702" });
+        await administrator.query("ROLLBACK TO SAVEPOINT before_login");
+        await administrator.query("RESET ROLE");
+        await administrator.query(repair);
+        await administrator.query("SET LOCAL ROLE aval_app");
+        assert.equal((await administrator.query(bootstrap, values)).rows[0].organization_id, organization);
+        assert.equal((await administrator.query(bootstrap, values)).rows[0].organization_id, organization);
+        await administrator.query("RESET ROLE");
+        const linked = await administrator.query("SELECT count(*)::int AS count FROM public.identity_links WHERE provider = 'supabase' AND subject = $1", [subject]);
+        assert.equal(linked.rows[0].count, 1, "retrying login must preserve one identity link");
+      } finally {
+        await administrator.query("ROLLBACK");
+      }
     });
 
     const propertyId = `property_${randomUUID()}`;
@@ -115,6 +147,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     const ownRows = await session(userA, (dbSession) => dbSession.db.select().from(properties)
       .where(and(eq(properties.organizationId, personalOrganization(userA)), eq(properties.id, propertyId))));
     assert.equal(ownRows.length, 1);
+    await runAuditCases(t, { config, administrator, userId: userA, invitedUserId: userB, organizationId: personalOrganization(userA) });
   } finally {
     if (roleCreated) {
       await administrator.query(`REVOKE aval_app, aval_worker FROM "${loginName}"`).catch(() => undefined);

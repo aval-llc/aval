@@ -194,7 +194,7 @@ export async function decideApproval(dbSession: DbSession,
   deciderRole: WorkspaceRole,
   note?: string
 ): Promise<DecisionOutcome> {
-  await dbSession.db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${approvalId}, 3))`);
+  await dbSession.db.execute(sql`select id from ${agentApprovals} where ${agentApprovals.id} = ${approvalId} for no key update`);
   const approval = await getApproval(dbSession, organizationId, approvalId);
   if (!approval) return { ok: false, reason: "not_found" };
 

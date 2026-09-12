@@ -28,7 +28,7 @@ export async function dispatchMessage(input: OutboundMessage, credentials: Recor
     const mime = `To: ${input.to}\r\nSubject: =?UTF-8?B?${encoded(input.subject ?? 'Message from Aval')}?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${encoded(input.body)}`;
     id = requiredString((await post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: encoded(mime).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'') })).id);
   } else if (input.provider === 'outlook') {
-    const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ message: { subject: input.subject ?? 'Message from Aval', body: { contentType: 'Text', content: input.body }, toRecipients: [{ emailAddress: { address: input.to } }] }, saveToSentItems: true }) });
+    const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ message: { subject: input.subject ?? 'Message from Aval', body: { contentType: 'Text', content: input.body }, toRecipients: [{ emailAddress: { address: input.to } }] }, saveToSentItems: true }) });
     await response.body?.cancel();
     if (response.status !== 202) throw new Error(`Microsoft did not accept the message (${response.status}).`);
   } else if (input.provider === 'twilio') {

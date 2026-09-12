@@ -6,8 +6,8 @@ import { customType } from "drizzle-orm/pg-core";
  * The D1 repositories exchange JSON as strings. node-postgres normally
  * deserializes jsonb to objects, which would make a database-only migration
  * change application behavior in dozens of call sites. This adapter parses on
- * writes and serializes on reads, so PostgreSQL receives native JSON values
- * while the parity layer continues to expose strings.
+ * writes and serializes on reads. Send validated JSON text to pg: JS arrays
+ * otherwise become PostgreSQL array literals, and JSON strings lose quotes.
  */
 export const jsonText = customType<{
   data: string;
@@ -18,7 +18,7 @@ export const jsonText = customType<{
   },
   toDriver(value) {
     try {
-      return JSON.parse(value) as unknown;
+      return JSON.stringify(JSON.parse(value));
     } catch {
       throw new Error("Invalid JSON supplied to a PostgreSQL JSONB column");
     }

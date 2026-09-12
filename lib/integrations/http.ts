@@ -8,7 +8,8 @@ export async function providerJson(url: string, init: RequestInit = {}): Promise
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("Invalid provider endpoint");
   let response: Response;
-  try { response = await fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(15000) }); }
+  // Workers supports manual/follow. Inspect 3xx without forwarding credentials.
+  try { response = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(15000) }); }
   catch { throw new ProviderHttpError(503, true); }
   if (!response.ok) {
     const retry = response.headers.get("retry-after");

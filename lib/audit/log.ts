@@ -6,11 +6,11 @@
  *
  * - **One batched write per answer, not one per tool call.** The Ask Aval loop
  *   runs up to four rounds and several tools; writing a row inside each round
- *   would add D1 round-trips to the critical path of every question. Events
+ *   would add database round-trips to the critical path of every question. Events
  *   are collected in memory and appended once when the answer resolves.
  *
  * - **The append shares the caller's transaction.** A transaction-scoped
- *   advisory lock serializes each organization's chain. If the append fails,
+ *   organization row lock serializes each organization's chain. If the append fails,
  *   the business mutation fails with it instead of leaving an unaudited gap.
  */
 
@@ -58,7 +58,7 @@ async function readHead(dbSession: DbSession, organizationId: string): Promise<{
  */
 export async function appendAuditEvents(dbSession: DbSession, organizationId: string, events: AuditEvent[]): Promise<string | null> {
   if (events.length === 0) return null;
-  await dbSession.db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${organizationId}, 1))`);
+  await dbSession.db.execute(sql`select aval_private.lock_organization(${organizationId})`);
   const head = await readHead(dbSession, organizationId);
   const entries = await chainEvents(events, head.sequence + 1, head.hash);
   const now = new Date();

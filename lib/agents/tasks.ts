@@ -23,7 +23,7 @@ import { parseTaskCheck, type TaskCheck } from './checks';
  *   that already started.
  */
 
-import { and, asc, desc, eq, inArray, lt, lte, or, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lt, lte, or, isNull, sql } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { agentTasks, agentTaskSteps } from "@/db/postgres/schema";
 import { latestApprovalSettledPredicate } from "./task-sql.ts";
@@ -152,7 +152,7 @@ export async function listTasks(dbSession: DbSession, organizationId: string, li
  *
  * The `where` clause is the entire lock: it matches only a task that is still
  * in the expected state **and** whose lease is absent or expired. Two workers
- * racing both issue this update; SQLite applies them in some order, and the
+ * racing both issue this update; PostgreSQL locks the candidate row, and the
  * second one matches zero rows because the first already moved the state and
  * stamped its own lease. The loser gets `false` and moves on. There is no
  * read-then-write window for them to race inside.
@@ -186,7 +186,7 @@ export async function heartbeat(dbSession: DbSession, taskId: string, workerId: 
   const result = await dbSession.db
     .update(agentTasks)
     .set({ leaseExpiresAt: new Date(now.getTime() + LEASE_MS), lastHeartbeatAt: now, updatedAt: now })
-    .where(and(eq(agentTasks.id, taskId), eq(agentTasks.leaseOwner, workerId), eq(agentTasks.leaseGeneration, leaseGeneration)));
+    .where(and(eq(agentTasks.id, taskId), eq(agentTasks.leaseOwner, workerId), eq(agentTasks.leaseGeneration, leaseGeneration), eq(agentTasks.status, "RUNNING"), gt(agentTasks.leaseExpiresAt, now)));
   return affectedRows(result) === 1;
 }
 
@@ -228,7 +228,7 @@ export async function updateTask(dbSession: DbSession, task: TaskRecord, workerI
       ...(terminal ? { finishedAt: now } : {}),
       updatedAt: now,
     })
-    .where(and(eq(agentTasks.id, task.id), eq(agentTasks.leaseOwner, workerId), eq(agentTasks.leaseGeneration, task.leaseGeneration)));
+    .where(and(eq(agentTasks.id, task.id), eq(agentTasks.leaseOwner, workerId), eq(agentTasks.leaseGeneration, task.leaseGeneration), eq(agentTasks.status, task.status), gt(agentTasks.leaseExpiresAt, now), ...(update.status === "CANCELLED" ? [] : [eq(agentTasks.cancelRequested, false)])));
   return affectedRows(result) === 1;
 }
 
@@ -377,7 +377,7 @@ export interface StepInput {
  * makes the loser fail visibly rather than silently reorder the trace.
  */
 export async function appendStep(dbSession: DbSession, step: StepInput): Promise<boolean> {
-  await dbSession.db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${step.taskId}, 4))`);
+  await dbSession.db.execute(sql`select id from ${agentTasks} where ${agentTasks.id} = ${step.taskId} for no key update`);
   const [head] = await dbSession.db
     .select({ sequence: agentTaskSteps.sequence })
     .from(agentTaskSteps)

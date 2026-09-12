@@ -82,6 +82,14 @@ export async function withDbSession<T>(
     reject: (reason: unknown) => void;
   }> = [];
 
+  const commit = async () => {
+    const result = await client.query("COMMIT");
+    inTransaction = false;
+    // PostgreSQL answers COMMIT with ROLLBACK after a swallowed SQL error.
+    // Never run a provider or report success for a reservation that vanished.
+    if (result.command !== "COMMIT") throw new Error("Database transaction was rolled back before commit");
+  };
+
   const begin = async () => {
     await client.query(options.readOnly ? "BEGIN READ ONLY" : "BEGIN");
     inTransaction = true;
@@ -143,24 +151,25 @@ export async function withDbSession<T>(
       async outsideTransaction<R>(externalWork: () => Promise<R>): Promise<R> {
         if (!inTransaction || outsideTransaction || savepointDepth > 0) throw new Error("Invalid external-operation boundary");
         outsideTransaction = true;
-        await client.query("COMMIT");
-        inTransaction = false;
+        await commit();
         let result: R | undefined;
         let externalError: unknown;
+        let externalFailed = false;
         try {
           result = await externalWork();
         } catch (error) {
+          externalFailed = true;
           externalError = error;
         }
         try {
           await begin();
         } catch (resumeError) {
-          if (externalError) throw new AggregateError([externalError, resumeError], "Provider operation failed and the database session could not resume");
+          if (externalFailed) throw new AggregateError([externalError, resumeError], "Provider operation failed and the database session could not resume");
           throw resumeError;
         } finally {
           outsideTransaction = false;
         }
-        if (externalError) throw externalError;
+        if (externalFailed) throw externalError;
         return result as R;
       },
       afterCommit<R>(committedWork: () => Promise<R>): Promise<R> {
@@ -174,8 +183,7 @@ export async function withDbSession<T>(
       },
     });
     const result = await work(session);
-    await client.query("COMMIT");
-    inTransaction = false;
+    await commit();
     for (const queued of afterCommitWork) {
       Promise.resolve().then(queued.work).then(queued.resolve, queued.reject);
     }
