@@ -31,6 +31,10 @@ source = source
     'date($1, { mode: "date" })')
   .replace('day: text("day").notNull()', 'day: date("day").notNull()')
   .replace(/integer\((['"][^'"]*(?:_cents|_tokens|_micros)['"])\)/g, 'bigint($1, { mode: "number" })')
+  // The planning UI stores epoch milliseconds as plain SQLite integers.
+  // PostgreSQL `integer` is only 32-bit and cannot hold a current timestamp.
+  .replace(/integer\((['"](?:created_at|updated_at|starts_at|ends_at)['"])\)/g,
+    'bigint($1, { mode: "number" })')
   .replace('real("usage_amount")', 'numeric("usage_amount", { precision: 20, scale: 6, mode: "number" })')
   .replaceAll("real(", "doublePrecision(")
   .replace(

@@ -1470,13 +1470,13 @@ export const agentWorkerRuns = pgTable(
 // Native workspace planning. Dates are UTC instants; UI uses the viewer's time zone.
 export const planningProjects = pgTable("planning_projects", {
   id: text("id").primaryKey(), organizationId: text("organization_id").notNull().references(()=>organizations.id),
-  title: text("title").notNull(), description: text("description").notNull().default(""), color: text("color").notNull().default("blue"), createdAt: integer("created_at").notNull(),
+  title: text("title").notNull(), description: text("description").notNull().default(""), color: text("color").notNull().default("blue"), createdAt: bigint("created_at", { mode: "number" }).notNull(),
 }, (t)=>[index("planning_projects_org_idx").on(t.organizationId)]);
 export const planningItems = pgTable("planning_items", {
   id: text("id").primaryKey(), organizationId: text("organization_id").notNull().references(()=>organizations.id),
   title: text("title").notNull(), description: text("description").notNull().default(""), kind: text("kind").notNull().default("task"), status: text("status").notNull().default("planned"),
-  projectId: text("project_id").references(()=>planningProjects.id), assigneeId: text("assignee_id"), startsAt: integer("starts_at").notNull(), endsAt: integer("ends_at").notNull(),
-  version: integer("version").notNull().default(1), createdBy: text("created_by").notNull(), updatedAt: integer("updated_at").notNull(),
+  projectId: text("project_id").references(()=>planningProjects.id), assigneeId: text("assignee_id"), startsAt: bigint("starts_at", { mode: "number" }).notNull(), endsAt: bigint("ends_at", { mode: "number" }).notNull(),
+  version: integer("version").notNull().default(1), createdBy: text("created_by").notNull(), updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (t)=>[index("planning_items_org_date_idx").on(t.organizationId,t.startsAt)]);
 
 // One record per authenticated active minute; uniqueness prevents double counting across tabs.
