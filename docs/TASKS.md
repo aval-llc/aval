@@ -1,5 +1,7 @@
 # Task brief — Aval web app
 
+> **Historical document (September 2026).** This brief describes the earlier prototype and is retained as implementation history. Use the root `README.md`, `docs/migration/README.md`, and the current GitHub issues for active setup and delivery work.
+
 Paste this whole file into Claude Code, or save it at `docs/TASKS.md` and say
 `read docs/TASKS.md and start with P0`.
 

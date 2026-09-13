@@ -6,6 +6,7 @@ import { pollCommunicationSources } from "@/lib/communications/poll-worker";
 import type { IntegrationEnv } from "@/lib/integrations/oauth";
 import { runImportWorker } from "@/lib/integrations/sync-worker";
 import type { AvalRuntimeBindings } from "@/lib/runtime/bindings";
+import { runIsolatedJobs } from "./isolated-jobs";
 
 type ScheduledBindings = AvalRuntimeBindings & AgentWorkerEnv;
 
@@ -23,24 +24,22 @@ export async function runScheduledSweep(bindings: ScheduledBindings): Promise<vo
   }, bindings);
 
   for (const organizationId of organizations) {
-    try {
-      await withWorkerOrganizationSession(
+    await runIsolatedJobs(organizationId, [
+      { name: "imports", run: () => withWorkerOrganizationSession(
         organizationId,
         (session) => runImportWorker(session, bindings as unknown as IntegrationEnv),
         bindings,
-      );
-      await withWorkerOrganizationSession(
+      ) },
+      { name: "communications", run: () => withWorkerOrganizationSession(
         organizationId,
         (session) => pollCommunicationSources(session),
         bindings,
-      );
-      await withWorkerOrganizationSession(
+      ) },
+      { name: "agents", run: () => withWorkerOrganizationSession(
         organizationId,
         (session) => runAgentWorkerBatch(session, bindings, "scheduled"),
         bindings,
-      );
-    } catch (error) {
-      console.error("scheduled_organization_failed", { organizationId, error });
-    }
+      ) },
+    ]);
   }
 }

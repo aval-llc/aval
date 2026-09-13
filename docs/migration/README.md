@@ -33,7 +33,7 @@ This design works on Supabase Free. It does not claim managed backups, PITR, SAM
 1. Create an empty Supabase Free project in the US West region.
 2. In Supabase Auth, keep email/password signup enabled, require email confirmation, and set Aval's production Site URL and redirect URL.
 3. Copy the project URL, anon key, and an administrator PostgreSQL connection string. Keep the database connection string off the client.
-4. Apply the seven checked-in migrations:
+4. Apply every checked-in migration through the checksum-aware runner:
 
    ```powershell
    $env:DATABASE_URL = "YOUR_SUPABASE_ADMIN_DATABASE_URL"
@@ -64,6 +64,12 @@ This design works on Supabase Free. It does not claim managed backups, PITR, SAM
    | Secret | `CLOUDFLARE_ACCOUNT_ID` | Owning Cloudflare account |
 
 9. Run the **Cloudflare production** GitHub Action. It verifies the app against disposable PostgreSQL, applies any unapplied migration by hash, deploys the Worker, then signs in through Supabase Auth and checks the integrations and agent-health APIs.
+
+### Hosted Auth email configuration
+
+In Supabase **Authentication → URL Configuration**, set the Site URL to `https://app.aval.llc` and allow `https://app.aval.llc/**` as a redirect URL. In **Authentication → Email Templates → Reset password**, use the checked-in `supabase/templates/recovery.html` content. Its link sends the one-time token hash to Aval's server-side confirmation route; do not replace it with a browser access-token fragment. The local Supabase configuration already uses this template.
+
+The repository now lives at `https://github.com/aval-llc/aval`. Repository secrets and environments transfer with the repository, but organization owners should review team access and the organization's GitHub Actions policy after the transfer.
 
 The runtime-role password is used when creating Hyperdrive and does not belong in the Worker or GitHub deployment environment afterward.
 

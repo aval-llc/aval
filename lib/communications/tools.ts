@@ -1,6 +1,6 @@
 import type { ToolSchema } from '@/lib/ask-aval/model-types';
 import { marketingConnections, publishListing } from "@/lib/marketing/service";
-import { and, eq, asc } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
 import type { DbSession } from "@/db/postgres/session";
 import { conversations, messages, integrationConnections } from "@/db/postgres/schema";
 import { deliver, readCommunicationsConfig, replyToConversation } from './store';
@@ -20,7 +20,8 @@ export async function runCommunicationTool(dbSession: DbSession, name:string,arg
   if (name === 'read_conversation') {
     const [thread]=await dbSession.db.select().from(conversations).where(and(eq(conversations.organizationId,org),eq(conversations.id,String(args.conversation_id)))).limit(1);
     if(!thread)throw Error('Conversation not found.');
-    return {id:thread.id,provider:thread.channel,messages:await dbSession.db.select({direction:messages.direction,body:messages.body,createdAt:messages.createdAt}).from(messages).where(eq(messages.conversationId,thread.id)).orderBy(asc(messages.createdAt)).limit(30)};
+    const recent = await dbSession.db.select({direction:messages.direction,body:messages.body,createdAt:messages.createdAt}).from(messages).where(eq(messages.conversationId,thread.id)).orderBy(desc(messages.createdAt), desc(messages.id)).limit(30);
+    return {id:thread.id,provider:thread.channel,messages:recent.reverse()};
   }
   if (name === 'get_marketing_channels') return marketingConnections(dbSession, org);
   if (name === 'publish_listing') { if (!key) throw new Error('Publication requires a durable task.'); return publishListing(dbSession, org, String(args.provider), String(args.body), key); }
@@ -29,7 +30,7 @@ export async function runCommunicationTool(dbSession: DbSession, name:string,arg
     const config = await readCommunicationsConfig(dbSession, org);
     return { connections:connections.filter(c => (SEND_PROVIDERS as readonly string[]).includes(c.provider)), callsEnabled:config.enabled, routes:config.routes.map(r => ({id:r.id,label:r.label})) };
   }
-  if (name === 'list_conversations') return dbSession.db.select({id:conversations.id,provider:conversations.channel,destination:conversations.externalThreadId,contact:conversations.contactDisplayName,draft:conversations.draftReply}).from(conversations).where(and(eq(conversations.organizationId,org),eq(conversations.status,'open'))).limit(30);
+  if (name === 'list_conversations') return dbSession.db.select({id:conversations.id,provider:conversations.channel,destination:conversations.externalThreadId,contact:conversations.contactDisplayName,draft:conversations.draftReply}).from(conversations).where(and(eq(conversations.organizationId,org),eq(conversations.status,'open'))).orderBy(desc(conversations.lastMessageAt), desc(conversations.id)).limit(30);
   if (name === 'request_execution_plan') return { approved:true, instruction:'Execute only the exact approved actions. Changes require another approval.' };
   if (!key) throw new Error('External actions require a durable operation key.');
   if (name === 'send_external_message') {

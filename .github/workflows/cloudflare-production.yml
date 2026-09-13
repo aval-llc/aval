@@ -81,6 +81,8 @@ jobs:
       - name: Deploy production Worker and cron
         run: >-
           npx wrangler deploy --config wrangler.deploy.generated.jsonc
+          --tag "$GITHUB_SHA"
+          --message "GitHub Actions $GITHUB_SHA"
           --var "SUPABASE_URL:$SUPABASE_URL"
           --var "SUPABASE_ANON_KEY:$SUPABASE_ANON_KEY"
 

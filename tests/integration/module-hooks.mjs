@@ -8,8 +8,15 @@ import { transformSync } from "esbuild";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const VIRTUAL = {
-  "cloudflare:workers": "export const env = globalThis.__CF_ENV__ ?? {};",
-  "@/lib/ask-aval/model-router": "export async function callModel(session, env, orgId, params) { return session.outsideTransaction(() => (params.tool_choice?.name === 'semantic_verdict' ? globalThis.__SEMANTIC_MODEL__ : globalThis.__MODEL__)(env, orgId, params)); }",
+  "cloudflare:workers": "export const env = globalThis.__CF_ENV__ ??= {};",
+  "vinext/shims/request-context": "export const getRequestExecutionContext = () => globalThis.__REQUEST_CONTEXT__;",
+  "next/headers": "export async function headers() { throw new Error('Page request headers are not installed in the route test harness'); }",
+  "@/lib/ask-aval/model-router": `export async function callModel(session, env, orgId, params) {
+    const fixture = params.tool_choice?.name === 'semantic_verdict' ? globalThis.__SEMANTIC_MODEL__ : globalThis.__MODEL__;
+    if (fixture) return session.outsideTransaction(() => fixture(env, orgId, params));
+    const real = await import(${JSON.stringify(pathToFileURL(`${ROOT}/lib/ask-aval/model-router.ts`).href)});
+    return real.callModel(session, env, orgId, params);
+  }`,
 };
 const virtualUrl = (s) => `debugstub:${encodeURIComponent(s)}`;
 
