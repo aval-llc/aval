@@ -8,7 +8,8 @@
  * took, which is the number that actually costs money.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { InvalidWorkOrderTransitionError } from "./errors";
 import type { DbSession } from "@/db/postgres/session";
 import { units, vendors, workOrders } from "@/db/postgres/schema";
 import { EntityNotFoundError, getProperty, getUnit, propertyNames, unitCountsByProperty } from "./portfolio";
@@ -188,24 +189,28 @@ export async function assignWorkOrder(dbSession: DbSession, organizationId: stri
   const vendor = await getVendor(dbSession, organizationId, vendorId);
   if (!vendor) throw new EntityNotFoundError("Vendor", vendorId);
 
-  await dbSession.db
+  const [updated] = await dbSession.db
     .update(workOrders)
     // `assignedAt` keeps its original value on reassignment. Response time is
     // measured to the *first* assignment; restamping it would let a work order
     // passed between three vendors report the last handoff as its response.
-    .set({ vendorId, status: "assigned", assignedAt: order.assignedAt ?? at, updatedAt: new Date() })
-    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId)));
-  return { ...order, vendorId, status: "assigned" as WorkOrderStatus, assignedAt: order.assignedAt ?? at };
+    .set({ vendorId, status: "assigned", assignedAt: sql`coalesce(${workOrders.assignedAt}, ${at})`, updatedAt: new Date() })
+    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId), inArray(workOrders.status, [...OPEN_WORK_ORDER_STATUSES])))
+    .returning();
+  if (!updated) throw new InvalidWorkOrderTransitionError();
+  return updated;
 }
 
 export async function startWorkOrder(dbSession: DbSession, organizationId: string, workOrderId: string, at = new Date()) {
   const order = await getWorkOrder(dbSession, organizationId, workOrderId);
   if (!order) throw new EntityNotFoundError("Work order", workOrderId);
-  await dbSession.db
+  const [updated] = await dbSession.db
     .update(workOrders)
-    .set({ status: "in_progress", startedAt: order.startedAt ?? at, updatedAt: new Date() })
-    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId)));
-  return { ...order, status: "in_progress" as WorkOrderStatus, startedAt: order.startedAt ?? at };
+    .set({ status: "in_progress", startedAt: sql`coalesce(${workOrders.startedAt}, ${at})`, updatedAt: new Date() })
+    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId), inArray(workOrders.status, [...OPEN_WORK_ORDER_STATUSES])))
+    .returning();
+  if (!updated) throw new InvalidWorkOrderTransitionError();
+  return updated;
 }
 
 export async function completeWorkOrder(dbSession: DbSession,
@@ -217,16 +222,18 @@ export async function completeWorkOrder(dbSession: DbSession,
   if (!order) throw new EntityNotFoundError("Work order", workOrderId);
 
   const completedAt = options.at ?? new Date();
-  await dbSession.db
+  const [updated] = await dbSession.db
     .update(workOrders)
     .set({
       status: "completed",
       completedAt,
-      actualCostCents: options.actualCostCents ?? order.actualCostCents,
+      actualCostCents: options.actualCostCents ?? sql`${workOrders.actualCostCents}`,
       updatedAt: new Date(),
     })
-    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId)));
-  return { ...order, status: "completed" as WorkOrderStatus, completedAt };
+    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId), inArray(workOrders.status, [...OPEN_WORK_ORDER_STATUSES])))
+    .returning();
+  if (!updated) throw new InvalidWorkOrderTransitionError();
+  return updated;
 }
 
 /**

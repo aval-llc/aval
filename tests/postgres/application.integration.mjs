@@ -8,6 +8,7 @@ import { properties } from "../../db/postgres/schema.ts";
 import { withDbSession } from "../../db/postgres/session.ts";
 import { createItem, createProject, readPlanning } from "../../lib/planning/store.ts";
 import { runAuditCases } from "./audit-cases.mjs";
+import { runMaintenanceCases } from "./maintenance-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
 
 const url = process.env.AVAL_TEST_DATABASE_URL;
@@ -169,6 +170,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     const ownRows = await session(userA, (dbSession) => dbSession.db.select().from(properties)
       .where(and(eq(properties.organizationId, personalOrganization(userA)), eq(properties.id, propertyId))));
     assert.equal(ownRows.length, 1);
+    await runMaintenanceCases(t, { session, userA, userB, propertyId });
     await runAuditCases(t, { config, administrator, userId: userA, invitedUserId: userB, organizationId: personalOrganization(userA) });
   } finally {
     if (roleCreated) {

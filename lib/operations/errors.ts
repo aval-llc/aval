@@ -18,6 +18,13 @@ export class EntityNotFoundError extends Error {
   }
 }
 
+export class InvalidWorkOrderTransitionError extends Error {
+  constructor() {
+    super("This work order is already completed or cancelled. Refresh before making changes.");
+    this.name = "InvalidWorkOrderTransitionError";
+  }
+}
+
 export class ImportBatchRejectedError extends Error {
   constructor(readonly skipped: SkippedRow[]) {
     super(`Import rejected: ${skipped.length} row(s) need correction; no rows were applied`);
@@ -43,6 +50,9 @@ export function operationsErrorResponse(error: unknown): Response {
   }
   if (error instanceof EntityNotFoundError) {
     return Response.json({ error: error.message }, { status: 404 });
+  }
+  if (error instanceof InvalidWorkOrderTransitionError) {
+    return Response.json({ error: error.message }, { status: 409 });
   }
   if (error instanceof ImportBatchRejectedError) {
     return Response.json({ error: error.message, skipped: error.skipped }, { status: 422 });
