@@ -159,7 +159,7 @@ jobs:
           cat > "$notes" <<EOF
           Hosted desktop build from commit \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`.
 
-          Target: https://aval.evalxnder.workers.dev. The matching Cloudflare
+          Target: https://app.aval.llc. The matching Cloudflare
           deployment and authenticated production readiness check passed.
 
           Includes the movable native chat title bar, theme-aware frosted glass,

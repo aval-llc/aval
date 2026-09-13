@@ -7,7 +7,7 @@ const { CodexAppServerService } = require("./codex-app-server.cjs");
 
 const { isChatWindowRequest, applyChatBackground, parseChatAppearance } = require("./chat-window.cjs");
 
-const DEFAULT_APP_URL = "https://aval.evalxnder.workers.dev";
+const DEFAULT_APP_URL = "https://app.aval.llc";
 const appUrl = new URL(process.env.AVAL_DESKTOP_URL || require("./package.json").avalDesktopUrl || DEFAULT_APP_URL);
 const allowedOrigin = appUrl.origin;
 let mainWindow = null;
