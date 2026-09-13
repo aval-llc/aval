@@ -10,6 +10,7 @@ import { createItem, createProject, readPlanning } from "../../lib/planning/stor
 import { runAuditCases } from "./audit-cases.mjs";
 import { runMaintenanceCases } from "./maintenance-cases.mjs";
 import { runConversationCases } from "./conversation-cases.mjs";
+import { runPlannerCases } from "./planner-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
 
 const url = process.env.AVAL_TEST_DATABASE_URL;
@@ -23,6 +24,7 @@ const personalOrganization = (subject) => `org_${createHash("sha256").update(sub
 test("clean Supabase migrations support auth bootstrap, RLS isolation and rollback", async (t) => {
   const admin = new Client({ connectionString: url });
   await admin.connect();
+  assert.equal((await admin.query("SHOW server_encoding")).rows[0].server_encoding, "UTF8", "Use UTF8 like hosted Supabase; on Windows pass initdb --encoding=UTF8");
   const existing = await admin.query("SELECT to_regclass('public.properties') AS table_name");
   assert.equal(existing.rows[0].table_name, null, "Use a fresh disposable database");
   await admin.end();
@@ -173,6 +175,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     assert.equal(ownRows.length, 1);
     await runMaintenanceCases(t, { session, userA, userB, propertyId });
     await runConversationCases(t, { session, userA, userB });
+    await runPlannerCases(t, { config, administrator });
     await runAuditCases(t, { config, administrator, userId: userA, invitedUserId: userB, organizationId: personalOrganization(userA) });
   } finally {
     if (roleCreated) {
