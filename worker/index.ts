@@ -51,7 +51,7 @@ const worker = {
     let requestHeaders = withoutUntrustedIdentityHeaders(request.headers);
     let responseCookies: string[] = [];
     const staticAsset = url.pathname.startsWith("/_next/") || url.pathname.startsWith("/assets/") || url.pathname === "/favicon.ico";
-    const authMutation = url.pathname === "/api/auth/login" || url.pathname === "/api/auth/signup" || url.pathname === "/api/auth/logout";
+    const authMutation = ["/api/auth/login", "/api/auth/signup", "/api/auth/logout", "/api/auth/forgot-password", "/api/auth/resend-verification", "/api/auth/confirm"].includes(url.pathname);
     if (!staticAsset && !authMutation) {
       const authentication = await authenticateSupabaseRequest(request, env);
       if (authentication) {

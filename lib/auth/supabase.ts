@@ -32,6 +32,8 @@ export interface RequestAuthentication {
   responseCookies: string[];
 }
 
+type AuthenticatedSession = RequestAuthentication & { accessToken: string };
+
 export class SupabaseAuthError extends Error {
   constructor(public readonly status: number, message: string) {
     super(message);
@@ -131,14 +133,14 @@ function verifiedIdentity(user: SupabaseUser): VerifiedSupabaseIdentity | null {
   };
 }
 
-export async function authenticateSupabaseRequest(request: Request, bindings: SupabaseAuthBindings): Promise<RequestAuthentication | null> {
+async function authenticatedSession(request: Request, bindings: SupabaseAuthBindings): Promise<AuthenticatedSession | null> {
   const requestCookies = cookies(request);
   const accessToken = requestCookies.get(ACCESS_COOKIE);
   if (accessToken) {
     const response = await authFetch(bindings, "user", { headers: { authorization: `Bearer ${accessToken}` } });
     if (response.ok) {
       const identity = verifiedIdentity(await response.json() as SupabaseUser);
-      return identity ? { identity, responseCookies: [] } : null;
+      return identity ? { identity, accessToken, responseCookies: [] } : null;
     }
   }
 
@@ -151,7 +153,12 @@ export async function authenticateSupabaseRequest(request: Request, bindings: Su
   if (!response.ok) return null;
   const session = await response.json() as SupabaseSessionPayload;
   const identity = verifiedIdentity(session.user);
-  return identity ? { identity, responseCookies: sessionCookies(request, session) } : null;
+  return identity ? { identity, accessToken: session.access_token, responseCookies: sessionCookies(request, session) } : null;
+}
+
+export async function authenticateSupabaseRequest(request: Request, bindings: SupabaseAuthBindings): Promise<RequestAuthentication | null> {
+  const session = await authenticatedSession(request, bindings);
+  return session ? { identity: session.identity, responseCookies: session.responseCookies } : null;
 }
 
 export async function signInWithSupabasePassword(
@@ -194,6 +201,62 @@ export async function signUpWithSupabasePassword(
   if (!identity) return { verificationRequired: true, cookies: [] };
   const session = body as SupabaseSessionPayload;
   return { verificationRequired: false, identity, cookies: sessionCookies(request, session) };
+}
+
+export async function requestSupabasePasswordReset(
+  bindings: SupabaseAuthBindings,
+  email: string,
+  redirectTo: string,
+): Promise<void> {
+  const response = await authFetch(bindings, `recover?redirect_to=${encodeURIComponent(redirectTo)}`, {
+    method: "POST",
+    body: JSON.stringify({ email, gotrue_meta_security: {} }),
+  });
+  if (!response.ok) throw await responseError(response, "Unable to send password reset email");
+}
+
+export async function resendSupabaseSignupVerification(
+  bindings: SupabaseAuthBindings,
+  email: string,
+  redirectTo: string,
+): Promise<void> {
+  const response = await authFetch(bindings, `resend?redirect_to=${encodeURIComponent(redirectTo)}`, {
+    method: "POST",
+    body: JSON.stringify({ type: "signup", email, gotrue_meta_security: {} }),
+  });
+  if (!response.ok) throw await responseError(response, "Unable to resend verification email");
+}
+
+export async function verifySupabaseRecoveryToken(
+  request: Request,
+  bindings: SupabaseAuthBindings,
+  tokenHash: string,
+): Promise<{ identity: VerifiedSupabaseIdentity; cookies: string[] }> {
+  const response = await authFetch(bindings, "verify", {
+    method: "POST",
+    body: JSON.stringify({ token_hash: tokenHash, type: "recovery", gotrue_meta_security: {} }),
+  });
+  if (!response.ok) throw await responseError(response, "The password reset link is invalid or expired");
+  const session = await response.json() as SupabaseSessionPayload;
+  const identity = verifiedIdentity(session.user);
+  if (!identity) throw new SupabaseAuthError(403, "The password reset link is invalid or expired");
+  return { identity, cookies: sessionCookies(request, session) };
+}
+
+export async function updateSupabasePassword(
+  request: Request,
+  bindings: SupabaseAuthBindings,
+  password: string,
+): Promise<string[]> {
+  const session = await authenticatedSession(request, bindings);
+  if (!session) throw new SupabaseAuthError(401, "The password reset session is invalid or expired");
+  const response = await authFetch(bindings, "user", {
+    method: "PUT",
+    headers: { authorization: `Bearer ${session.accessToken}` },
+    body: JSON.stringify({ password }),
+  });
+  if (!response.ok) throw await responseError(response, "Unable to update password");
+  return session.responseCookies;
 }
 
 export async function signOutFromSupabase(request: Request, bindings: SupabaseAuthBindings): Promise<string[]> {
