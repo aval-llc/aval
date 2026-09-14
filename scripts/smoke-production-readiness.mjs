@@ -23,7 +23,17 @@ const login = await fetch(`${baseUrl}/api/auth/login`, {
   body: JSON.stringify({ email, password }),
 });
 const sessionCookie = login.headers.get("set-cookie")?.split(";")[0];
-if (!login.ok || !sessionCookie) fail(`Verification account login failed (${login.status})`, {});
+if (!login.ok || !sessionCookie) {
+  const raw = await login.text();
+  let body;
+  try { body = raw ? JSON.parse(raw) : null; } catch { body = { nonJsonBody: raw.slice(0, 300) }; }
+  fail(`Verification account login failed (${login.status})`, {
+    body,
+    contentType: login.headers.get("content-type"),
+    server: login.headers.get("server"),
+    cfRay: login.headers.get("cf-ray"),
+  });
+}
 
 const integrations = await request("/api/integrations");
 if (integrations.status !== 200 || !Array.isArray(integrations.body?.providers) || integrations.body?.storage === "unavailable") {
