@@ -907,6 +907,8 @@ export const leaseResidents = pgTable(
     leaseId: text("lease_id").notNull().references(() => leases.id),
     residentId: text("resident_id").notNull().references(() => residents.id),
     role: text("role").notNull().default("primary"), // "primary" | "co_resident" | "guarantor"
+    sourceProvider: text("source_provider"),
+    sourceConnectionId: text("source_connection_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
   },
   (table) => [

@@ -1,5 +1,5 @@
 import type { DbSession } from "@/db/postgres/session";
-import { taskBoundary } from './task-boundary';
+import { taskBoundary, inboundToolAllowed } from './task-boundary';
 /**
  * The tool executor: the only path from a model's proposal to a tool actually
  * running.
@@ -88,7 +88,7 @@ export async function executeTool(dbSession: DbSession, request: ExecutionReques
       if (!checkFaithfulness(claims, withDerivedNumbers(evidence)).ok) return { result: { status: 'denied', code: 'invalid_arguments', reason: 'The proposed communication contains figures not verified by this task’s evidence. Read the supporting records or remove the unsupported figures.' }, audit };
     }
 
-    if (scope.source === 'inbound' && descriptor?.mutates && (request.toolName !== 'send_external_message' || request.args.conversation_id !== scope.conversationId || request.args.to !== undefined || request.args.provider !== undefined)) return { result: { status: 'denied', code: 'permission_denied', reason: 'An inbound-message task can only reply to its originating conversation.' }, audit };
+    if (scope.source === 'inbound' && descriptor?.mutates && !inboundToolAllowed(scope, request.toolName, request.args)) return { result: { status: 'denied', code: 'permission_denied', reason: 'An inbound-message task can only reply to its originating conversation.' }, audit };
   }
 
   if (descriptor && !descriptor.unimplemented && (descriptor.mutates || request.toolName === 'request_execution_plan')) {
@@ -272,7 +272,7 @@ export async function executeApprovedTool(dbSession: DbSession, request: Executi
       if (!checkFaithfulness(claims, withDerivedNumbers(evidence)).ok) return { result: { status: 'denied', code: 'invalid_arguments', reason: 'The proposed communication contains figures not verified by this task’s evidence. Read the supporting records or remove the unsupported figures.' }, audit };
     }
 
-    if (scope.source === 'inbound' && descriptor?.mutates && (request.toolName !== 'send_external_message' || request.args.conversation_id !== scope.conversationId || request.args.to !== undefined || request.args.provider !== undefined)) return { result: { status: 'denied', code: 'permission_denied', reason: 'An inbound-message task can only reply to its originating conversation.' }, audit };
+    if (scope.source === 'inbound' && descriptor?.mutates && !inboundToolAllowed(scope, request.toolName, request.args)) return { result: { status: 'denied', code: 'permission_denied', reason: 'An inbound-message task can only reply to its originating conversation.' }, audit };
   }
 
   if (descriptor && !descriptor.unimplemented && (descriptor.mutates || request.toolName === 'request_execution_plan')) {

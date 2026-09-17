@@ -66,6 +66,10 @@ source = source
     '    leaseOwner: text("lease_owner"),\n    // Monotonic fencing token prevents stale checkpoints after reassignment.\n    leaseGeneration: integer("lease_generation").notNull().default(0),\n    leaseExpiresAt:',
   )
   .replace(
+    '    role: text("role").notNull().default("primary"), // "primary" | "co_resident" | "guarantor"',
+    '    role: text("role").notNull().default("primary"), // "primary" | "co_resident" | "guarantor"\n    sourceProvider: text("source_provider"),\n    sourceConnectionId: text("source_connection_id"),',
+  )
+  .replace(
     'export const agentApprovals = pgTable(\n  "agent_approvals",\n  {\n    id: text("id").primaryKey(),\n    taskId: text("task_id").notNull().references(() => agentTasks.id),\n    organizationId: text("organization_id").notNull().references(() => organizations.id),\n    stepIndex:',
     'export const agentApprovals = pgTable(\n  "agent_approvals",\n  {\n    id: text("id").primaryKey(),\n    taskId: text("task_id").notNull().references(() => agentTasks.id),\n    organizationId: text("organization_id").notNull().references(() => organizations.id),\n    propertyId: text("property_id").references(() => properties.id),\n    stepIndex:',
   )

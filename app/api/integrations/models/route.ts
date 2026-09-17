@@ -8,6 +8,7 @@ import { getProvider } from "@/lib/integrations/catalog";
 import { isModelProviderId, listModelsDetailed } from "@/lib/integrations/model-providers";
 import { codexInstallationId, isSubscriptionProviderId } from "@/lib/integrations/subscription-oauth";
 import { getApiIdentity } from "@/lib/integrations/session";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
 
 const bindings = () => env as unknown as Record<string, string | undefined>;
 
@@ -22,6 +23,7 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   const providerId = new URL(request.url).searchParams.get("provider") ?? "";
+  if (isSubscriptionProviderId(providerId) && !PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
   if (!isModelProviderId(providerId)) return Response.json({ error: "Unknown provider" }, { status: 400 });
   const catalogEntry = getProvider(providerId);
   if (!catalogEntry) return Response.json({ error: "Unknown provider" }, { status: 400 });

@@ -36,6 +36,7 @@ import {
   UNIT_STATUSES,
   WORK_ORDER_CATEGORIES,
   WORK_ORDER_PRIORITIES,
+  WORK_ORDER_STATUSES,
 } from "./types.ts";
 
 /* ── the batch ───────────────────────────────────────────────────────────── */
@@ -108,6 +109,7 @@ export interface ImportVendor extends ExternallyKeyed {
 }
 
 export interface ImportWorkOrder extends ExternallyKeyed {
+  status?: string;
   propertyExternalId: string;
   unitExternalId?: string | null;
   vendorExternalId?: string | null;
@@ -442,6 +444,7 @@ function validateRow(
         optionalRef(resolvable, "workOrders", order.callbackOfExternalId, "callbackOfExternalId") ??
         enumProblem(order.category, WORK_ORDER_CATEGORIES, "category") ??
         enumProblem(order.priority, WORK_ORDER_PRIORITIES, "priority") ??
+        enumProblem(order.status, WORK_ORDER_STATUSES, "status") ??
         (isIntOrAbsent(order.estimateCents) ? null : { reason: "invalid_field", detail: "estimateCents must be an integer" }) ??
         (isIntOrAbsent(order.actualCostCents) ? null : { reason: "invalid_field", detail: "actualCostCents must be an integer" }) ??
         (DATE_FIELDS_OK(order.completedAt) ? null : { reason: "invalid_field", detail: "completedAt is not a valid date" })

@@ -1,4 +1,5 @@
 import { withApiSession } from "@/lib/api/with-session";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
@@ -27,6 +28,7 @@ const MAX_PASTED_INPUT_LENGTH = 4096;
  * against the same PKCE verifier without restarting the whole flow.
  */
 async function POSTWithSession(dbSession: DbSession, request: Request) {
+  if (!PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   const body = await request.json().catch(() => ({})) as { provider?: string; state?: string; pastedInput?: string };

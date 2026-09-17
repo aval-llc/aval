@@ -1,0 +1,66 @@
+name: Cloudflare isolated staging
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: aval-isolated-staging
+  cancel-in-progress: false
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: aval-ci-disposable-only
+          POSTGRES_DB: aval_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aval_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.STAGING_CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.STAGING_CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_URL: ${{ secrets.STAGING_SUPABASE_DB_URL }}
+      SUPABASE_URL: ${{ vars.STAGING_SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+      AVAL_HYPERDRIVE_ID: ${{ vars.STAGING_HYPERDRIVE_ID }}
+      STAGING_PROJECT_REF: ${{ vars.STAGING_SUPABASE_PROJECT_REF }}
+      STAGING_SYNTHETIC_ONLY: ${{ vars.STAGING_SYNTHETIC_ONLY }}
+      AVAL_STAGING_URL: ${{ vars.AVAL_STAGING_URL }}
+      AVAL_SMOKE_EMAIL: ${{ secrets.STAGING_SMOKE_EMAIL }}
+      AVAL_SMOKE_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - name: Require isolated synthetic environment
+        run: node scripts/verify-staging-config.mjs
+      - run: npm ci
+      - run: npm ci --prefix desktop
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:postgres
+        env:
+          AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
+      - name: Apply staging migrations only
+        run: npm run db:migrate -- --allow-remote
+      - name: Materialize staging Hyperdrive configuration
+        run: node scripts/configure-cloudflare-deploy.mjs wrangler.staging.jsonc wrangler.deploy.generated.jsonc
+      - name: Deploy isolated staging Worker
+        run: >-
+          npx wrangler deploy --config wrangler.deploy.generated.jsonc
+          --tag "$GITHUB_SHA" --message "Synthetic staging $GITHUB_SHA"
+          --var "SUPABASE_URL:$SUPABASE_URL"
+          --var "SUPABASE_ANON_KEY:$SUPABASE_ANON_KEY"
+      - name: Authenticated staging readiness
+        run: node scripts/smoke-production-readiness.mjs "$AVAL_STAGING_URL"

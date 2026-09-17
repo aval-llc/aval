@@ -72,6 +72,26 @@ jobs:
         env:
           AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
 
+      - name: Require approved restore drill
+        env:
+          AVAL_RESTORE_DRILL_VERIFIED: ${{ vars.AVAL_RESTORE_DRILL_VERIFIED }}
+        run: test "$AVAL_RESTORE_DRILL_VERIFIED" = "true"
+
+      - name: Install PostgreSQL backup client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Encrypt and verify off-site backup before migration
+        env:
+          AVAL_BACKUP_PUBLIC_KEY: ${{ secrets.AVAL_BACKUP_PUBLIC_KEY }}
+          AVAL_BACKUP_BUCKET: ${{ vars.AVAL_BACKUP_BUCKET }}
+          AVAL_BACKUP_ENDPOINT: ${{ vars.AVAL_BACKUP_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AVAL_BACKUP_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AVAL_BACKUP_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: PATH="/usr/lib/postgresql/17/bin:$PATH" node scripts/backup-database.mjs
+
       - name: Apply production Supabase migrations
         run: npm run db:migrate -- --allow-remote
 

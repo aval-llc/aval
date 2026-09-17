@@ -173,13 +173,16 @@ export async function advanceTask(dbSession: DbSession,
   const support=['render_answer','read_memory','write_memory','read_task_history'];
   const selected=contract.kind==='plan'?['plan_goal','get_goal_plan']
     :contract.kind==='evidence'?[...(contract.tools??[]),...(contract.tools?.includes('read_document')?['list_documents']:[])]
-    :contract.kind==='delivery'?['read_conversation','list_conversations','get_communication_channels','get_marketing_channels','request_execution_plan','send_external_message','place_call','publish_listing']
+    :contract.kind==='delivery'?['create_maintenance_work_order','read_conversation','list_conversations','get_communication_channels','get_marketing_channels','request_execution_plan','send_external_message','place_call','publish_listing']
     :contract.kind==='preference'?['record_preference']:[];
   // Delivery still needs the specialist's source evidence before composing an
   // action. The persona and permission intersection above remains the ceiling.
   // This adds only registered reads, never additional mutation authority.
   tools=tools.filter(t=>[...support,...selected].includes(t.name)
     || (contract.kind==='delivery' && getTool(t.name)?.mutates===false));
+  if (JSON.parse(task.executionScopeJson).source === 'inbound') {
+    tools = tools.filter(tool => ['render_answer','read_conversation','read_maintenance_context','create_maintenance_work_order','send_external_message'].includes(tool.name));
+  }
 
   const onboarding = await readOnboarding(dbSession, task.userId, organizationId);
   let system = buildSystem(persona.systemPromptAddition) + "\n" + autonomyInstructions(autonomyMode(onboarding.preferences.autonomy[0]));
@@ -514,7 +517,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
             // Bind the human decision to this exact model proposal. Tool name
             // alone is insufficient because one assistant message may contain
             // two calls to the same financial tool with different arguments.
-            evidence: { toolUseId: use.id, goal: task.goal, agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
+            evidence: { toolUseId: use.id, goal: task.goal, agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
             amountCents: typeof use.input.amount_cents === "number" ? use.input.amount_cents : undefined,
             currency: typeof use.input.currency === "string" ? use.input.currency : undefined,
             tier: result.tier,

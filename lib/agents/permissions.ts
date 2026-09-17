@@ -28,6 +28,7 @@ export type Permission =
   | "leases.read"
   | "documents.read"
   | "maintenance.read"
+  | "maintenance.create"
   | "leasing.read"
   | "market.read"
   | "provenance.read"
@@ -86,7 +87,7 @@ export const AGENT_PERMISSIONS: Record<AgentRole, readonly Permission[]> = {
 
   marketResearch: ["market.read", "portfolio.read", "leasing.read", "preferences.write"],
 
-  maintenance: ["maintenance.read", "portfolio.read", "accounting.read", "preferences.write", "messaging.send.external"],
+  maintenance: ["maintenance.read", "maintenance.create", "portfolio.read", "accounting.read", "preferences.write", "messaging.send.external"],
 
   // §17: "The agent with the widest visibility should often have the least
   // mutation authority." Risk Analyst reads across every domain and holds no

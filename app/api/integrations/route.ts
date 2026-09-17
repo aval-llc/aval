@@ -8,6 +8,8 @@ import { configuredEnvironment, integrationCatalog } from "@/lib/integrations/ca
 import { isModelProviderId } from "@/lib/integrations/model-providers";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
+import { isSubscriptionProviderId } from "@/lib/integrations/subscription-oauth";
 
 // Keep blocked Yardi entries out of the customer-facing catalog until their
 // partner access and adapter are ready. The provider definitions and server
@@ -52,8 +54,10 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
 async function POSTWithSession(dbSession: DbSession, request: Request) {
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
+  if (identity.role !== "owner") return Response.json({ error: "Only the owner can configure model connections" }, { status: 403 });
   const body = await request.json().catch(() => ({})) as { provider?: string | null };
   const provider = body.provider ?? null;
+  if (provider && isSubscriptionProviderId(provider) && !PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
   if (provider !== null && !isModelProviderId(provider)) {
     return Response.json({ error: "Unknown model provider" }, { status: 400 });
   }

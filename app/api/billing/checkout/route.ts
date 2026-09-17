@@ -1,4 +1,5 @@
 import { withApiSession } from "@/lib/api/with-session";
+import { PILOT_POLICY } from "@/lib/pilot-policy";
 import type { DbSession } from "@/db/postgres/session";
 import { env } from "cloudflare:workers";
 import { getApiIdentity } from "@/lib/integrations/session";
@@ -9,6 +10,7 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   if (identity.role !== "owner") return Response.json({ error: "Only a workspace administrator can manage billing" }, { status: 403 });
+  if (!PILOT_POLICY.paidCheckout) return Response.json({ code: "checkout_disabled", error: "Paid plans and token packs are unavailable during the BYOK pilot. Existing subscriptions are not automatically canceled." }, { status: 409 });
 
   const body = (await request.json().catch(() => ({}))) as { kind?: string; id?: string };
   const kind = body.kind === "topup" ? "topup" : "plan";

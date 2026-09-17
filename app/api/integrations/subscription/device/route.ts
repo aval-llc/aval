@@ -1,4 +1,5 @@
 import { withApiSession } from "@/lib/api/with-session";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
 import { env } from "cloudflare:workers";
 import type { DbSession } from "@/db/postgres/session";
 import { integrationConnections } from "@/db/postgres/schema";
@@ -35,6 +36,7 @@ const POLL_RULE = { limit: 400, windowMs: 20 * 60 * 1000 };
  * three.
  */
 async function POSTWithSession(dbSession: DbSession, request: Request) {
+  if (!PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 

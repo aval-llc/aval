@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, Star } from "iconoir-react";
 import { AnimatedNumber } from "@/app/components/experience";
+import { PILOT_POLICY } from "@/lib/pilot-policy";
 
 interface PlanInfo { id: string; name: string; priceUsdCents: number; monthlyTokenAllowance: number; recommended?: boolean }
 interface PackInfo { id: string; name: string; priceUsdCents: number; tokens: number }
@@ -70,6 +71,15 @@ export function BillingSettings() {
   // are exactly at your limit or well past it.
   const overQuota = data.tokensConsumed > data.tokensGranted;
   const paidPlans = data.plans.filter((plan) => plan.priceUsdCents > 0);
+
+  if (!PILOT_POLICY.paidCheckout) return (
+    <article className="settings-card billing-card" data-reveal>
+      <p className="eyebrow">{t("BillingSettings.eyebrow")}</p>
+      <h2>BYOK pilot</h2>
+      <p>Connect your own model API key in Intelligence. Aval plan and token-pack purchases are paused; your model provider bills API usage directly.</p>
+      <p className="settings-muted">Existing billing record: {data.plan.name} · {data.subscriptionStatus ?? "No subscription"}. Existing subscriptions are not automatically canceled.</p>
+    </article>
+  );
 
   return (
     <article className="settings-card billing-card" data-reveal>

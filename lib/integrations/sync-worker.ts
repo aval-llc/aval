@@ -7,8 +7,10 @@ import { fetchQuickbooksPage, quickbooksClient, syncCursor } from "./quickbooks"
 import { normalizeQuickbooks } from "./quickbooks-rules";
 import { ProviderHttpError } from "./http";
 import type { IntegrationEnv } from "./oauth";
+import { buildiumCursor, fetchBuildiumPage } from "./buildium";
+import { decryptSecret } from "./crypto";
 
-export const AUTOMATIC_IMPORT_PROVIDERS: ReadonlySet<string> = new Set(["quickbooks"]);
+export const AUTOMATIC_IMPORT_PROVIDERS: ReadonlySet<string> = new Set(["quickbooks", "buildium"]);
 const INTERVAL_MS = 15 * 60_000;
 const LEASE_MS = 5 * 60_000;
 const freeLease = (now: Date) => or(isNull(integrationSyncState.leaseExpiresAt), lte(integrationSyncState.leaseExpiresAt, now));
@@ -50,9 +52,27 @@ export async function runImportWorker(dbSession: DbSession, config: IntegrationE
     const runId = crypto.randomUUID();
     try {
       await db.update(syncRuns).set({ status: "interrupted", error: "Worker lease expired; the saved page will be retried.", completedAt: now }).where(and(eq(syncRuns.connectionId, state.connectionId), eq(syncRuns.status, "running")));
-      await db.insert(syncRuns).values({ id: runId, organizationId: state.organizationId, connectionId: state.connectionId, provider: "quickbooks", status: "running", cursorJson: state.cursorJson, countsJson: "{}", startedAt: now });
       const [connection] = await db.select().from(integrationConnections).where(and(eq(integrationConnections.id, state.connectionId), eq(integrationConnections.organizationId, state.organizationId))).limit(1);
-      if (!connection || connection.provider !== "quickbooks" || connection.status !== "connected" || connection.externalAccountId !== state.externalAccountId) throw new Error("The connected account changed or needs authorization. Review it before resuming.");
+      if (!connection || !AUTOMATIC_IMPORT_PROVIDERS.has(connection.provider) || connection.status !== "connected" || connection.externalAccountId !== state.externalAccountId) throw new Error("The connected account changed or needs authorization. Review it before resuming.");
+      await db.insert(syncRuns).values({ id: runId, organizationId: state.organizationId, connectionId: state.connectionId, provider: connection.provider, status: "running", cursorJson: state.cursorJson, countsJson: "{}", startedAt: now });
+      if (connection.provider === "buildium") {
+        if (!connection.accessTokenCiphertext || !config.INTEGRATION_TOKEN_ENCRYPTION_KEY) throw new Error("Buildium credentials unavailable");
+        const credentials = JSON.parse(await decryptSecret(connection.accessTokenCiphertext, config.INTEGRATION_TOKEN_ENCRYPTION_KEY)) as Record<string, string>;
+        const page = await dbSession.outsideTransaction(() => fetchBuildiumPage(credentials, buildiumCursor(state.cursorJson)));
+        await dbSession.atomic(async () => {
+          const [current] = await db.select().from(integrationSyncState).where(and(scope, eq(integrationSyncState.enabled, true))).limit(1);
+          const [currentConnection] = await db.select().from(integrationConnections).where(and(eq(integrationConnections.id, connection.id), eq(integrationConnections.status, "connected"), eq(integrationConnections.accessTokenCiphertext, connection.accessTokenCiphertext!))).limit(1);
+          if (!current || !currentConnection || !current.leaseExpiresAt || current.leaseExpiresAt <= new Date()) throw new Error("Buildium connection or worker lease changed");
+          const result = await applyImport(dbSession, state.organizationId, page.batch, { sourceProvider: "buildium", sourceConnectionId: connection.id, externalId: null });
+          if (result.conflictsDetected || result.failed.length || result.skipped.length) throw new Error("Buildium import requires reconciliation; checkpoint retained");
+          const completedAt = new Date();
+          const saved = await db.update(integrationSyncState).set({ cursorJson: JSON.stringify(page.next), attempts: 0, nextRunAt: new Date(completedAt.getTime() + (page.complete ? INTERVAL_MS : 0)), leaseToken: null, leaseExpiresAt: null, updatedAt: completedAt }).where(scope).returning();
+          if (!saved.length) throw new Error("Buildium worker ownership changed");
+          if (page.complete) await db.update(integrationConnections).set({ lastSyncAt: completedAt }).where(eq(integrationConnections.id, connection.id));
+          await db.update(syncRuns).set({ status: page.complete ? "completed" : "page_completed", cursorJson: JSON.stringify(page.next), countsJson: JSON.stringify({ ...result, complete: page.complete, readOnly: true }), completedAt }).where(eq(syncRuns.id, runId));
+        });
+        continue;
+      }
       const cursor = syncCursor(state.cursorJson, now);
       const client = await quickbooksClient(dbSession, connection, config);
       const page = await fetchQuickbooksPage(client, cursor);
