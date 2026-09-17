@@ -19,6 +19,23 @@
  *
  * Routing cannot target a Worker that does not exist, so this deploys before the
  * catch-all rule is pointed at it.
+ *
+ * ## Why this Worker filters recipients itself
+ *
+ * Seat addresses are `agent-{orgSlug}@aval.llc` — local parts on the apex, not a
+ * subdomain. Cloudflare Email Routing matches literal local parts or nothing:
+ * there is no `agent-*` wildcard rule (see docs/PMS_INTEGRATION_DISCOVERY.md).
+ * So the only rule that can deliver an address nobody pre-registered is the
+ * zone's **catch-all**, and a catch-all hands this Worker *every* unmatched
+ * message to the domain — a typo of a colleague's name, a scrape of the WHOIS
+ * contact, a spam run against common local parts.
+ *
+ * That makes the check below a security boundary, not a convenience. Under the
+ * earlier (abandoned) subdomain design, Cloudflare's rule engine was the filter
+ * and this Worker only ever saw seat mail. On the apex-prefix path the rule
+ * engine cannot distinguish seat mail from anything else, and this function is
+ * the only thing that can. It runs before the body is read, so a message that is
+ * not addressed to a seat is never buffered and never stored.
  */
 
 export interface SeatEnv {
@@ -43,13 +60,89 @@ interface ForwardableEmailMessage {
 /** Messages above this are rejected rather than stored. A PMS notice is small. */
 const MAX_RAW_BYTES = 5 * 1024 * 1024;
 
+/** The domain seat addresses live on. Anything else is not ours to accept. */
+const SEAT_DOMAIN = "aval.llc";
+
+/**
+ * The seat address shape: `agent-{orgSlug}@aval.llc`.
+ *
+ * This is a **shape** check and nothing more. `organizations` has no slug column
+ * yet, so there is no set of real slugs to test membership against — see the
+ * note in docs/PMS_INTEGRATION_DISCOVERY.md. `agent-notarealorg@aval.llc` gets
+ * stored under its own key and belongs to no workspace until a slug column and a
+ * lookup exist. Storing an unclaimed seat key is inert (P1 resolves recipient →
+ * org and will find nothing); accepting mail for the whole domain would not be.
+ *
+ * Slug grammar matches what a URL-safe workspace identifier can be: lowercase
+ * alphanumerics and internal hyphens, 1–40 characters, no leading or trailing
+ * hyphen. Deliberately narrow — widening it later is a one-line change, while
+ * having accepted too much is not reversible from R2.
+ */
+const SEAT_LOCAL_PART = /^agent-([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)$/;
+
+/**
+ * The org slug this message is addressed to, or `null` if it is not seat mail.
+ *
+ * Takes the envelope recipient (`message.to`), which Cloudflare gives us as the
+ * RCPT TO — not a header, so it is not attacker-forgeable in the way `From:` is.
+ */
+function seatOrgSlug(recipient: string): string | null {
+  const at = recipient.lastIndexOf("@");
+  if (at < 0) return null;
+  if (recipient.slice(at + 1) !== SEAT_DOMAIN) return null;
+  return SEAT_LOCAL_PART.exec(recipient.slice(0, at))?.[1] ?? null;
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * What happens to a message that reached this Worker but is not seat mail.
+ *
+ * Under the catch-all this is the disposition for *every* misaddressed message
+ * to aval.llc, so it is a policy call rather than a detail. Two honest options:
+ *
+ *   - `setReject(reason)` returns a permanent SMTP error, so the human who typed
+ *     `evna@aval.llc` gets a bounce and can correct it. This is also what the
+ *     zone does today with the catch-all disabled, which means enabling the
+ *     catch-all changes nothing observable for non-seat mail. The cost is that a
+ *     bounce confirms which addresses do not exist, so someone probing the
+ *     domain learns `agent-acme@` is real and `agent-xyz@` is not.
+ *   - Returning silently drops the message. No enumeration signal, but a real
+ *     person's typo vanishes with no bounce.
+ *
+ * Rejecting, because this Worker is being inserted into the path of a domain
+ * that already carries human mail, and the safest change to make to a working
+ * mail domain is the one nobody can observe. Seat addresses are handed to
+ * customers to type into a PMS anyway — they are not secret, so the enumeration
+ * the bounce leaks is information Aval publishes on purpose.
+ *
+ * Reversing this is one line, and the decision should be revisited if the seat
+ * addresses ever stop being customer-facing.
+ */
+function disposeOfNonSeatMail(message: ForwardableEmailMessage, recipient: string): void {
+  // Deliberately not logged at info level with the full address: under a
+  // catch-all this fires for every spam run against the domain, and the log
+  // would become a list of addresses strangers guessed. The local part is
+  // enough to tell a typo from a probe.
+  console.log(`[pms-seat] rejected non-seat recipient ${recipient.split("@")[0].slice(0, 32)}`);
+  message.setReject("No such recipient at this domain.");
+}
+
 export default {
   async email(message: ForwardableEmailMessage, env: SeatEnv): Promise<void> {
+    // First, before anything is read. A message that is not addressed to a seat
+    // must not be buffered, hashed or stored — under the catch-all this is the
+    // only check that distinguishes seat mail from the rest of the domain.
+    const recipient = message.to.toLowerCase();
+    const orgSlug = seatOrgSlug(recipient);
+    if (orgSlug === null) {
+      disposeOfNonSeatMail(message, recipient);
+      return;
+    }
+
     if (message.rawSize > MAX_RAW_BYTES) {
       message.setReject("Message too large for the Aval seat mailbox.");
       return;
@@ -85,7 +178,6 @@ export default {
     // same object twice, which is a no-op rather than a duplicate to de-dupe
     // later. Same dedupe-on-primary-key discipline as `integration_events`.
     const digest = await sha256Hex(raw);
-    const recipient = message.to.toLowerCase();
 
     await env.PMS_SEAT_INBOX.put(`unverified/${recipient}/${digest}`, raw as unknown as ArrayBuffer, {
       httpMetadata: { contentType: "message/rfc822" },
@@ -94,6 +186,10 @@ export default {
         // recorded as a claim, never as an established fact.
         claimedFrom: message.from.slice(0, 320),
         recipient,
+        // The slug the address claims. Not resolved to an organization here —
+        // there is no slug column to resolve it against, and resolution is P1's
+        // job anyway, after sender verification.
+        claimedOrgSlug: orgSlug,
         receivedAt: new Date().toISOString(),
         // Recorded for P1's verification pass to evaluate. Not evaluated here.
         authenticationResults: (message.headers.get("authentication-results") ?? "").slice(0, 1000),

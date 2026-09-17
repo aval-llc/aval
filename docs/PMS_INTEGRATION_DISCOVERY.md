@@ -226,26 +226,66 @@ nothing.
 
 Decided 2026-09-17: give the seats **their own subdomain**, so addresses become
 `{orgSlug}@agents.aval.llc` and the receive-only assertion lands on a name that
-genuinely never sends, while the apex keeps its real sending records. Until that
-exists the script stops at step 6 rather than reporting a success it did not
-achieve.
+genuinely never sends, while the apex keeps its real sending records.
 
 *Corrected the same day.* The first attempt at this said "delegate
 `agents.aval.llc` as its own Cloudflare zone", and step 4 probed `/zones?name=`
 to detect it. That is DNS **subdomain setup**, which is Enterprise-only
 (Free/Pro/Business: No) — and `aval.llc` is on Free Website, so the probe could
-never be true and the script was pinned to apex-prefix permanently.
+never be true and the script was pinned to apex-prefix permanently. The second
+attempt corrected it to Email Routing **subdomains**, an ordinary subdomain of
+the same zone, available on every plan.
 
-The feature actually required is Email Routing **subdomains**: an ordinary
-subdomain of the same zone, added under Email Routing → Settings → Subdomains,
-available on every plan, up to 30 domains per zone. No delegation, no plan
-change. Step 4 now detects it by the MX Cloudflare publishes on the subdomain.
+**Reversed 2026-09-17 — the subdomain is not being built.** Both corrections
+above were fixes to the mechanism of a decision whose premise was wrong. The
+address format was never an open question: Aval's inbound agent format is
+`agent-{orgSlug}@aval.llc`, so inbound seat mail belongs to the existing
+`aval.llc` Email Routing configuration and always did. The subdomain was
+reasoned backwards from a constraint — "SPF/DMARC cannot scope to a local part,
+therefore the seats need a domain of their own" — and that reasoning treated an
+anti-spoofing record as a requirement the address format had to satisfy, rather
+than as one mitigation among others.
 
-Step 5 was the dangerous half of the same mistake: `/email/routing/rules/
-catch_all` is the **apex's** catch-all and was written whatever path was taken,
-so once the subdomain existed `--apply` would have routed every unmatched
-`@aval.llc` message into the seat Worker. Routing rules are per domain; the
-subdomain needs its own, and the script now stops and says where to set it.
+It is not a requirement, because it does not defend the thing that matters.
+A receive-only SPF/DMARC record on a seat domain would tell *other people's*
+mail servers that the seat never sends, which limits someone spoofing a seat
+address outward. It does nothing about mail arriving *at* the seat, which is the
+actual exposure: the Worker's input is whatever a stranger chose to send. That
+threat is answered by inbound verification (P1 — SPF/DKIM/DMARC alignment
+against a per-org allowlist, checked before anything is parsed), and by the
+Worker storing every message unparsed until then. The subdomain would have bought
+an outward assertion at the cost of a second name, a second routing
+configuration, and an address format inconsistent with the rest of the product.
+
+So: **no `agents.aval.llc`.** No A, AAAA, CNAME, Worker custom domain, or
+separate zone for that name, and `scripts/setup-pms-seat-dns.mjs` now stops if it
+finds records there. The accepted consequence, recorded rather than discovered
+later: seat addresses carry no record asserting they never send, and the apex
+DMARC is `p=none`, so outward spoofing of a seat address is currently detected
+rather than blocked. Tightening apex DMARC is worth doing on its own merits and
+is not a seat problem.
+
+**The apex catch-all is the delivery mechanism, and the Worker is the filter.**
+Email Routing matches literal local parts or nothing — there is no `agent-*`
+wildcard rule. Seats are created per customer without a Cloudflare write, so the
+catch-all is the only rule that can deliver an address nobody pre-registered.
+That hands `worker/pms-seat-inbound.ts` every unmatched message to the domain,
+which moves a boundary: under the subdomain design Cloudflare's rule engine kept
+non-seat mail away from the Worker, and on the apex the Worker's own recipient
+check is the only thing that does. It runs before the body is read, matches
+`agent-{orgSlug}@aval.llc` on the envelope recipient, and returns a permanent
+SMTP rejection for anything else — which is what the zone already does today with
+the catch-all disabled, so non-seat mail sees no change.
+
+Rejecting rather than silently dropping is deliberate. A bounce lets someone
+enumerate which seat addresses exist, and that is acceptable: seat addresses are
+handed to customers to type into a PMS, so they are not secret. Silently
+discarding a colleague's typo of a human address, on a domain that carries real
+company mail, is the worse failure.
+
+Literal rules match ahead of the catch-all, so the existing `evan@aval.llc`
+forward is untouched by this. Verified against the live zone 2026-09-17: one
+active literal rule, catch-all `{all} → drop` and disabled.
 
 **DoorLoop maintenance writes are implemented and NOT live-validated.** Request
 shapes come from DoorLoop's published API documentation and are covered by
@@ -363,12 +403,15 @@ Next actions, in order:
    reachable end to end, and the third enforcement point for mandatory approval
    does not exist. Close the mid-turn pause gap in `pmsWriteAllowed()` in the
    same change.
-2. **P0.0.** In the dashboard, add `agents` under Email Routing → Settings →
-   Subdomains on `aval.llc`. Deploy `worker/pms-seat-inbound.ts` as
-   `aval-pms-seat-inbound`. Point `agents.aval.llc`'s own catch-all at that
-   Worker. Then run `scripts/setup-pms-seat-dns.mjs` — dry run first, `--apply`
-   second — which writes the SPF/DMARC assertions once it sees the subdomain.
-   Email Routing on the apex is already on; nothing there needs changing.
+2. **P0.0.** Deploy `worker/pms-seat-inbound.ts` as `aval-pms-seat-inbound`
+   (`npx wrangler deploy --config wrangler.seat.jsonc`) and create the
+   `aval-pms-seat-inbox` R2 bucket. **Blocked on credentials:** the `CF_API_TOKEN`
+   in this workspace carries Zone DNS and Email Routing Rules only — no Workers
+   or R2 scope — so the deploy returns `Authentication error [code: 10000]`.
+   Then run `scripts/setup-pms-seat-dns.mjs` — dry run first, `--apply` second —
+   which points the apex catch-all at the Worker. Email Routing on the apex is
+   already on and the `evan@aval.llc` forward is unaffected; nothing else in the
+   zone changes.
 3. **Build the deployments settings surface**, and make it state before the
    workspace's first deployment row that creating it narrows every other agent
    in the workspace at once.
