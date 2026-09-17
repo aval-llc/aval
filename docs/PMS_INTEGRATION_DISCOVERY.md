@@ -195,13 +195,40 @@ able to post to a resident ledger because someone asked it a broad question.
 
 ## Not done, and why
 
-**P0.0 (Cloudflare seat addresses) is blocked.** `CLOUDFLARE_API_TOKEN` lives in
-GitHub Actions secrets (`.github/workflows/cloudflare-production.yml`), which are
-write-only. It is not in the environment, `.dev.vars`, or a wrangler OAuth
-config, and there is no `~/.config/.wrangler`. Token scope could not be verified,
-so per the stop conditions nothing was assumed. `scripts/setup-pms-seat-dns.mjs`
-performs the whole sequence once a token is present, and
-`worker/pms-seat-inbound.ts` is the stub Email Worker it points the catch-all at.
+**P0.0 (Cloudflare seat addresses) is partly unblocked and not applied.** A
+scoped `CF_API_TOKEN` now exists. Run against the live zone it showed that the
+earlier "blocked" reading had been hiding the real state:
+
+- Email Routing on `aval.llc` is **already enabled** — the apex publishes
+  `route1/2/3.mx.cloudflare.net` and forwards `evan@aval.llc`. The script had
+  reported it disabled, because it computed `routing.ok && enabled === true` and
+  the token (scoped to Email Routing *Rules*) cannot read Email Routing
+  *settings*. A 403 became a fact. Fixed: it now infers from published MX, which
+  the DNS scope can read, and stops if neither is readable.
+- The catch-all is `{all} → drop`, disabled. Nothing reaches the seat.
+- `aval-pms-seat-inbound` is not deployed, and the token has no Workers scope to
+  confirm it either way.
+
+Two further silent failures were fixed in the same pass: step 4 chose the
+address format for every customer from a failed zone read, and step 6 wrote
+SPF/DMARC to `agents.aval.llc` whatever path it took.
+
+That last one is not a coding slip but a design collision, recorded below.
+
+**The seat cannot carry an anti-spoofing record on the apex-prefix path.** SPF
+and DMARC scope to a domain, never to a local-part, so there is no way to say
+"`agent-*@aval.llc` never sends". And `aval.llc` does send
+(`v=spf1 include:_spf.mx.cloudflare.net ~all`), so publishing `-all` there would
+fail every legitimate message the company sends. Writing the assertion to
+`agents.aval.llc` instead — which the script did — publishes it on a name no
+receiving server consults for those addresses: a passing check protecting
+nothing.
+
+Decided 2026-09-17: **delegate `agents.aval.llc` as its own Cloudflare zone**, so
+addresses become `{orgSlug}@agents.aval.llc` and the receive-only assertion lands
+on a domain that genuinely never sends. Until that zone exists the script stops
+at step 6 rather than reporting a success it did not achieve. Creating the zone
+is an account-level action a zone-scoped token cannot perform.
 
 **DoorLoop maintenance writes are implemented and NOT live-validated.** Request
 shapes come from DoorLoop's published API documentation and are covered by
@@ -216,17 +243,24 @@ a trust-ledger posting shape from documentation without a sandbox is how a
 payment lands on the wrong lease. Those actions resolve to `unlearned` — Aval's
 work, correctly attributed.
 
-**The agent-to-connection binding is designed but not implemented.** A shape is
-proposed for review; nothing was migrated.
+**The ten PMS write tools have no executor.** `executePmsWrite()` is exported and
+has no caller: `runTool()` in `lib/ask-aval/tools.ts` has no branch for any of
+the ten, and they are not marked `unimplemented` in the registry, so `policy.ts`
+does not deny them either. A model that calls `create_work_order` today reaches
+`runTool`'s default case and gets `Unknown tool "create_work_order"`. It fails
+safe — no write happens — but two claims made elsewhere are wrong as shipped:
+the write path is not reachable end to end, and mandatory approval is enforced
+in *two* independent places, not three, because the refusal inside
+`executePmsWrite` is not on any live path. Wiring the dispatch is the next
+substantive piece of P0.3.
 
 ---
 
-## Proposed: binding an agent to a connection
+## Binding an agent to a connection — implemented 2026-09-17
 
-Not implemented — proposed for review, per the instruction to propose a shape
-first. This is the structural gap the discovery turned up: `agent_personas` is
-org-scoped and carries a tool list, but nothing tells an agent *which system it
-works inside*.
+Approved as proposed and shipped in migration `0033_silent_kang.sql`. This was
+the structural gap the discovery turned up: `agent_personas` is org-scoped and
+carries a tool list, but nothing told an agent *which system it works inside*.
 
 ```
 agent_deployments
@@ -249,23 +283,54 @@ It also gives the seat a natural owner: the deployment is what holds the seat
 address once P0.0 lands, and what an operator pauses to take one agent out of one
 system without disconnecting the integration.
 
-`pmsToolAvailability()` currently resolves across every connected PMS and lets
-the tool carry a `provider` argument. With deployments it narrows to that
-deployment's provider — strictly tighter, so nothing here has to be rewritten.
+`pmsToolAvailability()` used to resolve across every connected PMS and let the
+tool carry a `provider` argument. It now takes the agent and narrows twice: to
+the providers that agent is deployed into, and within each, to the workflows
+that deployment owns — owning a PMS is not owning every workflow inside it.
+Strictly tighter, so nothing downstream was rewritten.
+
+**What an undeployed agent gets was the one decision the proposal did not
+settle.** Failing closed matches every other gate in `lib/pms`, where absence
+never reads as permission. But this table ships empty, so failing closed on it
+would revoke PMS writes from every already-configured workspace on the
+migration, silently. So the opt-in is per workspace: an empty table behaves
+exactly as before, and the first deployment row is the workspace saying it
+governs agents this way, after which an agent without a row gets nothing.
+
+The consequence has to reach the operator: **creating a workspace's first
+deployment narrows every other agent in it at the same time.** The settings
+surface must say so before writing that row. It does not yet — that surface is
+not built.
+
+Paused rows are excluded at the read rather than filtered later, so pausing
+removes the tools instead of refusing them afterwards. One gap remains: a
+deployment paused *mid-turn* is not re-checked, because `pmsWriteAllowed()` —
+the execution-time re-resolve that makes same-day revocation real for
+authorizations — does not know about deployments. It is not reachable today
+either way (see the executor note above), but it must be closed when the
+dispatch is wired.
 
 ## State at handoff — 2026-09-17
 
-Uncommitted, on branch `fix/codex-live-validation` (this work probably wants its
-own `feat/` branch). 19 files modified, 14 added.
+Committed on `feat/pms-integration`, branched from `fix/codex-live-validation`
+rather than from `main`. That is not a preference: migration `0032`'s
+`prevId` is `0031_snapshot.id`, and `0031` exists only on the chat branch, so
+branching off `main` would have broken the migration chain.
 
-Validation at handoff:
+```
+096d4ed  feat(pms): add PMS capability matrix, descriptors, and write path
+ff21b3c  fix(pms): stop the seat DNS script reporting failed reads as facts
+da24b7b  feat(pms): bind an agent to the system it works inside
+```
+
+Validation:
 
 ```
 typecheck     clean
 i18n parity   1806 keys match
 build         clean, /api/pms/matrix registered
-unit          539 pass / 0 fail   (+25)
-integration   157 pass / 0 fail   (+7)
+unit          543 pass / 0 fail   (+29)
+integration   163 pass / 0 fail   (+13)
 eslint        0 errors in new files
 ```
 
@@ -276,12 +341,22 @@ updated, not suppressed.
 
 Next actions, in order:
 
-1. P0.0 — create a Cloudflare token with Zone:DNS:Edit and Zone:Email
-   Routing:Edit on `aval.llc`, deploy `worker/pms-seat-inbound.ts` as
-   `aval-pms-seat-inbound`, then run `scripts/setup-pms-seat-dns.mjs` (dry run
-   first, `--apply` second).
-2. Decide on `agent_deployments` above.
-3. Verify AppFolio Core 5.4 against the live agreement and set
+1. **Wire the executor.** The ten write tools have no dispatch to
+   `executePmsWrite()` (see above). Until that lands the write path is not
+   reachable end to end, and the third enforcement point for mandatory approval
+   does not exist. Close the mid-turn pause gap in `pmsWriteAllowed()` in the
+   same change.
+2. **P0.0.** Delegate `agents.aval.llc` as its own Cloudflare zone (an
+   account-level action; the current token is zone-scoped and cannot), deploy
+   `worker/pms-seat-inbound.ts` as `aval-pms-seat-inbound`, then run
+   `scripts/setup-pms-seat-dns.mjs` — dry run first, `--apply` second. Email
+   Routing is already on; only the catch-all and the assertions are missing.
+3. **Build the deployments settings surface**, and make it state before the
+   workspace's first deployment row that creating it narrows every other agent
+   in the workspace at once.
+4. Verify AppFolio Core 5.4 against the live agreement and set
    `termsVerifiedAt` in `lib/pms/providers/appfolio.ts` — the citations are from
    secondary research and no customer should enable a flagged path before that.
-4. Live-validate the DoorLoop adapter against a real tenant before claiming it.
+5. Live-validate the DoorLoop adapter against a real tenant before claiming it.
+   Needs a DoorLoop API key (self-serve, from DoorLoop account settings)
+   connected to a workspace; none exists here.
