@@ -58,5 +58,6 @@ jobs:
       - run: git diff --exit-code -- docs/migration/inventory.json docs/migration/production-preflight.sql
       - run: npm run test:postgres
         env:
+          AVAL_POSTGRES_CLIENT_IMAGE: postgres:17
           AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
       # This job verifies real PostgreSQL behavior. It does not satisfy the hosted Hyperdrive gate.
