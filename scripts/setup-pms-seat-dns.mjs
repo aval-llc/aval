@@ -134,9 +134,30 @@ async function main() {
 
   // ── 3. email routing ───────────────────────────────────────────────────────
   step("3. Email Routing");
+  // A token scoped to Email Routing *Rules* cannot read the zone's Email
+  // Routing *settings*, and a failed read is not the same fact as "disabled".
+  // Collapsing the two once reported this zone as unconfigured while it was
+  // live and forwarding mail, so an unreadable settings endpoint falls back to
+  // evidence the DNS scope can see: Cloudflare publishes its own MX on a zone
+  // when, and only when, Email Routing is enabled.
   const routing = await cf(`/zones/${zone.id}/email/routing`);
-  const enabled = routing.ok && routing.body.result?.enabled === true;
-  info(`Currently ${enabled ? "enabled" : "not enabled"}`);
+  let enabled;
+  if (routing.ok) {
+    enabled = routing.body.result?.enabled === true;
+    info(`Currently ${enabled ? "enabled" : "not enabled"} (read from settings)`);
+  } else {
+    info(`Settings unreadable with this token (HTTP ${routing.status}) \u2014 inferring from published MX.`);
+    const mx = await cf(`/zones/${zone.id}/dns_records?type=MX&per_page=100`);
+    if (!mx.ok) {
+      stop(
+        "Email Routing state is unknown: neither the settings endpoint nor the MX records are readable.\n"
+          + "     Refusing to guess. Grant Zone:Email Routing:Edit and Zone:DNS:Edit, then re-run.",
+      );
+      return;
+    }
+    enabled = (mx.body.result ?? []).some((r) => /\.mx\.cloudflare\.net\.?$/i.test(r.content ?? ""));
+    info(`Currently ${enabled ? "enabled" : "not enabled"} (inferred from ${enabled ? "present" : "absent"} Cloudflare MX)`);
+  }
 
   if (!enabled) {
     if (!APPLY) {
@@ -157,7 +178,14 @@ async function main() {
   step(`4. Address scheme`);
   const subdomainZone = `${SUBDOMAIN}.${ZONE_NAME}`;
   const subZones = await cf(`/zones?name=${encodeURIComponent(subdomainZone)}`);
-  const subdomainSupported = subZones.ok && (subZones.body.result ?? []).length > 0;
+  if (!subZones.ok) {
+    stop(
+      `Could not determine whether ${subdomainZone} is its own zone (HTTP ${subZones.status}).\n`
+        + "     This choice fixes the address format for every customer, so it is not defaulted from a failed read.",
+    );
+    return;
+  }
+  const subdomainSupported = (subZones.body.result ?? []).length > 0;
 
   const path = subdomainSupported ? "subdomain" : "apex-prefix";
   const addressFormat = subdomainSupported ? `{orgSlug}@${subdomainZone}` : `agent-{orgSlug}@${ZONE_NAME}`;
@@ -165,9 +193,10 @@ async function main() {
   if (subdomainSupported) {
     ok(`${subdomainZone} exists as its own zone — configuring Email Routing there.`);
   } else {
-    ok(
-      `${subdomainZone} is not a separate zone, so Email Routing runs on the apex with a reserved prefix.\n`
-        + "     Functionally identical; not worth fighting.",
+    info(
+      `${subdomainZone} is not a separate zone, so Email Routing would run on the apex with a reserved prefix.\n`
+        + "     Delivery is equivalent, but the two paths are NOT interchangeable: only a separate zone can\n"
+        + "     carry the receive-only SPF/DMARC assertion in step 6. See there.",
     );
   }
   info(`Address format: ${addressFormat}`);
@@ -202,10 +231,28 @@ async function main() {
   // These addresses only ever receive. Publishing "-all" and "p=reject" says so
   // in the only place a receiving mail server will look, which is what stops
   // someone spoofing a seat address to a customer's PMS.
-  const records = [
-    { type: "TXT", name: SUBDOMAIN, content: "v=spf1 -all" },
-    { type: "TXT", name: `_dmarc.${SUBDOMAIN}`, content: "v=DMARC1; p=reject;" },
-  ];
+  //
+  // SPF and DMARC scope to a domain, never to a local-part. On the apex-prefix
+  // path the seats are agent-{orgSlug}@ZONE, so the only name that could carry
+  // the assertion is the apex \u2014 which sends real mail, and would fail every
+  // legitimate message if it published "-all". Writing to SUBDOMAIN instead
+  // publishes on a name no receiving server consults for these addresses: a
+  // green check protecting nothing. Neither is acceptable, so the gap is
+  // reported rather than papered over.
+  const records = path === "subdomain"
+    ? [
+      { type: "TXT", name: SUBDOMAIN, content: "v=spf1 -all" },
+      { type: "TXT", name: `_dmarc.${SUBDOMAIN}`, content: "v=DMARC1; p=reject;" },
+    ]
+    : [];
+  if (path !== "subdomain") {
+    stop(
+      `Cannot assert receive-only for ${addressFormat}.\n`
+        + `     SPF/DMARC apply per domain, not per local-part, and ${ZONE_NAME} sends real mail.\n`
+        + `     Delegate ${subdomainZone} as its own Cloudflare zone and re-run to get the assertion,\n`
+        + "     or accept that seat addresses carry no anti-spoofing record and record that decision.",
+    );
+  }
 
   for (const record of records) {
     const fqdn = `${record.name}.${ZONE_NAME}`;
