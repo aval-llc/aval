@@ -224,11 +224,28 @@ fail every legitimate message the company sends. Writing the assertion to
 receiving server consults for those addresses: a passing check protecting
 nothing.
 
-Decided 2026-09-17: **delegate `agents.aval.llc` as its own Cloudflare zone**, so
-addresses become `{orgSlug}@agents.aval.llc` and the receive-only assertion lands
-on a domain that genuinely never sends. Until that zone exists the script stops
-at step 6 rather than reporting a success it did not achieve. Creating the zone
-is an account-level action a zone-scoped token cannot perform.
+Decided 2026-09-17: give the seats **their own subdomain**, so addresses become
+`{orgSlug}@agents.aval.llc` and the receive-only assertion lands on a name that
+genuinely never sends, while the apex keeps its real sending records. Until that
+exists the script stops at step 6 rather than reporting a success it did not
+achieve.
+
+*Corrected the same day.* The first attempt at this said "delegate
+`agents.aval.llc` as its own Cloudflare zone", and step 4 probed `/zones?name=`
+to detect it. That is DNS **subdomain setup**, which is Enterprise-only
+(Free/Pro/Business: No) — and `aval.llc` is on Free Website, so the probe could
+never be true and the script was pinned to apex-prefix permanently.
+
+The feature actually required is Email Routing **subdomains**: an ordinary
+subdomain of the same zone, added under Email Routing → Settings → Subdomains,
+available on every plan, up to 30 domains per zone. No delegation, no plan
+change. Step 4 now detects it by the MX Cloudflare publishes on the subdomain.
+
+Step 5 was the dangerous half of the same mistake: `/email/routing/rules/
+catch_all` is the **apex's** catch-all and was written whatever path was taken,
+so once the subdomain existed `--apply` would have routed every unmatched
+`@aval.llc` message into the seat Worker. Routing rules are per domain; the
+subdomain needs its own, and the script now stops and says where to set it.
 
 **DoorLoop maintenance writes are implemented and NOT live-validated.** Request
 shapes come from DoorLoop's published API documentation and are covered by
@@ -346,11 +363,12 @@ Next actions, in order:
    reachable end to end, and the third enforcement point for mandatory approval
    does not exist. Close the mid-turn pause gap in `pmsWriteAllowed()` in the
    same change.
-2. **P0.0.** Delegate `agents.aval.llc` as its own Cloudflare zone (an
-   account-level action; the current token is zone-scoped and cannot), deploy
-   `worker/pms-seat-inbound.ts` as `aval-pms-seat-inbound`, then run
-   `scripts/setup-pms-seat-dns.mjs` — dry run first, `--apply` second. Email
-   Routing is already on; only the catch-all and the assertions are missing.
+2. **P0.0.** In the dashboard, add `agents` under Email Routing → Settings →
+   Subdomains on `aval.llc`. Deploy `worker/pms-seat-inbound.ts` as
+   `aval-pms-seat-inbound`. Point `agents.aval.llc`'s own catch-all at that
+   Worker. Then run `scripts/setup-pms-seat-dns.mjs` — dry run first, `--apply`
+   second — which writes the SPF/DMARC assertions once it sees the subdomain.
+   Email Routing on the apex is already on; nothing there needs changing.
 3. **Build the deployments settings surface**, and make it state before the
    workspace's first deployment row that creating it narrows every other agent
    in the workspace at once.
