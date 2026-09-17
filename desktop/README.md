@@ -2,7 +2,7 @@
 
 Aval Desktop is a trusted Electron shell for the hosted Aval dashboard. It starts `codex app-server` locally and exposes a deliberately narrow bridge to the renderer so interactive Ask Aval questions can use the signed-in user's ChatGPT plan.
 
-The desktop bridge uses an app-specific Codex home, never reads another Codex installation's `auth.json`, removes API-key environment variables from the child process, keeps authentication URLs and credentials out of the renderer, and runs model turns in an empty read-only workspace with network access disabled. Cloud automations remain server-hosted because they must keep running when the laptop is closed.
+The desktop bridge uses an app-specific Codex home. On first use it can adopt an existing local Codex login without overwriting a login made inside Aval; signing out disables that automatic adoption. It removes API-key environment variables from the child process, keeps authentication URLs and credentials out of the renderer, and runs model turns in an empty read-only workspace with tool network access disabled. Model inference still connects to OpenAI. Cloud automations remain server-hosted because they must keep running when the laptop is closed.
 
 ## Development
 

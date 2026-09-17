@@ -29,13 +29,13 @@ const ANSWER_SCHEMA = {
           label: { type: "string" },
           value: { type: "number" },
           unit: { type: "string", enum: ["currency", "percent", "count", "days"] },
-          delta: { type: "number" },
+          delta: { type: ["number", "null"] },
         },
-        required: ["label", "value", "unit"],
+        required: ["label", "value", "unit", "delta"],
       },
     },
     evidence: {
-      type: "array",
+      type: ["array", "null"],
       items: {
         type: "object",
         additionalProperties: false,
@@ -43,13 +43,13 @@ const ANSWER_SCHEMA = {
         required: ["label", "value"],
       },
     },
-    evidence_ids: { type: "array", items: { type: "string" } },
+    evidence_ids: { type: ["array", "null"], items: { type: "string" } },
     chart: {
-      type: "object",
+      type: ["object", "null"],
       additionalProperties: false,
       properties: {
-        metric: { type: "string" },
-        title: { type: "string" },
+        metric: { type: ["string", "null"] },
+        title: { type: ["string", "null"] },
         points: {
           type: "array",
           items: {
@@ -60,14 +60,14 @@ const ANSWER_SCHEMA = {
           },
         },
       },
-      required: ["points"],
+      required: ["metric", "title", "points"],
     },
-    document: { type: "string" },
-    action: { type: "string" },
-    actionDetail: { type: "string" },
+    document: { type: ["string", "null"] },
+    action: { type: ["string", "null"] },
+    actionDetail: { type: ["string", "null"] },
     confidence: { type: "string", enum: ["high", "medium", "low"] },
   },
-  required: ["headline", "narrative", "metrics", "confidence"],
+  required: ["headline", "narrative", "metrics", "evidence", "evidence_ids", "chart", "document", "action", "actionDetail", "confidence"],
 };
 
 const BASE_INSTRUCTIONS = `You are Ask Aval, the financial and operations analyst inside Aval's property-management dashboard.
@@ -78,7 +78,7 @@ Every number in the answer must appear unchanged in the supplied facts. Arithmet
 
 function safeError(error, fallback = "The local ChatGPT service is unavailable.") {
   if (!error) return fallback;
-  const message = error instanceof Error ? error.message : String(error);
+  const message = typeof error.message === "string" ? error.message : String(error);
   if (/token|authorization|bearer|cookie|secret/i.test(message)) return fallback;
   return message.slice(0, 240);
 }
@@ -116,6 +116,15 @@ function answerFromText(text) {
     if (!metric || typeof metric.label !== "string" || typeof metric.value !== "number") {
       throw new Error("ChatGPT returned invalid metrics.");
     }
+  }
+  // Structured output represents optional fields as null. The renderer expects
+  // absent fields (not a null delta that could be displayed as a change).
+  for (const metric of metrics) if (metric.delta === null) delete metric.delta;
+  for (const key of ["evidence", "evidence_ids", "chart", "document", "action", "actionDetail"]) {
+    if (value[key] === null) delete value[key];
+  }
+  if (value.chart) {
+    for (const key of ["metric", "title"]) if (value.chart[key] === null) delete value.chart[key];
   }
   return { ...value, metrics };
 }
@@ -381,7 +390,10 @@ class CodexAppServerService extends EventEmitter {
     this.rpc = null;
     if (this.child && !this.child.killed) this.child.kill();
     this.child = null;
-    for (const turn of this.activeTurns.values()) turn.reject(new Error("The local ChatGPT service stopped."));
+    for (const turn of this.activeTurns.values()) {
+      clearTimeout(turn.timer);
+      turn.reject(new Error("The local ChatGPT service stopped."));
+    }
     this.activeTurns.clear();
   }
 
@@ -524,7 +536,7 @@ class CodexAppServerService extends EventEmitter {
         reject(new Error("ChatGPT took too long to answer."));
       }, TURN_TIMEOUT_MS);
       timer.unref?.();
-      const active = { conversationId, requestId, threadId, turnId: null, text: "", context: payload.context ?? {}, resolve, reject, timer };
+      const active = { conversationId, requestId, threadId, turnId: null, pendingNotifications: [], text: "", context: payload.context ?? {}, resolve, reject, timer };
       this.activeTurns.set(conversationId, active);
       this.rpc.request("turn/start", {
           threadId,
@@ -535,11 +547,17 @@ class CodexAppServerService extends EventEmitter {
           model: this.state.selectedModel,
           outputSchema: ANSWER_SCHEMA,
         }, 30_000).then((started) => {
-        active.turnId = started?.turn?.id ?? null;
-        if (!active.turnId) throw new Error("Codex could not start the answer.");
+          active.turnId = started?.turn?.id ?? null;
+          if (!active.turnId) throw new Error("Codex could not start the answer.");
+          if (this.activeTurns.get(conversationId) !== active) {
+            // Cancellation can arrive before the start acknowledgement.
+            this.rpc?.request("turn/interrupt", { threadId, turnId: active.turnId }).catch(() => {});
+            return;
+          }
+          for (const notification of active.pendingNotifications.splice(0)) this.#onNotification(notification);
       }).catch((error) => {
         clearTimeout(timer);
-        this.activeTurns.delete(conversationId);
+        if (this.activeTurns.get(conversationId) === active) this.activeTurns.delete(conversationId);
         reject(error);
       });
     });
@@ -548,10 +566,10 @@ class CodexAppServerService extends EventEmitter {
   async cancelTurn({ conversationId }) {
     const active = this.activeTurns.get(conversationId);
     if (!active) return;
-    if (this.rpc && active.turnId) await this.rpc.request("turn/interrupt", { threadId: active.threadId, turnId: active.turnId }).catch(() => {});
     clearTimeout(active.timer);
     this.activeTurns.delete(conversationId);
     active.reject(new Error("Answer cancelled."));
+    if (this.rpc && active.turnId) await this.rpc.request("turn/interrupt", { threadId: active.threadId, turnId: active.turnId }).catch(() => {});
   }
 
   #onNotification(message) {
@@ -581,8 +599,17 @@ class CodexAppServerService extends EventEmitter {
       this.#setState({ rateLimits, status });
       return;
     }
-    const active = [...this.activeTurns.values()].find((turn) => turn.threadId === params.threadId && (!turn.turnId || turn.turnId === params.turnId));
+    // Item events carry turnId; lifecycle events carry the turn object instead.
+    const notificationTurnId = method === "turn/completed" || method === "turn/started"
+      ? params.turn?.id : params.turnId;
+    const active = [...this.activeTurns.values()].find((turn) => turn.threadId === params.threadId && (!turn.turnId || turn.turnId === notificationTurnId));
     if (!active) return;
+    if (!active.turnId) {
+      // Until turn/start resolves, this may belong to a previous cancelled turn.
+      // Replay against the confirmed ID instead of accepting it for a new ask.
+      active.pendingNotifications.push(message);
+      return;
+    }
     if (method === "item/agentMessage/delta" && typeof params.delta === "string") {
       active.text += params.delta;
       this.emit("event", { type: "delta", requestId: active.requestId, delta: params.delta });

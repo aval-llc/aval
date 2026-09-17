@@ -9,6 +9,7 @@ const path = require("node:path");
 const { PassThrough } = require("node:stream");
 const test = require("node:test");
 const {
+  ANSWER_SCHEMA,
   JsonLineRpc,
   CodexAppServerService,
   answerFromText,
@@ -60,6 +61,29 @@ test("structured answers are validated and normalized", () => {
   assert.throws(() => answerFromText('{"headline":7,"narrative":"x"}'), /incomplete/i);
 });
 
+test("desktop output schema satisfies strict output requirements at every object", () => {
+  function visit(schema) {
+    if (schema.properties) {
+      assert.equal(schema.additionalProperties, false);
+      assert.deepEqual([...schema.required].sort(), Object.keys(schema.properties).sort());
+      Object.values(schema.properties).forEach(visit);
+    }
+    if (schema.items) visit(schema.items);
+  }
+  visit(ANSWER_SCHEMA);
+});
+
+test("nullable fields are omitted for the renderer without dropping zero deltas", () => {
+  const answer = answerFromText(JSON.stringify({ headline: "Verified", narrative: "Supplied records.",
+    metrics: [{ label: "Count", value: 8, unit: "count", delta: null }, { label: "Other", value: 6, unit: "count", delta: 0 }],
+    evidence: null, chart: { metric: null, title: null, points: [] }, action: null, confidence: "high" }));
+  assert.equal(Object.hasOwn(answer.metrics[0], "delta"), false);
+  assert.equal(answer.metrics[1].delta, 0);
+  assert.equal(Object.hasOwn(answer, "evidence"), false);
+  assert.equal(Object.hasOwn(answer, "action"), false);
+  assert.deepEqual(answer.chart, { points: [] });
+});
+
 test("answers with unsupported figures fail closed", () => {
   const verified = { headline: "Occupancy", narrative: "Occupancy is 94%.", metrics: [{ label: "Occupancy", value: 94, unit: "percent" }], confidence: "high" };
   assert.equal(assertAnswerUsesSuppliedNumbers(verified, { occupancy: 94 }), verified);
@@ -84,13 +108,14 @@ test("Codex executable resolution checks explicit paths without a shell", () => 
   assert.deepEqual(checked, ["/opt/aval/codex"]);
 });
 
-test("service isolates Codex, opens only the validated login URL, and returns structured answers", async (t) => {
+test("service handles real completion envelopes after the start acknowledgement", { timeout: 3000 }, async (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "aval-service-test-"));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
   let spawnOptions;
   let openedUrl = null;
   const requests = [];
   const responses = [];
+  let completionStatus = "completed";
   const child = new EventEmitter();
   child.stdin = new PassThrough();
   child.stdout = new PassThrough();
@@ -118,11 +143,17 @@ test("service isolates Codex, opens only the validated login URL, and returns st
       if (message.method === "account/login/start") result = { type: "chatgpt", loginId: "login-1", authUrl: "https://auth.openai.com/oauth/authorize" };
       if (message.method === "thread/start") result = { thread: { id: "thread-1" } };
       if (message.method === "turn/start") result = { turn: { id: "turn-1" } };
+      if (message.method === "turn/start") {
+        // A delayed cancellation from the previous turn arrives before this ack.
+        child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "old-turn", status: "interrupted" } } })}\n`);
+      }
       child.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
       if (message.method === "turn/start") {
-        queueMicrotask(() => {
+        // Deliver after the start acknowledgement, as a real subprocess does.
+        setImmediate(() => {
           child.stdout.write(`${JSON.stringify({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", delta: '{"headline":"Verified","narrative":"The supplied facts support this.","metrics":[],"confidence":"high"}' } })}\n`);
-          child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", items: [], error: null } } })}\n`);
+          child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "unrelated-turn", status: "failed", error: { message: "Wrong turn" } } } })}\n`);
+          child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: completionStatus, items: [], error: completionStatus === "failed" ? { message: "Invalid output schema" } : null } } })}\n`);
         });
       }
     }
@@ -134,6 +165,7 @@ test("service isolates Codex, opens only the validated login URL, and returns st
     spawnImpl(_command, _args, options) { spawnOptions = options; return child; },
     openExternal: async (url) => { openedUrl = url; },
   });
+  t.after(() => service.stop());
   // The fake executable resolver needs one explicit path it can stat. This
   // test uses the current Node binary as a harmless executable placeholder;
   // spawnImpl above prevents it from actually launching.
@@ -176,8 +208,41 @@ test("service isolates Codex, opens only the validated login URL, and returns st
   assert.equal(responses.find(r=>r.id==='probe-4').error.code,-32601);
   const answer = await service.ask({ conversationId: "test", question: "What changed?", locale: "en", context: { facts: { occupancy: 94 } } });
   assert.equal(answer.headline, "Verified");
+  await t.test("failed turns report the provider error immediately", async () => {
+    completionStatus = "failed";
+    await assert.rejects(service.ask({ conversationId: "test", question: "Retry" }), /Invalid output schema/);
+    assert.equal(service.activeTurns.size, 0);
+  });
+  await t.test("interrupted turns settle without waiting for timeout", async () => {
+    completionStatus = "interrupted";
+    await assert.rejects(service.ask({ conversationId: "test", question: "Retry" }), /cancelled/);
+    assert.equal(service.activeTurns.size, 0);
+  });
   assert.equal(requests.find(r=>r.method==='thread/start').params.ephemeral,true);
   assert.deepEqual(requests.find(r=>r.method==='turn/start').params.sandboxPolicy,{type:'readOnly',networkAccess:false});
+  await t.test("a new question survives late cancellation events", async () => {
+    completionStatus = "completed";
+    assert.equal((await service.ask({ conversationId: "test", question: "Ask after cancellation" })).headline, "Verified");
+  });
+  await t.test("cancelling before acknowledgement interrupts the turn when its ID arrives", async () => {
+    let acknowledge;
+    const interrupts = [];
+    const mockRequest = t.mock.method(service.rpc, "request", (method, params) => {
+      if (method === "turn/start") return new Promise(resolve => { acknowledge = resolve; });
+      if (method === "turn/interrupt") interrupts.push(params);
+      return Promise.resolve({});
+    });
+    try {
+      const answer = service.ask({ conversationId: "test", question: "Cancel immediately" });
+      const cancelled = assert.rejects(answer, /cancelled/);
+      await service.cancelTurn({ conversationId: "test" });
+      await cancelled;
+      acknowledge({ turn: { id: "late-start" } });
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(interrupts, [{ threadId: "thread-1", turnId: "late-start" }]);
+      assert.equal(service.activeTurns.size, 0);
+    } finally { mockRequest.mock.restore(); }
+  });
   t.mock.timers.enable({apis:['setTimeout']});
   // Direct RPC probes use an unresponsive pipe so no model or credentials are involved.
   const stalled=new JsonLineRpc(new PassThrough(),new PassThrough(),{timeoutMs:30});
