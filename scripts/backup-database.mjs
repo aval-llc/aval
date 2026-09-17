@@ -2,7 +2,7 @@ import { createCipheriv, createHash, publicEncrypt, randomBytes } from 'node:cry
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdtemp, writeFile, rm, mkdir, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname, isAbsolute } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
@@ -15,6 +15,17 @@ export function postgresEnvironment(url) {
   return { ...process.env, PGHOST: parsed.hostname, PGPORT: parsed.port || '5432', PGUSER: decodeURIComponent(parsed.username), PGPASSWORD: decodeURIComponent(parsed.password), PGDATABASE: decodeURIComponent(parsed.pathname.slice(1)), PGSSLMODE: parsed.searchParams.get('sslmode') || (['localhost','127.0.0.1'].includes(parsed.hostname) ? 'disable' : 'require') };
 }
 export async function command(program, args, env = process.env) {
+  if (env.AVAL_POSTGRES_CLIENT_IMAGE && ['pg_dump','pg_restore'].includes(program)) {
+    if (env.AVAL_POSTGRES_CLIENT_IMAGE !== 'postgres:17') throw new Error('Unsupported PostgreSQL client image');
+    const fileIndex = args.indexOf('--file');
+    const file = program === 'pg_dump' ? args[fileIndex + 1] : args.at(-1);
+    if (!file || !isAbsolute(file) || !dirname(file).startsWith(join(tmpdir(),'aval-'))) throw new Error('Backup container must mount an isolated backup directory');
+    const mount = dirname(file);
+    args = ['run','--rm','--network','host','--volume',`${mount}:${mount}`,
+      ...['PGHOST','PGPORT','PGUSER','PGPASSWORD','PGDATABASE','PGSSLMODE'].flatMap(name => ['--env',name]),
+      env.AVAL_POSTGRES_CLIENT_IMAGE,program,...args];
+    program = 'docker';
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { env, stdio: ['ignore','pipe','pipe'] });
     let output = ''; child.stdout.on('data', chunk => { output += chunk; });
