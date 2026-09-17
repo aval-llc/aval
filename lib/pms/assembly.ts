@@ -23,6 +23,13 @@ import { resolveMatrix } from "./capability.ts";
 import { actionForTool, PMS_WRITE_TOOL_NAMES } from "./tool-map.ts";
 import type { PmsAction } from "./types.ts";
 import { ensurePmsAdaptersRegistered } from "./register.ts";
+import {
+  type AgentDeployment,
+  deploymentOwnsAction,
+  deploymentsForAgent,
+  organizationHasDeployments,
+  unconfiguredAgentMayUseEveryProvider,
+} from "./deployments.ts";
 
 const PMS_PROVIDER_IDS = PMS_PROVIDERS.map((provider) => provider.id);
 
@@ -62,10 +69,38 @@ const NONE: PmsToolAvailability = {
   mandatoryApproval: new Set(),
 };
 
-export async function pmsToolAvailability(organizationId: string): Promise<PmsToolAvailability> {
+/**
+ * The fourth narrowing, now scoped to where this agent actually works.
+ *
+ * `personaId` is optional only so callers that have no agent in hand (the
+ * settings matrix previewing a workspace) keep working. A real request always
+ * passes one; omitting it skips the deployment narrowing and nothing else.
+ */
+export async function pmsToolAvailability(
+  organizationId: string,
+  personaId?: string,
+): Promise<PmsToolAvailability> {
   ensurePmsAdaptersRegistered();
   try {
-    const providers = await connectedPmsProviders(organizationId);
+    let providers = await connectedPmsProviders(organizationId);
+    if (providers.length === 0) return NONE;
+
+    // Deployments narrow both which providers this agent may target and which
+    // workflows it owns there. A deployment owning "maintenance" in DoorLoop
+    // does not thereby own arrears in DoorLoop, nor maintenance in AppFolio.
+    let deployments: readonly AgentDeployment[] | null = null;
+    if (personaId !== undefined) {
+      const forAgent = await deploymentsForAgent(organizationId, personaId);
+      if (forAgent.length > 0) {
+        deployments = forAgent;
+        const deployed = new Set(forAgent.map((deployment) => deployment.provider));
+        providers = providers.filter((provider) => deployed.has(provider));
+      } else if (!unconfiguredAgentMayUseEveryProvider(await organizationHasDeployments(organizationId))) {
+        // The workspace governs agents by deployment and this one has none.
+        // Not an error and not a refusal — it was left out on purpose.
+        return NONE;
+      }
+    }
     if (providers.length === 0) return NONE;
 
     const matrices = await Promise.all(
@@ -81,6 +116,10 @@ export async function pmsToolAvailability(organizationId: string): Promise<PmsTo
       for (const [provider, matrix] of matrices) {
         const resolution = matrix.get(action);
         if (resolution?.state !== "allow") continue;
+        // Owning the provider is not owning every workflow inside it.
+        if (deployments && !deployments.some((deployment) =>
+          deployment.provider === provider && deploymentOwnsAction(deployment, action)
+        )) continue;
         toolNames.add(toolName);
         const list = providersByTool.get(toolName) ?? [];
         list.push(provider);

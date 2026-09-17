@@ -232,6 +232,13 @@
       "when": 1789671749607,
       "tag": "0032_productive_zuras",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1789678406703,
+      "tag": "0033_silent_kang",
+      "breakpoints": true
     }
   ]
 }

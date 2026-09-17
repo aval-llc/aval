@@ -1524,3 +1524,44 @@ export const pmsWriteQueue = sqliteTable(
     index("pms_write_queue_drain_idx").on(table.organizationId, table.status, table.createdAt),
   ],
 );
+
+/**
+ * Which system an agent works inside (docs/PMS_INTEGRATION_DISCOVERY.md).
+ *
+ * `agent_personas` says what an agent *is* and which tools it may frame; nothing
+ * said which PMS it works in. Without that, `pmsToolAvailability()` had to
+ * resolve across every connected provider and let the model name one as a tool
+ * argument — so an org with two PMSs offered every agent both.
+ *
+ * A join row, not a `provider` column on `agent_personas`, because one persona
+ * should be deployable into several PMSs at different autonomy levels and one
+ * PMS should host several personas. A column forces one-to-one and makes "the
+ * maintenance agent in AppFolio is supervised while the one in DoorLoop is
+ * autonomous" unrepresentable.
+ *
+ * `personaId` carries no foreign key on purpose: it holds either an
+ * `agent_personas.id` or a built-in PersonaId that has no row to point at.
+ */
+export const agentDeployments = sqliteTable(
+  "agent_deployments",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    // An agent_personas.id, or a built-in PersonaId. No FK — see above.
+    personaId: text("persona_id").notNull(),
+    // The PMS this deployment works inside. Matches integration_connections.provider.
+    provider: text("provider").notNull(),
+    // JSON string array of PmsWorkflow this deployment owns here. A deployment
+    // that owns "maintenance" does not thereby own "arrears" in the same system.
+    workflowsJson: text("workflows_json").notNull().default("[]"),
+    autonomyMode: text("autonomy_mode").notNull().default("supervised"), // supervised | assisted | autonomous
+    status: text("status").notNull().default("active"), // active | paused
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("agent_deployments_uq").on(table.organizationId, table.personaId, table.provider),
+    index("agent_deployments_lookup_idx").on(table.organizationId, table.personaId, table.status),
+  ],
+);

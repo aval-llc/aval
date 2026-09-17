@@ -168,7 +168,10 @@ export async function advanceTask(
   // the workspace enabled it, and Aval has built the path. For an AppFolio org
   // `create_work_order` is absent from this list, not refused later — a tool
   // that does not exist cannot be reached by a prompt injection.
-  const pmsAvailability = await pmsToolAvailability(organizationId);
+  // Scoped to this agent's deployments: which PMS it works inside and which
+  // workflows it owns there. A workspace with no deployments configured is
+  // unchanged; one with any is governed by them (lib/pms/deployments.ts).
+  const pmsAvailability = await pmsToolAvailability(organizationId, task.agentId);
   let tools: ToolSchema[] = personaTools(TOOLS, persona, "render_answer")
     .filter((tool) => tool.name === "render_answer" || permitted.has(tool.name))
     .filter((tool) => !isPmsWriteTool(tool.name) || pmsAvailability.toolNames.has(tool.name));
