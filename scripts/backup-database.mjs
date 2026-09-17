@@ -21,7 +21,7 @@ export async function command(program, args, env = process.env) {
     const file = program === 'pg_dump' ? args[fileIndex + 1] : args.at(-1);
     if (!file || !isAbsolute(file) || !dirname(file).startsWith(join(tmpdir(),'aval-'))) throw new Error('Backup container must mount an isolated backup directory');
     const mount = dirname(file);
-    args = ['run','--rm','--network','host','--volume',`${mount}:${mount}`,
+    args = ['run','--rm','--network','host','--user',`${process.getuid()}:${process.getgid()}`,'--volume',`${mount}:${mount}`,
       ...['PGHOST','PGPORT','PGUSER','PGPASSWORD','PGDATABASE','PGSSLMODE'].flatMap(name => ['--env',name]),
       env.AVAL_POSTGRES_CLIENT_IMAGE,program,...args];
     program = 'docker';
