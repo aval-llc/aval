@@ -56,6 +56,11 @@ jobs:
       - run: npm run test:migration
       - run: npm run db:inventory
       - run: git diff --exit-code -- docs/migration/inventory.json docs/migration/production-preflight.sql
+      - name: Install matching PostgreSQL backup client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
       - run: npm run test:postgres
         env:
           AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test

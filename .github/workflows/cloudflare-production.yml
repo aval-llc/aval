@@ -68,29 +68,68 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
-      - run: npm run test:postgres
-        env:
-          AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
-
-      - name: Require approved restore drill
-        env:
-          AVAL_RESTORE_DRILL_VERIFIED: ${{ vars.AVAL_RESTORE_DRILL_VERIFIED }}
-        run: test "$AVAL_RESTORE_DRILL_VERIFIED" = "true"
-
       - name: Install PostgreSQL backup client
         run: |
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
 
-      - name: Encrypt and verify off-site backup before migration
+      - run: npm run test:postgres
+        env:
+          AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
+
+      - name: Encrypt production backup before migration
         env:
           AVAL_BACKUP_PUBLIC_KEY: ${{ secrets.AVAL_BACKUP_PUBLIC_KEY }}
-          AVAL_BACKUP_BUCKET: ${{ vars.AVAL_BACKUP_BUCKET }}
-          AVAL_BACKUP_ENDPOINT: ${{ vars.AVAL_BACKUP_ENDPOINT }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AVAL_BACKUP_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AVAL_BACKUP_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
+          AVAL_BACKUP_DIRECTORY: ${{ runner.temp }}/aval-encrypted-backup
         run: PATH="/usr/lib/postgresql/17/bin:$PATH" node scripts/backup-database.mjs
+
+      # This public repository retains ciphertext only. Data fingerprints and
+      # record counts are encrypted too; the private key stays in production secrets.
+      - name: Retain encrypted backup for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/aval-encrypted-backup/database.enc
+            ${{ runner.temp }}/aval-encrypted-backup/manifest.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Download retained backup for independent restoration
+        uses: actions/download-artifact@v5
+        with:
+          name: production-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/aval-downloaded-backup
+
+      - name: Require backup recovery credentials
+        env:
+          AVAL_BACKUP_PRIVATE_KEY: ${{ secrets.AVAL_BACKUP_PRIVATE_KEY }}
+        run: |
+          test -n "$AVAL_BACKUP_PRIVATE_KEY" || { echo "::error::Missing backup recovery key; migrations must not proceed"; exit 1; }
+
+      - name: Start isolated Supabase recovery database
+        run: |
+          docker run --detach --name aval-recovery --publish 127.0.0.1:5433:5432 \
+            --env POSTGRES_PASSWORD=aval-disposable-recovery-only \
+            supabase/postgres:17.6.1.136
+          for attempt in {1..60}; do
+            if docker exec aval-recovery pg_isready -U postgres; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::Disposable recovery database did not start"; exit 1
+
+      - name: Restore downloaded backup and verify data and isolation before migration
+        env:
+          AVAL_BACKUP_PRIVATE_KEY: ${{ secrets.AVAL_BACKUP_PRIVATE_KEY }}
+          AVAL_RESTORE_DATABASE_URL: postgresql://postgres:aval-disposable-recovery-only@127.0.0.1:5433/aval_restore_production
+          BACKUP_DIRECTORY: ${{ runner.temp }}/aval-downloaded-backup
+        run: PATH="/usr/lib/postgresql/17/bin:$PATH" node scripts/restore-database.mjs "$BACKUP_DIRECTORY/database.enc" "$BACKUP_DIRECTORY/manifest.json"
+
+      - name: Remove disposable recovery container
+        if: always()
+        run: docker rm --force --volumes aval-recovery >/dev/null 2>&1 || true
 
       - name: Apply production Supabase migrations
         run: npm run db:migrate -- --allow-remote
