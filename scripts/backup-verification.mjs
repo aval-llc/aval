@@ -11,7 +11,10 @@ export function restoreUrl(value) {
 export async function databaseInventory(client) {
   await client.query("SET TIME ZONE 'UTC'");
   const { rows: tables } = await client.query(`SELECT n.nspname AS schema, c.relname AS name, c.relrowsecurity AS rls, c.relforcerowsecurity AS force_rls,
-    coalesce(c.relacl::text, '') AS acl FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    (SELECT coalesce(jsonb_agg(jsonb_build_array(coalesce(r.rolname,'PUBLIC'),a.privilege_type,a.is_grantable)
+      ORDER BY coalesce(r.rolname,'PUBLIC'),a.privilege_type,a.is_grantable)::text,'[]')
+      FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a LEFT JOIN pg_roles r ON r.oid=a.grantee) AS acl
+    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
     WHERE c.relkind='r' AND n.nspname IN ('public','aval_private','aval_migrations') ORDER BY 1,2`);
   for (const table of tables) {
     const identifier = `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
@@ -42,7 +45,14 @@ export async function prepareRestoreTarget(value, roles) {
 
 export async function verifyRestoredDatabase(client, expected) {
   const actual = await databaseInventory(client);
-  if (JSON.stringify(actual.tables) !== JSON.stringify(expected.tables)) throw new Error('Restored data counts, fingerprints or table permissions differ');
+  if (JSON.stringify(actual.tables) !== JSON.stringify(expected.tables)) {
+    const differences = expected.tables.flatMap(table => {
+      const restored = actual.tables.find(row => row.schema===table.schema && row.name===table.name);
+      const fields = restored ? Object.keys(table).filter(key => table[key]!==restored[key]) : ['missing'];
+      return fields.length ? [`${table.schema}.${table.name}:${fields.join(',')}`] : [];
+    });
+    throw new Error(`Restored data counts, fingerprints or table permissions differ (${differences.slice(0,12).join(';')}; source tables ${expected.tables.length}, restored ${actual.tables.length})`);
+  }
   if (JSON.stringify(actual.policies) !== JSON.stringify(expected.policies)) throw new Error('Restored workspace access policies differ');
   for (const name of ['aval_app','aval_worker']) {
     const source = expected.roles.find(r => r.rolname === name), target = actual.roles.find(r => r.rolname === name);
