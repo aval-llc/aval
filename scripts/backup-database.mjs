@@ -71,7 +71,7 @@ export async function backupDatabase() {
       await source.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const snapshot = (await source.query('SELECT pg_export_snapshot() AS id')).rows[0].id;
       verification = await databaseInventory(source);
-      await command('pg_dump', ['--format=custom','--no-owner',`--snapshot=${snapshot}`,'--file',dump], postgresEnvironment(process.env.DATABASE_URL));
+      await command('pg_dump', ['--format=custom',`--snapshot=${snapshot}`,'--file',dump], postgresEnvironment(process.env.DATABASE_URL));
       await source.query('COMMIT');
     } finally { await source.end(); }
     const metadata = await encryptBackup(dump, encrypted, process.env.AVAL_BACKUP_PUBLIC_KEY, verification);

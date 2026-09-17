@@ -110,7 +110,13 @@ jobs:
             --env POSTGRES_PASSWORD=aval-disposable-recovery-only \
             supabase/postgres:17.6.1.136
           for attempt in {1..60}; do
-            if docker exec aval-recovery pg_isready -U postgres; then exit 0; fi
+            if docker exec aval-recovery pg_isready -U postgres; then
+              # Supabase's postgres role is not a superuser. Use the image's
+              # local administrator only inside this disposable recovery instance.
+              docker exec aval-recovery psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+                -c "ALTER ROLE supabase_admin WITH LOGIN PASSWORD 'aval-disposable-recovery-only'"
+              exit 0
+            fi
             sleep 2
           done
           echo "::error::Disposable recovery database did not start"; exit 1
@@ -118,7 +124,7 @@ jobs:
       - name: Restore downloaded backup and verify data and isolation before migration
         env:
           AVAL_BACKUP_PRIVATE_KEY: ${{ secrets.AVAL_BACKUP_PRIVATE_KEY }}
-          AVAL_RESTORE_DATABASE_URL: postgresql://postgres:aval-disposable-recovery-only@127.0.0.1:5433/aval_restore_production
+          AVAL_RESTORE_DATABASE_URL: postgresql://supabase_admin:aval-disposable-recovery-only@127.0.0.1:5433/aval_restore_production
           BACKUP_DIRECTORY: ${{ runner.temp }}/aval-downloaded-backup
         run: node scripts/restore-database.mjs "$BACKUP_DIRECTORY/database.enc" "$BACKUP_DIRECTORY/manifest.json"
 

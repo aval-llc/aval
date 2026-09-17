@@ -31,7 +31,7 @@ export async function restoreDatabase(encrypted, manifestPath) {
   try {
     const dump = join(directory,'database.dump');
     await pipeline(createReadStream(encrypted), cipher, createWriteStream(dump, { mode: 0o600 }));
-    await command('pg_restore', ['--exit-on-error','--no-owner', '--dbname', decodeURIComponent(url.pathname.slice(1)), dump], postgresEnvironment(url.href));
+    await command('pg_restore', ['--exit-on-error', '--dbname', decodeURIComponent(url.pathname.slice(1)), dump], postgresEnvironment(url.href));
     const restored = new Client({ connectionString: url.href }); await restored.connect();
     try {
       const result = await verifyRestoredDatabase(restored, verification);
