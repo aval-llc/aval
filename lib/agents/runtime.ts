@@ -36,6 +36,8 @@ import type { AskAvalEnv, ContentBlock, Message, ToolSchema, ToolUseBlock } from
 import { AnthropicError } from "@/lib/ask-aval/anthropic";
 import { callModel } from "@/lib/ask-aval/model-router";
 import { TOOLS, TOOL_SCHEMAS } from "@/lib/ask-aval/tools";
+import { pmsToolAvailability } from "@/lib/pms/assembly.ts";
+import { isPmsWriteTool } from "@/lib/pms/tool-map.ts";
 import { personaTools, resolvePersona } from "@/lib/ask-aval/personas";
 import { checkFaithfulness, withDerivedNumbers, round2 } from "@/lib/ask-aval/faithfulness";
 import { stripDashes } from "@/lib/ask-aval/style";
@@ -160,8 +162,16 @@ export async function advanceTask(
   // ceiling — a persona listing a tool it has no permission for gets it
   // removed here, not granted.
   const permitted = new Set(allowedToolNames(task.agentId, subject));
+  // The third narrowing, and the only one that varies per customer and per
+  // provider: the capability matrix. A PMS write tool is *assembled in* only
+  // when the provider supports and permits the action, the connection grants it,
+  // the workspace enabled it, and Aval has built the path. For an AppFolio org
+  // `create_work_order` is absent from this list, not refused later — a tool
+  // that does not exist cannot be reached by a prompt injection.
+  const pmsAvailability = await pmsToolAvailability(organizationId);
   let tools: ToolSchema[] = personaTools(TOOLS, persona, "render_answer")
-    .filter((tool) => tool.name === "render_answer" || permitted.has(tool.name));
+    .filter((tool) => tool.name === "render_answer" || permitted.has(tool.name))
+    .filter((tool) => !isPmsWriteTool(tool.name) || pmsAvailability.toolNames.has(tool.name));
 
   const contract=JSON.parse(task.checkJson??'{}');
   const support=['render_answer','read_memory','write_memory','read_task_history'];

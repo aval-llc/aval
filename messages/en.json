@@ -1942,5 +1942,59 @@
     "transparencyValue": "{value}% transparent",
     "opaque": "Opaque",
     "moreTransparent": "More transparent"
+  },
+  "PmsMatrix": {
+    "title": "PMS capability matrix",
+    "description": "What each Aval agent can do inside your property management system, and why. Reads are on for every workflow. Writes are decided per action by what your provider supports, what its terms permit, what your PMS role grants, and what this workspace has enabled.",
+    "loading": "Resolving capabilities…",
+    "loadError": "Could not load the capability matrix.",
+    "saveError": "Could not change that authorization.",
+    "noneConnected": "No property management system is connected yet. Connect one to see what Aval can do inside it.",
+    "none": "none",
+    "readsVia": "Reads via {mechanisms}",
+    "writesOnDevice": "Writes run on your machine, in your own signed-in session",
+    "writesInCloud": "Writes run from Aval's servers",
+    "termsVerified": "Provider terms last read {date}",
+    "termsUnverified": "Provider terms not yet confirmed by counsel",
+    "requiresAuthorization": "requires signed authorization",
+    "readOnlyByDesign": "read-only by design",
+    "humanApprovalAlways": "always needs your approval",
+    "checkpointHint": "Fair Housing rules apply to applicant communication. This approval cannot be turned off.",
+    "turnOn": "Turn on",
+    "turnOff": "Turn off",
+    "state": {
+      "allow": "On",
+      "off": "Off",
+      "blocked": "Unavailable",
+      "unlearned": "Not yet supported",
+      "unavailable": "Not available"
+    },
+    "owner": {
+      "aval": "Aval's work",
+      "customer": "Needs a change on your side",
+      "provider": "Set by your provider"
+    },
+    "workflow": {
+      "maintenance": "Maintenance",
+      "arrears": "Rent arrears",
+      "leasing": "Leasing",
+      "reporting": "Reporting"
+    },
+    "action": {
+      "maintenance.work_orders.read": "Read work orders",
+      "maintenance.work_order.create": "Create work orders",
+      "maintenance.work_order.update_status": "Update work order status",
+      "maintenance.work_order.close": "Close work orders",
+      "maintenance.vendor.dispatch": "Dispatch vendors",
+      "arrears.ledger.read": "Read resident ledgers",
+      "arrears.payment_plan.create": "Record payment plans",
+      "arrears.payment.post": "Post payments to a ledger",
+      "leasing.applications.read": "Read applications",
+      "leasing.inquiry.reply": "Reply to leasing inquiries",
+      "leasing.viewing.book": "Book viewings",
+      "leasing.application.send": "Send rental applications",
+      "leasing.lease.update_status": "Update lease status",
+      "reporting.financials.read": "Read financials for reporting"
+    }
   }
 }

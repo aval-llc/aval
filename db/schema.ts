@@ -1389,3 +1389,138 @@ export const agentPlanNodes = sqliteTable("agent_plan_nodes", {
 export const agentModelContexts = sqliteTable("agent_model_contexts", {
  id:text("id").primaryKey(),organizationId:text("organization_id").notNull().references(()=>organizations.id),taskId:text("task_id").notNull().references(()=>agentTasks.id),stepIndex:integer("step_index").notNull(),contextJson:text("context_json").notNull(),digest:text("digest").notNull(),createdAt:integer("created_at",{mode:"timestamp_ms"}).notNull(),
 },t=>[index("agent_model_context_task_idx").on(t.organizationId,t.taskId,t.stepIndex)]);
+
+/**
+ * Per-org authorization for a PMS write action (docs/PMS_INTEGRATION.md, P0/P2).
+ *
+ * Deliberately shaped like `agent_execution_policies` and deliberately NOT like
+ * `communication_settings`. A `signed_authorization` that cannot say who signed
+ * it and when is not an authorization, it is a checkbox — and for the actions
+ * gated here (money in a trust account, a message to a housing applicant) the
+ * identity of the approver is the entire control.
+ *
+ * One row per (org, provider, action). Absence means not enabled: the resolver
+ * reads a missing row as `off`, never as permitted. `status` exists because an
+ * authorization is revocable without being deleted — `suspended` preserves the
+ * audit trail of who had once signed for it.
+ */
+export const pmsWriteAuthorizations = sqliteTable(
+  "pms_write_authorizations",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    // A PmsAction from lib/pms/types.ts. Stored as text because the enum lives
+    // in code, where a test can assert every stored value still resolves.
+    action: text("action").notNull(),
+    status: text("status").notNull().default("draft"), // draft | approved | suspended
+    // True only when a human countersigned the provider's terms override. The
+    // resolver requires this for any action whose descriptor says permitted:false.
+    signedAuthorization: integer("signed_authorization", { mode: "boolean" }).notNull().default(false),
+    // Free text naming the document or counsel sign-off. Not parsed; it exists
+    // so an auditor can find the paper.
+    authorizationReference: text("authorization_reference"),
+    version: integer("version").notNull().default(1),
+    approvedByUserId: text("approved_by_user_id"),
+    approvedAt: integer("approved_at", { mode: "timestamp_ms" }),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_write_auth_uq").on(table.organizationId, table.provider, table.action),
+    index("pms_write_auth_org_idx").on(table.organizationId, table.status),
+  ],
+);
+
+/**
+ * A recorded, replayable path for one (provider, action) — the cache behind the
+ * `unlearned` state.
+ *
+ * The first time an action is needed on a provider whose mechanism is `ui`, the
+ * agent reads the page's semantic tree, works out the path, and proposes it on
+ * an approval card. On approval it executes *and* stores the path here. Every
+ * later run replays this row: no model call, deterministic, and renderable on an
+ * approval card before it runs, which a live vision agent can never be.
+ *
+ * `version` is part of the key rather than a mutable column because a provider
+ * UI redesign does not invalidate history — it creates a new flow. Keeping the
+ * old row lets an audit entry from last month still resolve to the steps that
+ * actually ran.
+ *
+ * `provider` is scoped per-org rather than global on purpose: two AppFolio
+ * tenants can have different field layouts, and a flow learned in one workspace
+ * is not evidence about another. Global promotion is a later decision, and it
+ * needs to be a deliberate one.
+ */
+export const pmsActionFlows = sqliteTable(
+  "pms_action_flows",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    action: text("action").notNull(),
+    version: integer("version").notNull().default(1),
+    // Ordered, declarative steps — selectors and values, no executable code.
+    // Reviewed on an approval card, so it has to be readable by a person.
+    stepsJson: text("steps_json").notNull(),
+    // SHA-256 of stepsJson. An approval binds to this, so a flow edited after
+    // approval fails to replay rather than running something unapproved.
+    digest: text("digest").notNull(),
+    status: text("status").notNull().default("candidate"), // candidate | active | retired
+    learnedByUserId: text("learned_by_user_id"),
+    lastReplayAt: integer("last_replay_at", { mode: "timestamp_ms" }),
+    lastReplayOk: integer("last_replay_ok", { mode: "boolean" }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_action_flow_uq").on(table.organizationId, table.provider, table.action, table.version),
+    index("pms_action_flow_lookup_idx").on(table.organizationId, table.provider, table.action, table.status),
+  ],
+);
+
+/**
+ * Pending PMS writes awaiting the desktop runner.
+ *
+ * No new queue infrastructure: this follows the `integration_events` pattern the
+ * WhatsApp discovery identified as the one that works on D1 — an append-only log
+ * with primary-key dedupe, drained by a poller. The difference is who drains it.
+ * `integration_events` is drained by the one-minute cron; this is drained by the
+ * Electron runner asking for its own org's pending rows, because the whole point
+ * of `runner: 'desktop'` is that the cron cannot do this work.
+ *
+ * `leaseId`-style provider ids are NOT stored here; `payloadJson` holds only what
+ * the approved flow needs, and the approval it binds to is the record of intent.
+ */
+export const pmsWriteQueue = sqliteTable(
+  "pms_write_queue",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    action: text("action").notNull(),
+    // The approval that authorized this write. Null is only valid for actions
+    // whose resolution did not require one; the drainer re-checks either way.
+    approvalId: text("approval_id"),
+    flowId: text("flow_id"),
+    payloadJson: text("payload_json").notNull(),
+    // Caller-supplied idempotency key. Unique per org so a retried enqueue
+    // collides on the index instead of queueing a second write.
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"), // pending | leased | done | failed | abandoned
+    // Set while a runner holds it, so two desktop instances for one org cannot
+    // both execute. Expires, because a laptop closing mid-write is normal.
+    leasedBy: text("leased_by"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_write_queue_idem_uq").on(table.organizationId, table.idempotencyKey),
+    index("pms_write_queue_drain_idx").on(table.organizationId, table.status, table.createdAt),
+  ],
+);

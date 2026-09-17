@@ -7,6 +7,7 @@ import { getProvider } from "@/lib/integrations/catalog";
 import { exchangeSubscriptionCode, isSubscriptionProviderId, parsePastedAuthorization } from "@/lib/integrations/subscription-oauth";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { clientIp, isRateLimited, recordAttempt } from "@/lib/security/rate-limit";
+import { providerIsReadOnly } from "@/lib/pms/derive.ts";
 
 const bindings = () => env as unknown as Record<string, string | undefined>;
 
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
       accessTokenCiphertext,
       refreshTokenCiphertext,
       expiresAt: credential.expiresAt,
-      metadataJson: JSON.stringify({ readOnly: provider.readOnly, webhook: provider.webhook }),
+      metadataJson: JSON.stringify({ readOnly: providerIsReadOnly(provider.id, provider.readOnly), webhook: provider.webhook }),
       createdBy: identity.userId,
       createdAt: now,
       updatedAt: now,

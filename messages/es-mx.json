@@ -1942,5 +1942,59 @@
     "transparencyValue": "{value}% transparente",
     "opaque": "Opaco",
     "moreTransparent": "Más transparente"
+  },
+  "PmsMatrix": {
+    "title": "Matriz de capacidades del PMS",
+    "description": "Qué puede hacer cada agente de Aval dentro de su sistema de administración de propiedades, y por qué. La lectura está activa en todos los flujos. La escritura se decide por acción según lo que su proveedor admite, lo que sus términos permiten, lo que otorga su rol en el PMS y lo que este espacio de trabajo ha habilitado.",
+    "loading": "Resolviendo capacidades…",
+    "loadError": "No se pudo cargar la matriz de capacidades.",
+    "saveError": "No se pudo cambiar esa autorización.",
+    "noneConnected": "Aún no hay ningún sistema de administración de propiedades conectado. Conecte uno para ver qué puede hacer Aval dentro de él.",
+    "none": "ninguno",
+    "readsVia": "Lee mediante {mechanisms}",
+    "writesOnDevice": "Las escrituras se ejecutan en su equipo, en su propia sesión",
+    "writesInCloud": "Las escrituras se ejecutan desde los servidores de Aval",
+    "termsVerified": "Términos del proveedor revisados por última vez el {date}",
+    "termsUnverified": "Los términos del proveedor aún no han sido confirmados por asesoría legal",
+    "requiresAuthorization": "requiere autorización firmada",
+    "readOnlyByDesign": "solo lectura por diseño",
+    "humanApprovalAlways": "siempre requiere su aprobación",
+    "checkpointHint": "Las normas de Fair Housing aplican a la comunicación con solicitantes. Esta aprobación no se puede desactivar.",
+    "turnOn": "Activar",
+    "turnOff": "Desactivar",
+    "state": {
+      "allow": "Activo",
+      "off": "Inactivo",
+      "blocked": "No disponible",
+      "unlearned": "Aún no compatible",
+      "unavailable": "No disponible"
+    },
+    "owner": {
+      "aval": "Trabajo de Aval",
+      "customer": "Requiere un cambio de su parte",
+      "provider": "Definido por su proveedor"
+    },
+    "workflow": {
+      "maintenance": "Mantenimiento",
+      "arrears": "Rentas atrasadas",
+      "leasing": "Arrendamiento",
+      "reporting": "Reportes"
+    },
+    "action": {
+      "maintenance.work_orders.read": "Leer órdenes de trabajo",
+      "maintenance.work_order.create": "Crear órdenes de trabajo",
+      "maintenance.work_order.update_status": "Actualizar el estado de órdenes de trabajo",
+      "maintenance.work_order.close": "Cerrar órdenes de trabajo",
+      "maintenance.vendor.dispatch": "Asignar proveedores de servicio",
+      "arrears.ledger.read": "Leer estados de cuenta de residentes",
+      "arrears.payment_plan.create": "Registrar planes de pago",
+      "arrears.payment.post": "Registrar pagos en un estado de cuenta",
+      "leasing.applications.read": "Leer solicitudes",
+      "leasing.inquiry.reply": "Responder consultas de arrendamiento",
+      "leasing.viewing.book": "Agendar visitas",
+      "leasing.application.send": "Enviar solicitudes de renta",
+      "leasing.lease.update_status": "Actualizar el estado del contrato",
+      "reporting.financials.read": "Leer datos financieros para reportes"
+    }
   }
 }

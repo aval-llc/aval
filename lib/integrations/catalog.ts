@@ -1,4 +1,4 @@
-import { additionalProviders, type AdditionalProviderId } from "./additional-providers";
+import { additionalProviders, type AdditionalProviderId } from "./additional-providers.ts";
 
 export type ProviderId = AdditionalProviderId
   | "quickbooks"
@@ -12,6 +12,7 @@ export type ProviderId = AdditionalProviderId
   | "entrata"
   | "rentmanager"
   | "doorloop"
+  | "generic_email"
   | "whatsapp"
   | "whatsapp_personal"
   | "apple_messages"
@@ -45,7 +46,14 @@ export type IntegrationProvider = {
   credentialFields?: { key: string; label: string; secret?: boolean }[];
   env: string[];
   webhook: boolean;
-  readOnly: boolean;
+  /**
+   * Absent for every PMS provider: `lib/pms/derive.ts` computes it from that
+   * provider's descriptor instead. Kept for accounting, messaging and model
+   * connections, whose write posture the PMS layer does not describe. Read it
+   * through `providerIsReadOnly`, never directly — a literal here on a PMS
+   * provider is the split-brain this field used to be.
+   */
+  readOnly?: boolean;
   note: string;
   /** Explicitly unavailable adapters must never become connected from a saved key. */
   setupBlocker?: string;
@@ -138,7 +146,6 @@ export const integrationCatalog: IntegrationProvider[] = [
     ],
     env: [],
     webhook: false,
-    readOnly: true,
     note: "Availability depends on the AppFolio Stack partnership and the customer's enabled API products.",
   },
   {
@@ -154,7 +161,6 @@ export const integrationCatalog: IntegrationProvider[] = [
     ],
     env: [],
     webhook: false,
-    readOnly: true,
     note: "Server-to-server authentication using Buildium's required client headers.",
   },
   {
@@ -170,7 +176,6 @@ export const integrationCatalog: IntegrationProvider[] = [
     ],
     env: [],
     webhook: false,
-    readOnly: true,
     note: "Requires becoming an approved Yardi Interface Partner and a signed per-interface agreement. No self-serve signup.",
   },
   {
@@ -186,7 +191,6 @@ export const integrationCatalog: IntegrationProvider[] = [
     ],
     env: [],
     webhook: false,
-    readOnly: true,
     note: "Access is granted only through the RealPage Exchange partner program. Sales-led, not self-serve.",
   },
   {
@@ -202,7 +206,6 @@ export const integrationCatalog: IntegrationProvider[] = [
     ],
     env: [],
     webhook: false,
-    readOnly: true,
     note: "Requires a signed API Developer Interface Agreement and IP allowlisting before any credential works.",
   },
   {
@@ -215,7 +218,6 @@ export const integrationCatalog: IntegrationProvider[] = [
     credentialFields: [{ key: "apiKey", label: "Rent Manager API key", secret: true }],
     env: [],
     webhook: false,
-    readOnly: true,
     note: "Requires enrollment in Rent Manager's Integrations Program rather than a public self-serve key.",
   },
   {
@@ -228,8 +230,21 @@ export const integrationCatalog: IntegrationProvider[] = [
     credentialFields: [{ key: "apiKey", label: "DoorLoop API key", secret: true }],
     env: [],
     webhook: false,
-    readOnly: true,
     note: "Public, self-serve API key generated directly in DoorLoop account settings.",
+  },
+  {
+    id: "generic_email",
+    title: "Other PMS (email notifications)",
+    category: "Leasing & PMS",
+    description: "Capture work orders, messages and notices from any PMS that can copy an address on outbound mail.",
+    authMode: "credentials",
+    permissions: ["Inbound notifications"],
+    credentialFields: [{ key: "pmsName", label: "Which system sends these notifications?" }],
+    env: [],
+    webhook: true,
+    note:
+      "The universal fallback: no API and no partnership needed. Inbound only, and unverified mail is stored "
+      + "without being parsed — anyone can send to a seat address claiming to be a PMS.",
   },
   {
     id: "whatsapp",

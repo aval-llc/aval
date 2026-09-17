@@ -8,6 +8,7 @@ import { getApiIdentity } from "@/lib/integrations/session";
 import { authorizationUrl, safeReturnTo } from "@/lib/integrations/oauth";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { ensureOrganization } from "@/lib/integrations/organizations";
+import { providerIsReadOnly } from "@/lib/pms/derive.ts";
 
 const bindings = () => env as unknown as Record<string, string | undefined>;
 
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
     authMode: provider.authMode,
     scopesJson: JSON.stringify(provider.permissions),
     accessTokenCiphertext: encrypted,
-    metadataJson: JSON.stringify({ readOnly: provider.readOnly, webhook: provider.webhook }),
+    metadataJson: JSON.stringify({ readOnly: providerIsReadOnly(provider.id, provider.readOnly), webhook: provider.webhook }),
     createdBy: identity.userId,
     createdAt: now,
     updatedAt: now,

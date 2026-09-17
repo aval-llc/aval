@@ -42,7 +42,17 @@ export type Permission =
   | "vendor.spend.authorize"
   | "lease.execute"
   | "payments.execute"
-  | "permissions.modify";
+  | "permissions.modify"
+  // Writes *into* a customer's PMS. Separate from the permissions above because
+  // those describe an effect in the world (money moved, a lease executed) while
+  // these describe an effect in someone else's system of record. An agent can
+  // legitimately need one without the other, and the blast radius differs: a
+  // wrong work order is an apology, a wrong ledger posting is a regulated event.
+  // Holding one of these is still not sufficient — `lib/pms/capability.ts`
+  // decides whether the tool exists for this org and provider at all.
+  | "pms.maintenance.write"
+  | "pms.arrears.write"
+  | "pms.leasing.write";
 
 /** Agents that exist as permission subjects. Mirrors `PersonaId` in lib/ask-aval/personas.ts; a custom persona resolves to `custom`. */
 export type AgentRole =
@@ -78,15 +88,24 @@ export const AGENT_PERMISSIONS: Record<AgentRole, readonly Permission[]> = {
   // behavioral memory), nothing external.
   general: [...READ_EVERYTHING, "preferences.write", "messaging.send.external", "listing.publish"],
 
-  financial: ["portfolio.read", "accounting.read", "leases.read", "market.read", "preferences.write", "messaging.send.external"],
+  // Arrears is the financial agent's workflow, so it holds the permission —
+  // which grants nothing until an org records a signed authorization, because
+  // the matrix resolves every arrears write to `off` without one.
+  financial: ["portfolio.read", "accounting.read", "leases.read", "market.read", "preferences.write", "messaging.send.external", "pms.arrears.write"],
 
-  brokerage: ["leasing.read", "portfolio.read", "leases.read", "market.read", "preferences.write", "messaging.send.external", "listing.publish"],
+  // Leasing writes are Fair Housing-exposed: every applicant-facing action this
+  // permission reaches carries a mandatory human checkpoint that no setting can
+  // remove (MANDATORY_HUMAN_CHECKPOINT in lib/pms/types.ts).
+  brokerage: ["leasing.read", "portfolio.read", "leases.read", "market.read", "preferences.write", "messaging.send.external", "listing.publish", "pms.leasing.write"],
 
   realEstate: ["portfolio.read", "leasing.read", "leases.read", "preferences.write"],
 
   marketResearch: ["market.read", "portfolio.read", "leasing.read", "preferences.write"],
 
-  maintenance: ["maintenance.read", "portfolio.read", "accounting.read", "preferences.write", "messaging.send.external"],
+  // The only role holding a PMS write permission by default, matching the
+  // workflow defaults in lib/pms/types.ts: maintenance writes on, everything
+  // else off. `vendor.dispatch` is the pre-existing permission for the same act.
+  maintenance: ["maintenance.read", "portfolio.read", "accounting.read", "preferences.write", "messaging.send.external", "vendor.dispatch", "pms.maintenance.write"],
 
   // §17: "The agent with the widest visibility should often have the least
   // mutation authority." Risk Analyst reads across every domain and holds no

@@ -1752,3 +1752,56 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 .agent-plan-nodes li > strong, .agent-plan-nodes li > small { display: block; overflow-wrap: anywhere; }
 .agent-plan-nodes li > span { font-size: 11px; color: var(--quiet); }
 .agent-check-passed { margin-block: 8px; }
+
+/* ── PMS capability matrix ────────────────────────────────────────────────────
+   Five states, and the visual language has to keep them apart. `blocked` and
+   `unavailable` are muted because nobody in this room can change them;
+   `unlearned` is deliberately NOT red — it is Aval's backlog, and dressing our
+   own work up as a policy refusal is the exact confusion this surface exists to
+   prevent. `off` gets a live control because `off` is the only state one click
+   away. */
+.pms-matrix { margin: 18px 0; padding: 20px; border: 1px solid var(--line, #dedee2); border-radius: 18px; background: var(--surface, #fff); }
+.pms-matrix > summary { display:flex; align-items:center; gap:10px; font-weight:600; cursor:pointer; }
+.pms-matrix > p { color:var(--muted, #72727a); font-size:13px; line-height:1.6; max-width:70ch; }
+.pms-matrix-notice { font-size:12px; color:var(--muted, #72727a); }
+.pms-matrix-empty { font-size:13px; color:var(--muted, #72727a); }
+
+.pms-provider { margin-top:20px; padding-top:18px; border-top:1px solid var(--line, #dedee2); }
+.pms-provider > header { display:flex; align-items:flex-start; gap:10px; margin-bottom:14px; }
+.pms-provider > header strong { display:block; font-size:14px; }
+.pms-provider-meta { display:block; font-size:12px; color:var(--muted, #72727a); }
+.pms-provider-terms { display:block; font-size:11px; color:var(--quiet, #9a9aa2); font-style:italic; }
+
+.pms-workflow { margin:14px 0; }
+.pms-workflow h4 { display:flex; align-items:center; gap:8px; margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted, #72727a); }
+.pms-flag { font-style:normal; font-size:10px; padding:2px 7px; border-radius:999px; background:var(--line, #eeeef1); color:var(--muted, #72727a); letter-spacing:0; text-transform:none; }
+.pms-workflow ul { list-style:none; margin:0; padding:0; display:grid; gap:2px; }
+
+.pms-row { display:grid; grid-template-columns:10px minmax(170px,1.1fr) 110px 1fr auto; align-items:baseline; gap:12px; padding:7px 8px; border-radius:9px; font-size:13px; }
+.pms-row:hover { background:var(--line, #f6f6f8); }
+.pms-action-label { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.pms-state-label { font-size:12px; font-weight:600; }
+.pms-reason { font-size:12px; color:var(--muted, #72727a); line-height:1.5; }
+.pms-remediation, .pms-owner { display:block; font-style:normal; font-size:11px; margin-top:2px; }
+.pms-owner { color:var(--quiet, #9a9aa2); }
+.pms-checkpoint { font-style:normal; font-size:10px; padding:2px 7px; border-radius:999px; background:#fdf1d6; color:#8a5a00; white-space:nowrap; }
+
+.pms-dot { width:8px; height:8px; border-radius:50%; align-self:center; background:var(--quiet, #c9c9d0); }
+.pms-dot.allow { background:#2e9e5b; }
+.pms-dot.off { background:#c9c9d0; box-shadow:inset 0 0 0 1.5px #9a9aa2; background:transparent; }
+/* A provider's refusal and our own backlog must never share a colour. */
+.pms-dot.blocked { background:#b4443a; }
+.pms-dot.unlearned { background:#4a7fd0; }
+.pms-dot.unavailable { background:transparent; box-shadow:inset 0 0 0 1.5px #d4d4da; }
+
+.pms-row.state-blocked .pms-state-label, .pms-row.state-unavailable .pms-state-label { color:var(--quiet, #9a9aa2); }
+.pms-row.state-unlearned .pms-state-label { color:#4a7fd0; }
+.pms-row.state-allow .pms-state-label { color:#2e9e5b; }
+
+@media (prefers-color-scheme: dark) {
+  .pms-checkpoint { background:#3a2e10; color:#e8c37a; }
+}
+@media (max-width:820px) {
+  .pms-row { grid-template-columns:10px 1fr; }
+  .pms-state-label, .pms-reason { grid-column:2; }
+}
