@@ -165,6 +165,8 @@ jobs:
           Includes the movable native chat title bar, theme-aware frosted glass,
           and the live 0–100% transparency slider in Settings → Preferences.
           Text and controls remain opaque. Includes a bundled Codex runtime.
+          Fixes interactive ChatGPT answers timing out after Codex completed
+          the answer, by matching the turn lifecycle event's nested ID.
 
           The current hosted DMG is signed with Developer ID, notarized by Apple,
           stapled, Gatekeeper-assessed, and accompanied by SHA256SUMS.
