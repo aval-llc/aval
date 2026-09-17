@@ -177,26 +177,47 @@ async function main() {
   // probes for it and falls back rather than fighting it.
   step(`4. Address scheme`);
   const subdomainZone = `${SUBDOMAIN}.${ZONE_NAME}`;
-  const subZones = await cf(`/zones?name=${encodeURIComponent(subdomainZone)}`);
-  if (!subZones.ok) {
+
+  // Two different Cloudflare features share the word "subdomain", and this
+  // originally probed for the wrong one:
+  //
+  //   * DNS *subdomain setup* — the subdomain as a standalone zone. Enterprise
+  //     only (Free/Pro/Business: No), so on this account it is never true and
+  //     probing for it silently forced the apex-prefix path forever.
+  //   * Email Routing *subdomains* — an ordinary subdomain of the SAME zone,
+  //     enabled under Email Routing → Settings → Subdomains. Available on every
+  //     plan, up to 30 domains per zone, and it is what we actually need: it
+  //     gives `{orgSlug}@agents.aval.llc` a name of its own to carry the
+  //     receive-only assertion, while the apex keeps its real sending records.
+  //
+  // Enabling it is a dashboard action (and needs the Email Routing settings
+  // scope this token lacks), so this detects rather than creates it — by the
+  // MX records Cloudflare publishes on the subdomain when it is enabled, which
+  // the DNS scope can read.
+  const subMx = await cf(`/zones/${zone.id}/dns_records?type=MX&name=${encodeURIComponent(subdomainZone)}`);
+  if (!subMx.ok) {
     stop(
-      `Could not determine whether ${subdomainZone} is its own zone (HTTP ${subZones.status}).\n`
+      `Could not determine whether Email Routing is enabled on ${subdomainZone} (HTTP ${subMx.status}).\n`
         + "     This choice fixes the address format for every customer, so it is not defaulted from a failed read.",
     );
     return;
   }
-  const subdomainSupported = (subZones.body.result ?? []).length > 0;
+  const subdomainSupported = (subMx.body.result ?? []).some((r) =>
+    /\.mx\.cloudflare\.net\.?$/i.test(r.content ?? "")
+  );
 
   const path = subdomainSupported ? "subdomain" : "apex-prefix";
   const addressFormat = subdomainSupported ? `{orgSlug}@${subdomainZone}` : `agent-{orgSlug}@${ZONE_NAME}`;
 
   if (subdomainSupported) {
-    ok(`${subdomainZone} exists as its own zone — configuring Email Routing there.`);
+    ok(`Email Routing is enabled on ${subdomainZone} — seats get their own name.`);
   } else {
     info(
-      `${subdomainZone} is not a separate zone, so Email Routing would run on the apex with a reserved prefix.\n`
-        + "     Delivery is equivalent, but the two paths are NOT interchangeable: only a separate zone can\n"
-        + "     carry the receive-only SPF/DMARC assertion in step 6. See there.",
+      `Email Routing is not enabled on ${subdomainZone}, so seats would sit on the apex with a reserved prefix.\n`
+        + "     Delivery is equivalent, but the two paths are NOT interchangeable: only a subdomain can carry\n"
+        + "     the receive-only SPF/DMARC assertion in step 6. See there.\n"
+        + `     Enable it: Cloudflare dashboard → ${ZONE_NAME} → Compute → Email Service → Email Routing →\n`
+        + `     Settings → Subdomains → add "${SUBDOMAIN}".`,
     );
   }
   info(`Address format: ${addressFormat}`);
@@ -209,7 +230,21 @@ async function main() {
     matchers: [{ type: "all" }],
     actions: [{ type: "worker", value: [WORKER_NAME] }],
   };
-  if (!APPLY) {
+  // The catch_all endpoint is the APEX's catch-all. On the subdomain path that
+  // is the wrong target and an actively harmful one: it would route every
+  // unmatched `@aval.llc` message into the PMS seat Worker, which has nothing to
+  // do with the seats and would quietly swallow ordinary company mail. Routing
+  // rules are per domain (up to 30 per zone), so the subdomain needs its own
+  // rule — and confirming that endpoint needs the Email Routing settings scope
+  // this token does not have. Stop rather than PUT the apex by default.
+  if (path === "subdomain") {
+    stop(
+      `Refusing to set the apex catch-all while seats live at ${subdomainZone}.\n`
+        + `     It would route every unmatched ${ZONE_NAME} message into "${WORKER_NAME}".\n`
+        + `     Point ${subdomainZone}'s own catch-all at the Worker instead: dashboard → Email Routing →\n`
+        + `     select ${subdomainZone} → Routing Rules → Catch-all → Send to a Worker.`,
+    );
+  } else if (!APPLY) {
     info(`Would PUT /zones/${zone.id}/email/routing/rules/catch_all → worker "${WORKER_NAME}" (dry run).`);
   } else {
     const catchAll = await cf(`/zones/${zone.id}/email/routing/rules/catch_all`, {
@@ -249,8 +284,9 @@ async function main() {
     stop(
       `Cannot assert receive-only for ${addressFormat}.\n`
         + `     SPF/DMARC apply per domain, not per local-part, and ${ZONE_NAME} sends real mail.\n`
-        + `     Delegate ${subdomainZone} as its own Cloudflare zone and re-run to get the assertion,\n`
-        + "     or accept that seat addresses carry no anti-spoofing record and record that decision.",
+        + `     Enable Email Routing on ${subdomainZone} (dashboard → Email Routing → Settings →\n`
+        + `     Subdomains → add "${SUBDOMAIN}") and re-run to get the assertion, or accept that seat\n`
+        + "     addresses carry no anti-spoofing record and record that decision.",
     );
   }
 
@@ -285,7 +321,9 @@ async function main() {
   console.log(`\n${"─".repeat(60)}`);
   console.log(`Path taken:     ${path}`);
   console.log(`Address format: ${addressFormat}`);
-  console.log(`Worker route:   catch_all on ${ZONE_NAME} → ${WORKER_NAME}`);
+  console.log(
+    `Worker route:   ${path === "subdomain" ? `catch_all on ${subdomainZone} (set by hand)` : `catch_all on ${ZONE_NAME}`} → ${WORKER_NAME}`,
+  );
   console.log(`Mode:           ${APPLY ? "APPLIED" : "DRY RUN — re-run with --apply"}`);
   console.log(
     "\nNext: send a test message to an address in that format and confirm it lands in R2\n"
