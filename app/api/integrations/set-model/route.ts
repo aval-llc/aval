@@ -7,6 +7,7 @@ import { decryptSecret, encryptSecret } from "@/lib/integrations/crypto";
 import { REASONING_EFFORT_LEVELS, isModelProviderId } from "@/lib/integrations/model-providers";
 import { isSubscriptionProviderId } from "@/lib/integrations/subscription-oauth";
 import { getApiIdentity } from "@/lib/integrations/session";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
 
 const bindings = () => env as unknown as Record<string, string | undefined>;
 
@@ -23,8 +24,10 @@ const bindings = () => env as unknown as Record<string, string | undefined>;
 async function POSTWithSession(dbSession: DbSession, request: Request) {
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
+  if (identity.role !== "owner") return Response.json({ error: "Only the owner can configure model connections" }, { status: 403 });
   const body = await request.json().catch(() => ({})) as { provider?: string; model?: string; reasoningEffort?: string };
   if (!body.provider || !isModelProviderId(body.provider)) return Response.json({ error: "Unknown provider" }, { status: 400 });
+  if (isSubscriptionProviderId(body.provider) && !PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
   const model = (body.model ?? "").trim();
   // Validated against the fixed set rather than stored as free text, so a
   // malformed value can't reach the provider and 400 the whole request.

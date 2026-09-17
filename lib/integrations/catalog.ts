@@ -149,6 +149,7 @@ export const integrationCatalog: IntegrationProvider[] = [
     credentialFields: [
       { key: "clientId", label: "Buildium client ID" },
       { key: "clientSecret", label: "Buildium client secret", secret: true },
+      { key: "environment", label: "Environment: sandbox or production" },
     ],
     env: [],
     webhook: false,

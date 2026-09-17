@@ -752,7 +752,8 @@ export function IntelligenceSettings() {
 
   if (!providers) return null;
   const modelProviders = providers.filter((provider) => provider.category === "Model" && !provider.subscriptionOf);
-  const twinByProvider = new Map(providers.filter((provider) => provider.subscriptionOf).map((provider) => [provider.subscriptionOf as string, provider]));
+  // Hosted pilot supports API keys only. The local desktop bridge is separate.
+  const twinByProvider = new Map<string, Provider>();
   const filtered = modelProviders.filter((provider) => provider.title.toLowerCase().includes(search.trim().toLowerCase()));
   const activeEntry = providers.find((provider) => provider.id === activeProvider);
   const desktopInUse = desktop.state?.active === true && desktop.state.account?.type === "chatgpt";
@@ -761,13 +762,14 @@ export function IntelligenceSettings() {
     <article className="settings-card intelligence-card" data-reveal>
       <p className="eyebrow">{t("IntelligenceSettings.eyebrow")}</p>
       <h2>{t("IntelligenceSettings.title")}</h2>
+      <p className="settings-muted">The hosted pilot uses your workspace API key. Existing subscription connections must be replaced; Aval will not silently switch providers.</p>
 
       {desktopInUse && desktop.state ? (
         <DesktopModelBeingUsedRow state={desktop.state} onModel={desktop.setModel} />
       ) : (
         <ModelBeingUsedRow
           key={activeProvider ?? "none"}
-          providers={providers}
+          providers={modelProviders}
           activeProvider={activeProvider}
           activeEntry={activeEntry}
           onSwitchProvider={(id) => void setActive(id)}

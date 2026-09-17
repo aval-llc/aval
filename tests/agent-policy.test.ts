@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { evaluate, allowedToolNames, MAX_DELEGATION_DEPTH } from "../lib/agents/policy.ts";
-import { AGENT_PERMISSIONS, roleForPersona } from "../lib/agents/permissions.ts";
+import { AGENT_PERMISSIONS, roleForPersona, hasPermission } from "../lib/agents/permissions.ts";
 import { TOOL_REGISTRY, implementedTools } from "../lib/agents/registry.ts";
 import { PERSONAS, type PersonaId } from "../lib/ask-aval/personas.ts";
 
@@ -104,6 +104,11 @@ test("every tool a persona can be offered is registered", () => {
 test("the general agent can reach every implemented tool, and the risk analyst can only write task coordination state", () => {
   const general = new Set(allowedToolNames("general", { isGuest: false }));
   for (const tool of implementedTools()) {
+    if (tool.name === "create_maintenance_work_order") {
+      assert.equal(hasPermission("general", tool.requiredPermission), false);
+      assert.equal(hasPermission("maintenance", tool.requiredPermission), true);
+      continue;
+    }
     assert.ok(general.has(tool.name), `general agent cannot reach "${tool.name}"`);
   }
   // §17: the widest reader holds the least mutation authority.

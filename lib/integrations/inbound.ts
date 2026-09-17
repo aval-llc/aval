@@ -26,6 +26,22 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 }
 
+/** Split at the message boundary, retaining the verified destination metadata. */
+export function splitWhatsappPayload(payload: Record<string, unknown>): Record<string, unknown>[] {
+  const result: Record<string, unknown>[] = [];
+  for (const entry of Array.isArray(payload.entry) ? payload.entry : []) {
+    for (const change of Array.isArray(asRecord(entry)?.changes) ? asRecord(entry)!.changes as unknown[] : []) {
+      const value = asRecord(asRecord(change)?.value);
+      for (const message of Array.isArray(value?.messages) ? value.messages : []) {
+        const sender = asRecord(message)?.from;
+        const contacts = Array.isArray(value?.contacts) ? value.contacts.filter(c => asRecord(c)?.wa_id === sender) : [];
+        result.push({ ...payload, entry: [{ ...asRecord(entry), changes: [{ ...asRecord(change), value: { ...value, contacts, messages: [message] } }] }] });
+      }
+    }
+  }
+  return result;
+}
+
 function parseTelegram(payload: Record<string, unknown>, connectionId: string | null): InboundMessage | null {
   if (!connectionId) return null;
   const message = asRecord(payload.message);

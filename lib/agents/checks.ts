@@ -1,6 +1,6 @@
-import { and, eq, sql, asc } from 'drizzle-orm';
+import { and, eq, sql, asc, desc } from 'drizzle-orm';
 import type { DbSession } from "@/db/postgres/session";
-import { agentChecks, communicationDeliveries, learnedPreferences, agentPlanNodes, agentTasks, conversations, integrationConnections } from "@/db/postgres/schema";
+import { agentChecks, communicationDeliveries, learnedPreferences, agentPlanNodes, agentTasks, conversations, integrationConnections, messages as storedMessages } from "@/db/postgres/schema";
 import { implementedTools } from './registry';
 import type { TaskRecord } from './tasks';
 import type { Message } from '@/lib/ask-aval/model-types';
@@ -92,7 +92,14 @@ export async function checkTask(dbSession: DbSession, task: TaskRecord, messages
         const deliveryRows = await dbSession.db.select({ delivery: communicationDeliveries, provider: integrationConnections.provider }).from(communicationDeliveries).innerJoin(integrationConnections, and(eq(integrationConnections.id, communicationDeliveries.connectionId), eq(integrationConnections.organizationId, task.organizationId))).where(and(eq(communicationDeliveries.organizationId, task.organizationId), sql `substr(${communicationDeliveries.requestKey},1,${task.id.length + 1}) = ${task.id + ":"}`, eq(communicationDeliveries.kind, check.operation)));
         const thread = check.conversationId ? (await dbSession.db.select().from(conversations).where(and(eq(conversations.organizationId, task.organizationId), eq(conversations.id, check.conversationId))).limit(1))[0] : undefined;
         const rows = deliveryRows.map(row => ({ ...row.delivery, provider: row.provider }));
-        const destination = thread?.channel === 'whatsapp' && !thread.externalThreadId.startsWith('+') ? '+' + thread.externalThreadId : thread?.externalThreadId;
+        let destination = thread?.channel === 'whatsapp' && !thread.externalThreadId.startsWith('+') ? '+' + thread.externalThreadId : thread?.externalThreadId;
+        if (thread?.channel === 'gmail') {
+            const scope = JSON.parse(task.executionScopeJson);
+            const [original] = await dbSession.db.select({ payloadJson: storedMessages.payloadJson }).from(storedMessages)
+                .where(and(eq(storedMessages.conversationId, thread.id), eq(storedMessages.direction, 'inbound'), scope.messageId ? eq(storedMessages.externalMessageId, scope.messageId) : undefined))
+                .orderBy(desc(storedMessages.createdAt), desc(storedMessages.id)).limit(1);
+            destination = original ? JSON.parse(original.payloadJson).sender : undefined;
+        }
         if (!rows.some(r => statuses.includes(r.status) && (!check.conversationId || (thread && r.destination === destination && (check.operation !== 'message' || r.provider === thread.channel)))))
             problems.push(`No ${check.operation} operation for this task has provider-confirmed ${check.status} status. Do not claim it happened or repeat an unknown send.`);
     }

@@ -66,9 +66,9 @@
     "pg": "^8.23.0",
     "pizzip": "^3.2.0",
     "pptxgenjs": "^4.0.1",
-    "react": "19.2.6",
+    "react": "19.2.8",
     "react-day-picker": "^10.0.1",
-    "react-dom": "19.2.6",
+    "react-dom": "19.2.8",
     "simple-icons": "^16.28.0",
     "tailwind-merge": "^3.6.0"
   },
@@ -92,14 +92,17 @@
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "16.4.0",
-    "react-server-dom-webpack": "19.2.6",
+    "react-server-dom-webpack": "19.2.8",
     "supabase": "^2.117.0",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "typescript-eslint": "8.59.3",
     "vinext": "1.0.0-beta.2",
-    "vite": "8.0.13",
+    "vite": "8.0.16",
     "wrangler": "4.92.0"
   },
-  "type": "module"
+  "type": "module",
+  "overrides": {
+    "vinext": { "image-size": "2.0.3" }
+  }
 }

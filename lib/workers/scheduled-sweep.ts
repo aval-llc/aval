@@ -7,6 +7,7 @@ import type { IntegrationEnv } from "@/lib/integrations/oauth";
 import { runImportWorker } from "@/lib/integrations/sync-worker";
 import type { AvalRuntimeBindings } from "@/lib/runtime/bindings";
 import { runIsolatedJobs } from "./isolated-jobs";
+import { retryPendingInbound } from "@/lib/communications/intake";
 
 type ScheduledBindings = AvalRuntimeBindings & AgentWorkerEnv;
 
@@ -40,6 +41,7 @@ export async function runScheduledSweep(bindings: ScheduledBindings): Promise<vo
         (session) => runAgentWorkerBatch(session, bindings, "scheduled"),
         bindings,
       ) },
+      { name: "inbound-pending", run: () => withWorkerOrganizationSession(organizationId, session => retryPendingInbound(session, organizationId), bindings) },
     ]);
   }
 }

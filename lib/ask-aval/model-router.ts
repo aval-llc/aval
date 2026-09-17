@@ -10,6 +10,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
+import { API_KEY_REQUIRED, PILOT_POLICY } from "@/lib/pilot-policy";
 import type { DbSession } from "@/db/postgres/session";
 import { integrationConnections, organizations } from "@/db/postgres/schema";
 import { decryptSecret, encryptSecret } from "@/lib/integrations/crypto";
@@ -75,6 +76,7 @@ async function resolveOverride(dbSession: DbSession, env: AskAvalEnv, orgId: str
   }
 
   if (connection.authMode === "oauth_subscription_paste" && isSubscriptionProviderId(org.activeModelProvider)) {
+    if (!PILOT_POLICY.subscriptionOAuth) throw new ModelConfigurationError(API_KEY_REQUIRED);
     const providerId = org.activeModelProvider;
     const metadata = (() => { try { return JSON.parse(connection.metadataJson || "{}") as { model?: string; reasoningEffort?: string }; } catch { return {}; } })();
     const model = metadata.model;

@@ -80,7 +80,7 @@ test("the implemented mutation inventory is explicit", () => {
   // A drifting version of this test is the early warning that a mutating tool
   // shipped without an approval posture being chosen for it.
   const mutating = implementedTools().filter((tool) => tool.mutates).map((tool) => tool.name);
-  assert.deepEqual(mutating, ["plan_goal", "write_memory", "record_preference", "send_external_message", "place_call", "publish_listing"]);
+  assert.deepEqual(mutating, ["plan_goal", "write_memory", "record_preference", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"]);
 });
 
 test("every tool declares a positive timeout and a non-negative retry budget", () => {

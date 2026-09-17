@@ -131,7 +131,7 @@ export async function upsertPropertyFromSource(dbSession: DbSession, organizatio
       .where(and(eq(properties.organizationId, organizationId), eq(properties.id, existing.id)));
   }
   await recordConflicts(dbSession, organizationId, "property", existing.id, plan.conflicts);
-  return { property: { ...existing, ...plan.updates }, created: false, conflicts: plan.conflicts.length };
+  return { property: { ...existing, ...plan.updates }, created: false, updated: Object.keys(plan.updates).length > 0, conflicts: plan.conflicts.length };
 }
 
 async function findPropertyMatch(dbSession: DbSession, organizationId: string, name: string, source: SourceRef) {
@@ -297,7 +297,7 @@ export async function upsertUnitFromSource(dbSession: DbSession, organizationId:
       .where(and(eq(units.organizationId, organizationId), eq(units.id, existing.id)));
   }
   await recordConflicts(dbSession, organizationId, "unit", existing.id, plan.conflicts);
-  return { unit: { ...existing, ...plan.updates }, created: false, conflicts: plan.conflicts.length };
+  return { unit: { ...existing, ...plan.updates }, created: false, updated: Object.keys(plan.updates).length > 0, conflicts: plan.conflicts.length };
 }
 
 /* ── read models ────────────────────────────────────────────────────────── */

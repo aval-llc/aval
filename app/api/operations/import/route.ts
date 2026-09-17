@@ -38,18 +38,25 @@ const MAX_ROWS_PER_BATCH = 2000;
 async function POSTWithSession(dbSession: DbSession, request: Request) {
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
+  if (identity.role !== "owner") return Response.json({ error: "Only the workspace owner can import records" }, { status: 403 });
   await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
+    if (["sourceProvider", "sourceConnectionId", "syncRunId"].some((key) => Object.hasOwn(body, key))) {
+      return Response.json({ error: "Import provenance and sync runs are assigned by the server" }, { status: 400 });
+    }
     const batch = (body.batch ?? {}) as ImportBatch;
+    const reserved = ["sourceProvider", "sourceConnectionId", "syncRunId", "source_provider", "source_connection_id", "sync_run_id"];
+    if (Object.values(batch).some(rows => Array.isArray(rows) && rows.some(row => row && typeof row === "object" && reserved.some(key => Object.hasOwn(row, key))))) {
+      return Response.json({ error: "Row provenance is assigned by the server" }, { status: 400 });
+    }
     const dryRun = body.dryRun === true;
 
     // The provider this data came from, which becomes every row's provenance.
     // Defaults to "manual" — a spreadsheet a person exported is exactly that,
     // and labelling it with a connector's name would misattribute it.
-    const sourceProvider =
-      typeof body.sourceProvider === "string" && body.sourceProvider.trim() ? body.sourceProvider.trim().slice(0, 60) : MANUAL_SOURCE;
+    const sourceProvider = MANUAL_SOURCE;
 
     const plan = planImport(batch);
     const total = plannedRowCount(plan) + plan.skipped.length;
@@ -79,7 +86,6 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
       identity.organizationId,
       batch,
       { sourceProvider, sourceConnectionId: null, externalId: null },
-      typeof body.syncRunId === "string" ? body.syncRunId : undefined,
     );
     return Response.json({ result }, { status: 201 });
   } catch (error) {

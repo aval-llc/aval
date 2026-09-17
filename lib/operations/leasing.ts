@@ -177,7 +177,8 @@ export async function attachResidentToLease(dbSession: DbSession,
   organizationId: string,
   leaseId: string,
   residentId: string,
-  role: LeaseResidentRole = "primary"
+  role: LeaseResidentRole = "primary",
+  source?: SourceRef
 ) {
   const [lease] = await dbSession.db
     .select({ id: leases.id })
@@ -193,7 +194,7 @@ export async function attachResidentToLease(dbSession: DbSession,
     .limit(1);
   if (!resident) throw new EntityNotFoundError("Resident", residentId);
 
-  const row = { id: crypto.randomUUID(), organizationId, leaseId, residentId, role, createdAt: new Date() };
+  const row = { id: crypto.randomUUID(), organizationId, leaseId, residentId, role, sourceProvider: source?.sourceProvider ?? null, sourceConnectionId: source?.sourceConnectionId ?? null, createdAt: new Date() };
   await dbSession.db.insert(leaseResidents).values(row).onConflictDoNothing();
   return row;
 }

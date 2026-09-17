@@ -44,7 +44,7 @@ export {
 
 export interface NewTask {
   id?: string;
-  executionScope?: { source: "inbound"; conversationId: string };
+  executionScope?: { source: "inbound"; conversationId: string; messageId?: string; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } };
   organizationId: string;
   userId: string;
   agentId: string;

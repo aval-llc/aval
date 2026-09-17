@@ -61,11 +61,18 @@ export async function deliver(dbSession: DbSession, org: string, input: Outbound
     throw new Error('Delivery was not confirmed. Review the delivery record before retrying; the operation will not be sent twice automatically.');
   }
 }
-export async function replyToConversation(dbSession: DbSession, org: string, conversationId: string, body: string, key: string) {
+export async function replyToConversation(dbSession: DbSession, org: string, conversationId: string, body: string, key: string, messageId?: string) {
   const db = dbSession.db;
   const [thread] = await db.select().from(conversations).where(and(eq(conversations.organizationId, org), eq(conversations.id, conversationId))).limit(1);
   if (!thread) throw new Error('Conversation not found.');
-  const result = await deliver(dbSession, org, { provider: thread.channel, to: thread.channel === 'whatsapp' && !thread.externalThreadId.startsWith('+') ? '+'+thread.externalThreadId : thread.externalThreadId, body }, key);
+  let input: OutboundMessage = { provider: thread.channel, to: thread.channel === 'whatsapp' && !thread.externalThreadId.startsWith('+') ? '+'+thread.externalThreadId : thread.externalThreadId, body };
+  if (thread.channel === 'gmail') {
+    const [original] = await db.select().from(messages).where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound'), messageId ? eq(messages.externalMessageId, messageId) : undefined)).orderBy(desc(messages.createdAt), desc(messages.id)).limit(1);
+    const metadata = original ? JSON.parse(original.payloadJson) : {};
+    if (!metadata.sender || !metadata.threadId || !metadata.rfcMessageId) throw new Error('This Gmail message needs a verified sender and reply headers before replying');
+    input = { provider: 'gmail', to: metadata.sender, body, subject: String(metadata.subject ?? ''), threadId: metadata.threadId, inReplyTo: metadata.rfcMessageId };
+  }
+  const result = await deliver(dbSession, org, input, key);
   if (['accepted', 'sent', 'delivered'].includes(result.status)) {
     const now = new Date();
     await db.insert(messages).values({ id: crypto.randomUUID(), conversationId, externalMessageId: result.operationId, direction: 'outbound', body, payloadJson: JSON.stringify(result), createdAt: now }).onConflictDoNothing();

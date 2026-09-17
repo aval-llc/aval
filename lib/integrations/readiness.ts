@@ -22,5 +22,5 @@ export function connectionBlocker(provider: string): string | null {
 export function integrationReadiness(provider: string) {
   const configured = getProvider(provider);
   const blocker = connectionBlocker(provider);
-  return { status: !configured || blocker ? "unavailable" : "credentials_required", blocker, verification: Boolean(configured && !blocker), sync: provider === "quickbooks", model: Boolean(configured && MODEL_PROVIDER_IDS.has(configured.id)), liveValidated: false };
+  return { status: !configured || blocker ? "unavailable" : "credentials_required", blocker, verification: Boolean(configured && !blocker), sync: provider === "quickbooks" || provider === "buildium", model: Boolean(configured && MODEL_PROVIDER_IDS.has(configured.id)), liveValidated: false };
 }
