@@ -14,8 +14,8 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections } from "@/db/postgres/schema";
 import { decryptSecret } from "@/lib/integrations/crypto.ts";
 import { providerJson, record, requiredString, safeSegment } from "@/lib/integrations/http.ts";
 import { registerWriteAdapter, type WriteAdapter } from "../flows.ts";
@@ -24,9 +24,8 @@ import type { PmsAction } from "../types.ts";
 
 const BASE = "https://app.doorloop.com/api";
 
-async function apiKey(organizationId: string): Promise<string> {
-  const db = getDb();
-  const [connection] = await db
+async function apiKey(dbSession: DbSession, organizationId: string): Promise<string> {
+  const [connection] = await dbSession.db
     .select({ ciphertext: integrationConnections.accessTokenCiphertext })
     .from(integrationConnections)
     .where(
@@ -65,8 +64,8 @@ function headers(key: string): HeadersInit {
  * Over-claiming here costs one clear error; under-claiming would hide a
  * capability the customer paid for.
  */
-const probe: GrantProbe = async (organizationId) => {
-  const key = await apiKey(organizationId);
+const probe: GrantProbe = async (dbSession, organizationId) => {
+  const key = await apiKey(dbSession, organizationId);
   const available: PmsAction[] = [];
 
   const checks: ReadonlyArray<{ path: string; actions: readonly PmsAction[] }> = [
@@ -121,8 +120,8 @@ async function put(key: string, path: string, body: unknown): Promise<Record<str
   return record(await providerJson(`${BASE}${path}`, { method: "PUT", headers: headers(key), body: JSON.stringify(body) }));
 }
 
-const createWorkOrder: WriteAdapter = async (input: AdapterInput) => {
-  const key = await apiKey(input.organizationId);
+const createWorkOrder: WriteAdapter = async (dbSession, input: AdapterInput) => {
+  const key = await apiKey(dbSession, input.organizationId);
   const payload = payloadRecord(input.payload);
   try {
     const created = await post(key, "/work-orders", {
@@ -138,8 +137,8 @@ const createWorkOrder: WriteAdapter = async (input: AdapterInput) => {
   }
 };
 
-const updateWorkOrderStatus: WriteAdapter = async (input: AdapterInput) => {
-  const key = await apiKey(input.organizationId);
+const updateWorkOrderStatus: WriteAdapter = async (dbSession, input: AdapterInput) => {
+  const key = await apiKey(dbSession, input.organizationId);
   const payload = payloadRecord(input.payload);
   const id = safeSegment(requiredString(payload.workOrderId, "work order id"));
   try {
@@ -150,8 +149,8 @@ const updateWorkOrderStatus: WriteAdapter = async (input: AdapterInput) => {
   }
 };
 
-const closeWorkOrder: WriteAdapter = async (input: AdapterInput) => {
-  const key = await apiKey(input.organizationId);
+const closeWorkOrder: WriteAdapter = async (dbSession, input: AdapterInput) => {
+  const key = await apiKey(dbSession, input.organizationId);
   const payload = payloadRecord(input.payload);
   const id = safeSegment(requiredString(payload.workOrderId, "work order id"));
   try {
@@ -165,8 +164,8 @@ const closeWorkOrder: WriteAdapter = async (input: AdapterInput) => {
   }
 };
 
-const dispatchVendor: WriteAdapter = async (input: AdapterInput) => {
-  const key = await apiKey(input.organizationId);
+const dispatchVendor: WriteAdapter = async (dbSession, input: AdapterInput) => {
+  const key = await apiKey(dbSession, input.organizationId);
   const payload = payloadRecord(input.payload);
   const id = safeSegment(requiredString(payload.workOrderId, "work order id"));
   try {

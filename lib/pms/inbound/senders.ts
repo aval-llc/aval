@@ -17,8 +17,8 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { pmsSeatSenders } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { pmsSeatSenders } from "@/db/postgres/schema";
 import { isPmsProvider } from "../providers/index.ts";
 import {
   authenticatedDomain,
@@ -45,8 +45,8 @@ export type AllowResult =
   | { ok: false; reason: string };
 
 /** Every sender this workspace allows, current first by recency of the grant. */
-export async function readSeatAllowlist(organizationId: string): Promise<SeatSender[]> {
-  const rows = await getDb()
+export async function readSeatAllowlist(dbSession: DbSession, organizationId: string): Promise<SeatSender[]> {
+  const rows = await dbSession.db
     .select()
     .from(pmsSeatSenders)
     .where(eq(pmsSeatSenders.organizationId, organizationId));
@@ -69,8 +69,8 @@ export async function readSeatAllowlist(organizationId: string): Promise<SeatSen
  * substitutes a default: the descriptors' `senderDomains` are suggestions for a
  * setup screen and are never read on the verification path.
  */
-export async function allowlistedSenderDomains(organizationId: string): Promise<string[]> {
-  return (await readSeatAllowlist(organizationId)).map((sender) => sender.domain);
+export async function allowlistedSenderDomains(dbSession: DbSession, organizationId: string): Promise<string[]> {
+  return (await readSeatAllowlist(dbSession, organizationId)).map((sender) => sender.domain);
 }
 
 /**
@@ -82,6 +82,7 @@ export async function allowlistedSenderDomains(organizationId: string): Promise<
  * concrete to confirm rather than a silent overwrite.
  */
 export async function allowSender(
+  dbSession: DbSession,
   organizationId: string,
   domain: string,
   providerId: string,
@@ -98,8 +99,7 @@ export async function allowSender(
   const rejection = senderDomainRejection(normalized, providerId);
   if (rejection) return { ok: false, reason: describeSenderDomainRejection(rejection) };
 
-  const db = getDb();
-  const [existing] = await db
+  const [existing] = await dbSession.db
     .select({ providerId: pmsSeatSenders.providerId })
     .from(pmsSeatSenders)
     .where(and(eq(pmsSeatSenders.organizationId, organizationId), eq(pmsSeatSenders.domain, normalized)))
@@ -110,14 +110,14 @@ export async function allowSender(
 
   if (existing) {
     if (existing.providerId === providerId) return { ok: true, sender, replacedProviderId: null };
-    await db
+    await dbSession.db
       .update(pmsSeatSenders)
       .set({ providerId, addedBy: userId, addedAt })
       .where(and(eq(pmsSeatSenders.organizationId, organizationId), eq(pmsSeatSenders.domain, normalized)));
     return { ok: true, sender, replacedProviderId: existing.providerId };
   }
 
-  await db.insert(pmsSeatSenders).values({
+  await dbSession.db.insert(pmsSeatSenders).values({
     organizationId,
     domain: normalized,
     providerId,
@@ -135,9 +135,9 @@ export async function allowSender(
  * is deleted rather than flagged: a revocation that leaves a disabled row is a
  * revocation that a later code path can misread as consent.
  */
-export async function revokeSender(organizationId: string, domain: string): Promise<boolean> {
+export async function revokeSender(dbSession: DbSession, organizationId: string, domain: string): Promise<boolean> {
   const normalized = normalizeSenderDomain(domain);
-  const deleted = await getDb()
+  const deleted = await dbSession.db
     .delete(pmsSeatSenders)
     .where(and(eq(pmsSeatSenders.organizationId, organizationId), eq(pmsSeatSenders.domain, normalized)))
     .returning({ domain: pmsSeatSenders.domain });
@@ -164,10 +164,11 @@ export interface SeatSenderResolution {
  * and guessing a provider would hide it behind mail that parses slightly wrong.
  */
 export async function resolveSeatSender(
+  dbSession: DbSession,
   organizationId: string,
   auth: AuthenticationResults | null,
 ): Promise<SeatSenderResolution> {
-  const allowlist = await readSeatAllowlist(organizationId);
+  const allowlist = await readSeatAllowlist(dbSession, organizationId);
   const verdict = verifySender(auth, allowlist.map((sender) => sender.domain));
 
   if (!verdict.verified) {

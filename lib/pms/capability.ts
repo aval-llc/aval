@@ -14,6 +14,7 @@ import { resolveWithContext, UNKNOWN_PROVIDER } from "./capability-rules.ts";
 import { hasGrantProbe, readGrants } from "./grants.ts";
 import { hasWriteAdapter, learnedFlowActions } from "./flows.ts";
 import { readAllEnablements } from "./enablement.ts";
+import type { DbSession } from "@/db/postgres/session";
 
 const ALL_ACTIONS: readonly PmsAction[] = Object.values(PMS_ACTIONS).flat();
 const WRITE_ACTIONS: readonly PmsAction[] = ALL_ACTIONS.filter((action) => !action.endsWith(".read"));
@@ -25,15 +26,15 @@ const WRITE_ACTIONS: readonly PmsAction[] = ALL_ACTIONS.filter((action) => !acti
  * provider it is the registered adapters, for a `ui` provider the learned
  * flows. The rules do not need to know which, only whether a path exists.
  */
-async function loadContext(organizationId: string, providerId: string): Promise<ResolutionContext> {
+async function loadContext(dbSession: DbSession, organizationId: string, providerId: string): Promise<ResolutionContext> {
   const descriptor = pmsProvider(providerId);
   const mechanism = descriptor?.write.mechanisms[0];
 
   const [grants, enablements, learnedFlows] = await Promise.all([
-    readGrants(organizationId, providerId),
-    readAllEnablements(organizationId),
+    readGrants(dbSession, organizationId, providerId),
+    readAllEnablements(dbSession, organizationId),
     // A provider with no `ui` mechanism has no flows to look up, so skip the query.
-    mechanism === "ui" ? learnedFlowActions(organizationId, providerId) : Promise.resolve(new Set<PmsAction>()),
+    mechanism === "ui" ? learnedFlowActions(dbSession, organizationId, providerId) : Promise.resolve(new Set<PmsAction>()),
   ]);
 
   const executablePaths = mechanism === "api"
@@ -45,13 +46,14 @@ async function loadContext(organizationId: string, providerId: string): Promise<
 
 /** The signature the brief specifies. Three queries; use `resolveMatrix` for many actions. */
 export async function resolveCapability(
+  dbSession: DbSession,
   organizationId: string,
   providerId: string,
   action: PmsAction,
 ): Promise<CapabilityResolution> {
   const descriptor = pmsProvider(providerId);
   if (!descriptor) return UNKNOWN_PROVIDER;
-  return resolveWithContext(descriptor, action, await loadContext(organizationId, providerId));
+  return resolveWithContext(descriptor, action, await loadContext(dbSession, organizationId, providerId));
 }
 
 /**
@@ -62,6 +64,7 @@ export async function resolveCapability(
  * per action.
  */
 export async function resolveMatrix(
+  dbSession: DbSession,
   organizationId: string,
   providerId: string,
 ): Promise<Map<PmsAction, CapabilityResolution>> {
@@ -73,14 +76,14 @@ export async function resolveMatrix(
     return resolved;
   }
 
-  const context = await loadContext(organizationId, providerId);
+  const context = await loadContext(dbSession, organizationId, providerId);
   for (const action of ALL_ACTIONS) resolved.set(action, resolveWithContext(descriptor, action, context));
   return resolved;
 }
 
 /** The actions an org may actually execute on a provider right now. */
-export async function allowedActions(organizationId: string, providerId: string): Promise<PmsAction[]> {
-  const matrix = await resolveMatrix(organizationId, providerId);
+export async function allowedActions(dbSession: DbSession, organizationId: string, providerId: string): Promise<PmsAction[]> {
+  const matrix = await resolveMatrix(dbSession, organizationId, providerId);
   return [...matrix.entries()].filter(([, resolution]) => resolution.state === "allow").map(([action]) => action);
 }
 

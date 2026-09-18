@@ -8,17 +8,17 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { pmsWriteAuthorizations } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { pmsWriteAuthorizations } from "@/db/postgres/schema";
 import { ABSENT_ENABLEMENT, enablementFor, type Enablement, type PmsAction } from "./types.ts";
 
 export async function readEnablement(
+  dbSession: DbSession,
   organizationId: string,
   providerId: string,
   action: PmsAction,
 ): Promise<Enablement> {
-  const db = getDb();
-  const [row] = await db
+  const [row] = await dbSession.db
     .select()
     .from(pmsWriteAuthorizations)
     .where(
@@ -48,9 +48,8 @@ export async function readEnablement(
 }
 
 /** Every authorization row for an org, for the settings matrix to render in one query. */
-export async function readAllEnablements(organizationId: string): Promise<Map<string, Enablement>> {
-  const db = getDb();
-  const rows = await db
+export async function readAllEnablements(dbSession: DbSession, organizationId: string): Promise<Map<string, Enablement>> {
+  const rows = await dbSession.db
     .select()
     .from(pmsWriteAuthorizations)
     .where(eq(pmsWriteAuthorizations.organizationId, organizationId));

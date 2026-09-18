@@ -8,7 +8,7 @@ CREATE TABLE "access_grants" (
 	"portfolio_id" text,
 	"region_id" text,
 	"property_id" text,
-	"capabilities_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"capabilities_json" jsonb DEFAULT '[]' NOT NULL,
 	"expires_at" timestamp with time zone,
 	"revoked_at" timestamp with time zone,
 	"created_by_principal_id" text,
@@ -38,13 +38,14 @@ CREATE TABLE "agent_approvals" (
 	"id" text PRIMARY KEY NOT NULL,
 	"task_id" text NOT NULL,
 	"organization_id" text NOT NULL,
+	"property_id" text,
 	"step_index" integer NOT NULL,
 	"tool_name" text NOT NULL,
 	"risk_level" text NOT NULL,
 	"tier" text NOT NULL,
 	"amount_cents" bigint,
 	"currency" text,
-	"evidence_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"evidence_json" jsonb DEFAULT '{}' NOT NULL,
 	"status" text NOT NULL,
 	"requested_at" timestamp with time zone NOT NULL,
 	"expires_at" timestamp with time zone NOT NULL,
@@ -66,14 +67,27 @@ CREATE TABLE "agent_checks" (
 	"created_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "agent_deployments" (
+	"id" text PRIMARY KEY NOT NULL,
+	"organization_id" text NOT NULL,
+	"persona_id" text NOT NULL,
+	"provider" text NOT NULL,
+	"workflows_json" jsonb DEFAULT '[]' NOT NULL,
+	"autonomy_mode" text DEFAULT 'supervised' NOT NULL,
+	"status" text DEFAULT 'active' NOT NULL,
+	"created_by" text NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "agent_execution_policies" (
 	"organization_id" text PRIMARY KEY NOT NULL,
 	"status" text DEFAULT 'draft' NOT NULL,
 	"single_approval_max_cents" bigint DEFAULT 50000 NOT NULL,
 	"hard_ceiling_cents" bigint DEFAULT 2500000 NOT NULL,
 	"daily_limit_cents" bigint DEFAULT 5000000 NOT NULL,
-	"allowed_currencies_json" jsonb DEFAULT '["USD"]'::jsonb NOT NULL,
-	"allowed_account_fingerprints_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"allowed_currencies_json" jsonb DEFAULT '["USD"]' NOT NULL,
+	"allowed_account_fingerprints_json" jsonb DEFAULT '[]' NOT NULL,
 	"version" integer DEFAULT 1 NOT NULL,
 	"approved_by_user_id" text,
 	"approved_at" timestamp with time zone,
@@ -191,10 +205,10 @@ CREATE TABLE "agent_tasks" (
 	"agent_id" text NOT NULL,
 	"goal" text NOT NULL,
 	"status" text NOT NULL,
-	"execution_scope_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
-	"check_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"execution_scope_json" jsonb DEFAULT '{}' NOT NULL,
+	"check_json" jsonb DEFAULT '{}' NOT NULL,
 	"deadline_at" timestamp with time zone,
-	"transcript_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"transcript_json" jsonb DEFAULT '[]' NOT NULL,
 	"step_count" integer DEFAULT 0 NOT NULL,
 	"max_steps" integer NOT NULL,
 	"tokens_used" integer DEFAULT 0 NOT NULL,
@@ -205,6 +219,7 @@ CREATE TABLE "agent_tasks" (
 	"delegation_depth" integer DEFAULT 0 NOT NULL,
 	"cancel_requested" boolean DEFAULT false NOT NULL,
 	"lease_owner" text,
+	"lease_generation" integer DEFAULT 0 NOT NULL,
 	"lease_expires_at" timestamp with time zone,
 	"last_heartbeat_at" timestamp with time zone,
 	"result_json" jsonb,
@@ -216,6 +231,7 @@ CREATE TABLE "agent_tasks" (
 --> statement-breakpoint
 CREATE TABLE "agent_worker_runs" (
 	"id" text PRIMARY KEY NOT NULL,
+	"organization_id" text NOT NULL,
 	"trigger" text NOT NULL,
 	"status" text NOT NULL,
 	"tasks_scanned" integer DEFAULT 0 NOT NULL,
@@ -232,7 +248,7 @@ CREATE TABLE "ai_usage" (
 	"id" text PRIMARY KEY NOT NULL,
 	"organization_id" text NOT NULL,
 	"user_id" text NOT NULL,
-	"day" text NOT NULL,
+	"day" date NOT NULL,
 	"input_tokens" bigint DEFAULT 0 NOT NULL,
 	"output_tokens" bigint DEFAULT 0 NOT NULL,
 	"created_at" timestamp with time zone NOT NULL
@@ -278,7 +294,7 @@ CREATE TABLE "automation_steps" (
 	"kind" text NOT NULL,
 	"actor_label" text NOT NULL,
 	"summary" text NOT NULL,
-	"payload_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"payload_json" jsonb DEFAULT '{}' NOT NULL,
 	"created_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
@@ -311,7 +327,7 @@ CREATE TABLE "communication_poll_sources" (
 --> statement-breakpoint
 CREATE TABLE "communication_settings" (
 	"organization_id" text PRIMARY KEY NOT NULL,
-	"config_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"config_json" jsonb DEFAULT '{}' NOT NULL,
 	"updated_by" text NOT NULL,
 	"updated_at" timestamp with time zone NOT NULL
 );
@@ -356,7 +372,7 @@ CREATE TABLE "draft_documents" (
 	"narrative" text,
 	"document_type" text,
 	"document_markdown" text,
-	"metrics_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"metrics_json" jsonb DEFAULT '[]' NOT NULL,
 	"chart_json" jsonb,
 	"confidence" text,
 	"error_message" text,
@@ -432,11 +448,11 @@ CREATE TABLE "integration_connections" (
 	"auth_mode" text NOT NULL,
 	"external_account_id" text,
 	"external_account_name" text,
-	"scopes_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"scopes_json" jsonb DEFAULT '[]' NOT NULL,
 	"access_token_ciphertext" text,
 	"refresh_token_ciphertext" text,
 	"expires_at" timestamp with time zone,
-	"metadata_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"metadata_json" jsonb DEFAULT '{}' NOT NULL,
 	"last_sync_at" timestamp with time zone,
 	"created_by" text NOT NULL,
 	"created_at" timestamp with time zone NOT NULL,
@@ -461,7 +477,7 @@ CREATE TABLE "integration_sync_state" (
 	"organization_id" text NOT NULL,
 	"external_account_id" text NOT NULL,
 	"enabled" boolean DEFAULT true NOT NULL,
-	"cursor_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"cursor_json" jsonb DEFAULT '{}' NOT NULL,
 	"next_run_at" timestamp with time zone NOT NULL,
 	"lease_token" text,
 	"lease_expires_at" timestamp with time zone,
@@ -484,6 +500,8 @@ CREATE TABLE "lease_residents" (
 	"lease_id" text NOT NULL,
 	"resident_id" text NOT NULL,
 	"role" text DEFAULT 'primary' NOT NULL,
+	"source_provider" text,
+	"source_connection_id" text,
 	"created_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
@@ -493,11 +511,11 @@ CREATE TABLE "leases" (
 	"unit_id" text NOT NULL,
 	"property_id" text NOT NULL,
 	"status" text DEFAULT 'active' NOT NULL,
-	"start_date" timestamp with time zone NOT NULL,
-	"end_date" timestamp with time zone,
+	"start_date" date NOT NULL,
+	"end_date" date,
 	"is_month_to_month" boolean DEFAULT false NOT NULL,
-	"move_in_date" timestamp with time zone,
-	"move_out_date" timestamp with time zone,
+	"move_in_date" date,
+	"move_out_date" date,
 	"rent_cents" bigint NOT NULL,
 	"deposit_cents" bigint DEFAULT 0 NOT NULL,
 	"rent_due_day" integer DEFAULT 1 NOT NULL,
@@ -543,7 +561,7 @@ CREATE TABLE "ledger_entries" (
 	"amount_cents" bigint NOT NULL,
 	"currency" text DEFAULT 'USD' NOT NULL,
 	"posted_at" timestamp with time zone NOT NULL,
-	"due_at" timestamp with time zone,
+	"due_at" date,
 	"memo" text,
 	"source_provider" text DEFAULT 'manual' NOT NULL,
 	"source_connection_id" text,
@@ -557,7 +575,7 @@ CREATE TABLE "messages" (
 	"external_message_id" text NOT NULL,
 	"direction" text NOT NULL,
 	"body" text NOT NULL,
-	"payload_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"payload_json" jsonb DEFAULT '{}' NOT NULL,
 	"created_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
@@ -611,12 +629,20 @@ CREATE TABLE "organization_members" (
 	"updated_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "organization_seat_slugs" (
+	"slug" text PRIMARY KEY NOT NULL,
+	"organization_id" text NOT NULL,
+	"created_by" text NOT NULL,
+	"created_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "organizations" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"owner_user_id" text NOT NULL,
 	"active_model_provider" text,
 	"default_persona_id" text,
+	"seat_slug" text,
 	"created_at" timestamp with time zone NOT NULL,
 	"updated_at" timestamp with time zone NOT NULL
 );
@@ -641,11 +667,11 @@ CREATE TABLE "planning_items" (
 	"status" text DEFAULT 'planned' NOT NULL,
 	"project_id" text,
 	"assignee_id" text,
-	"starts_at" integer NOT NULL,
-	"ends_at" integer NOT NULL,
+	"starts_at" bigint NOT NULL,
+	"ends_at" bigint NOT NULL,
 	"version" integer DEFAULT 1 NOT NULL,
 	"created_by" text NOT NULL,
-	"updated_at" integer NOT NULL
+	"updated_at" bigint NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "planning_projects" (
@@ -654,7 +680,82 @@ CREATE TABLE "planning_projects" (
 	"title" text NOT NULL,
 	"description" text DEFAULT '' NOT NULL,
 	"color" text DEFAULT 'blue' NOT NULL,
-	"created_at" integer NOT NULL
+	"created_at" bigint NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "pms_action_flows" (
+	"id" text PRIMARY KEY NOT NULL,
+	"organization_id" text NOT NULL,
+	"provider" text NOT NULL,
+	"action" text NOT NULL,
+	"version" integer DEFAULT 1 NOT NULL,
+	"steps_json" jsonb NOT NULL,
+	"digest" text NOT NULL,
+	"status" text DEFAULT 'candidate' NOT NULL,
+	"learned_by_user_id" text,
+	"last_replay_at" timestamp with time zone,
+	"last_replay_ok" boolean,
+	"consecutive_failures" integer DEFAULT 0 NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "pms_seat_messages" (
+	"id" text PRIMARY KEY NOT NULL,
+	"digest" text NOT NULL,
+	"recipient" text NOT NULL,
+	"organization_id" text,
+	"disposition" text NOT NULL,
+	"authenticated_domain" text,
+	"method" text,
+	"provider_id" text,
+	"reason" text,
+	"observed_authserv_ids" text,
+	"object_key" text NOT NULL,
+	"received_at" timestamp with time zone NOT NULL,
+	"processed_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "pms_seat_senders" (
+	"organization_id" text NOT NULL,
+	"domain" text NOT NULL,
+	"provider_id" text NOT NULL,
+	"added_by" text NOT NULL,
+	"added_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "pms_write_authorizations" (
+	"id" text PRIMARY KEY NOT NULL,
+	"organization_id" text NOT NULL,
+	"provider" text NOT NULL,
+	"action" text NOT NULL,
+	"status" text DEFAULT 'draft' NOT NULL,
+	"signed_authorization" boolean DEFAULT false NOT NULL,
+	"authorization_reference" text,
+	"version" integer DEFAULT 1 NOT NULL,
+	"approved_by_user_id" text,
+	"approved_at" timestamp with time zone,
+	"created_by" text NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "pms_write_queue" (
+	"id" text PRIMARY KEY NOT NULL,
+	"organization_id" text NOT NULL,
+	"provider" text NOT NULL,
+	"action" text NOT NULL,
+	"approval_id" text,
+	"flow_id" text,
+	"payload_json" jsonb NOT NULL,
+	"idempotency_key" text NOT NULL,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"leased_by" text,
+	"lease_expires_at" timestamp with time zone,
+	"attempts" integer DEFAULT 0 NOT NULL,
+	"last_error" text,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "portfolio_snapshots" (
@@ -664,8 +765,8 @@ CREATE TABLE "portfolio_snapshots" (
 	"metric_key" text NOT NULL,
 	"numeric_value" integer,
 	"text_value" text,
-	"period_start" timestamp with time zone,
-	"period_end" timestamp with time zone,
+	"period_start" date,
+	"period_end" date,
 	"captured_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
@@ -717,6 +818,7 @@ CREATE TABLE "properties" (
 --> statement-breakpoint
 CREATE TABLE "rate_limit_hits" (
 	"id" text PRIMARY KEY NOT NULL,
+	"organization_id" text NOT NULL,
 	"scope_key" text NOT NULL,
 	"created_at" timestamp with time zone NOT NULL
 );
@@ -749,7 +851,7 @@ CREATE TABLE "sso_connections" (
 	"id" text PRIMARY KEY NOT NULL,
 	"organization_id" text NOT NULL,
 	"supabase_provider_id" text,
-	"permitted_domains_json" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"permitted_domains_json" jsonb DEFAULT '[]' NOT NULL,
 	"enforcement" text DEFAULT 'disabled' NOT NULL,
 	"created_at" timestamp with time zone NOT NULL,
 	"updated_at" timestamp with time zone NOT NULL,
@@ -775,8 +877,8 @@ CREATE TABLE "sync_runs" (
 	"connection_id" text NOT NULL,
 	"provider" text NOT NULL,
 	"status" text DEFAULT 'queued' NOT NULL,
-	"cursor_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
-	"counts_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"cursor_json" jsonb DEFAULT '{}' NOT NULL,
+	"counts_json" jsonb DEFAULT '{}' NOT NULL,
 	"error" text,
 	"started_at" timestamp with time zone NOT NULL,
 	"completed_at" timestamp with time zone
@@ -801,7 +903,7 @@ CREATE TABLE "units" (
 	"square_feet" integer,
 	"market_rent_cents" bigint,
 	"status" text DEFAULT 'vacant_ready' NOT NULL,
-	"vacant_since" timestamp with time zone,
+	"vacant_since" date,
 	"source_provider" text DEFAULT 'manual' NOT NULL,
 	"source_connection_id" text,
 	"external_id" text,
@@ -829,7 +931,6 @@ CREATE TABLE "user_onboarding" (
 CREATE TABLE "users" (
 	"id" text PRIMARY KEY NOT NULL,
 	"email" text NOT NULL,
-	"password_hash" text NOT NULL,
 	"display_name" text NOT NULL,
 	"created_at" timestamp with time zone NOT NULL,
 	"updated_at" timestamp with time zone NOT NULL
@@ -839,8 +940,8 @@ CREATE TABLE "utility_bills" (
 	"id" text PRIMARY KEY NOT NULL,
 	"organization_id" text NOT NULL,
 	"meter_id" text NOT NULL,
-	"period_start" timestamp with time zone NOT NULL,
-	"period_end" timestamp with time zone NOT NULL,
+	"period_start" date NOT NULL,
+	"period_end" date NOT NULL,
 	"usage_amount" numeric(20, 6) NOT NULL,
 	"cost_cents" bigint NOT NULL,
 	"currency" text DEFAULT 'USD' NOT NULL,
@@ -870,7 +971,7 @@ CREATE TABLE "vendors" (
 	"trade" text,
 	"email" text,
 	"phone" text,
-	"insurance_expires_at" timestamp with time zone,
+	"insurance_expires_at" date,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"source_provider" text DEFAULT 'manual' NOT NULL,
 	"source_connection_id" text,
@@ -926,8 +1027,11 @@ ALTER TABLE "agent_approval_decisions" ADD CONSTRAINT "agent_approval_decisions_
 ALTER TABLE "agent_approval_decisions" ADD CONSTRAINT "agent_approval_decisions_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_approvals" ADD CONSTRAINT "agent_approvals_task_id_agent_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."agent_tasks"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_approvals" ADD CONSTRAINT "agent_approvals_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "agent_approvals" ADD CONSTRAINT "agent_approvals_property_id_properties_id_fk" FOREIGN KEY ("property_id") REFERENCES "public"."properties"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "agent_approvals" ADD CONSTRAINT "agent_approvals_org_property_fk" FOREIGN KEY ("organization_id","property_id") REFERENCES "public"."properties"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_checks" ADD CONSTRAINT "agent_checks_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_checks" ADD CONSTRAINT "agent_checks_task_id_agent_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."agent_tasks"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "agent_deployments" ADD CONSTRAINT "agent_deployments_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_execution_policies" ADD CONSTRAINT "agent_execution_policies_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_financial_events" ADD CONSTRAINT "agent_financial_events_operation_id_agent_financial_operations_id_fk" FOREIGN KEY ("operation_id") REFERENCES "public"."agent_financial_operations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_financial_events" ADD CONSTRAINT "agent_financial_events_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -944,6 +1048,7 @@ ALTER TABLE "agent_plan_nodes" ADD CONSTRAINT "agent_plan_nodes_root_task_id_age
 ALTER TABLE "agent_plan_nodes" ADD CONSTRAINT "agent_plan_nodes_task_id_agent_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."agent_tasks"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_task_steps" ADD CONSTRAINT "agent_task_steps_task_id_agent_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."agent_tasks"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_tasks" ADD CONSTRAINT "agent_tasks_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "agent_worker_runs" ADD CONSTRAINT "agent_worker_runs_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "ai_usage" ADD CONSTRAINT "ai_usage_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "answer_audit_log" ADD CONSTRAINT "answer_audit_log_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "approval_authorities" ADD CONSTRAINT "approval_authorities_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -994,10 +1099,15 @@ ALTER TABLE "operations_conflicts" ADD CONSTRAINT "operations_conflicts_organiza
 ALTER TABLE "organization_invitations" ADD CONSTRAINT "organization_invitations_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "organization_members" ADD CONSTRAINT "organization_members_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "organization_members" ADD CONSTRAINT "organization_members_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "organization_seat_slugs" ADD CONSTRAINT "organization_seat_slugs_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "ownership_entities" ADD CONSTRAINT "ownership_entities_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "planning_items" ADD CONSTRAINT "planning_items_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "planning_items" ADD CONSTRAINT "planning_items_project_id_planning_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."planning_projects"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "planning_projects" ADD CONSTRAINT "planning_projects_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pms_action_flows" ADD CONSTRAINT "pms_action_flows_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pms_seat_senders" ADD CONSTRAINT "pms_seat_senders_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pms_write_authorizations" ADD CONSTRAINT "pms_write_authorizations_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pms_write_queue" ADD CONSTRAINT "pms_write_queue_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "portfolio_snapshots" ADD CONSTRAINT "portfolio_snapshots_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "portfolios" ADD CONSTRAINT "portfolios_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "properties" ADD CONSTRAINT "properties_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -1008,6 +1118,7 @@ ALTER TABLE "properties" ADD CONSTRAINT "properties_source_connection_id_integra
 ALTER TABLE "properties" ADD CONSTRAINT "properties_org_owner_fk" FOREIGN KEY ("organization_id","ownership_entity_id") REFERENCES "public"."ownership_entities"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "properties" ADD CONSTRAINT "properties_org_portfolio_fk" FOREIGN KEY ("organization_id","portfolio_id") REFERENCES "public"."portfolios"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "properties" ADD CONSTRAINT "properties_org_region_fk" FOREIGN KEY ("organization_id","region_id") REFERENCES "public"."regions"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "rate_limit_hits" ADD CONSTRAINT "rate_limit_hits_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "regions" ADD CONSTRAINT "regions_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "residents" ADD CONSTRAINT "residents_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "residents" ADD CONSTRAINT "residents_source_connection_id_integration_connections_id_fk" FOREIGN KEY ("source_connection_id") REFERENCES "public"."integration_connections"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -1037,8 +1148,11 @@ CREATE INDEX "access_grants_property_idx" ON "access_grants" USING btree ("organ
 CREATE UNIQUE INDEX "agent_approval_decisions_approval_user_uq" ON "agent_approval_decisions" USING btree ("approval_id","user_id");--> statement-breakpoint
 CREATE INDEX "agent_approval_decisions_org_created_idx" ON "agent_approval_decisions" USING btree ("organization_id","created_at");--> statement-breakpoint
 CREATE INDEX "agent_approvals_org_status_idx" ON "agent_approvals" USING btree ("organization_id","status");--> statement-breakpoint
+CREATE INDEX "agent_approvals_org_property_status_idx" ON "agent_approvals" USING btree ("organization_id","property_id","status");--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_approvals_task_step_uq" ON "agent_approvals" USING btree ("task_id","step_index");--> statement-breakpoint
 CREATE INDEX "agent_checks_task_idx" ON "agent_checks" USING btree ("organization_id","task_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "agent_deployments_uq" ON "agent_deployments" USING btree ("organization_id","persona_id","provider");--> statement-breakpoint
+CREATE INDEX "agent_deployments_lookup_idx" ON "agent_deployments" USING btree ("organization_id","persona_id","status");--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_financial_events_operation_sequence_uq" ON "agent_financial_events" USING btree ("operation_id","sequence");--> statement-breakpoint
 CREATE INDEX "agent_financial_events_org_created_idx" ON "agent_financial_events" USING btree ("organization_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_financial_operations_idempotency_uq" ON "agent_financial_operations" USING btree ("idempotency_key");--> statement-breakpoint
@@ -1111,17 +1225,30 @@ CREATE UNIQUE INDEX "organization_invitations_code_uq" ON "organization_invitati
 CREATE INDEX "organization_invitations_org_idx" ON "organization_invitations" USING btree ("organization_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "organization_members_org_user_uq" ON "organization_members" USING btree ("organization_id","user_id");--> statement-breakpoint
 CREATE INDEX "organization_members_user_idx" ON "organization_members" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "organization_seat_slugs_org_idx" ON "organization_seat_slugs" USING btree ("organization_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "organizations_seat_slug_uq" ON "organizations" USING btree ("seat_slug");--> statement-breakpoint
 CREATE UNIQUE INDEX "ownership_entities_org_id_uq" ON "ownership_entities" USING btree ("organization_id","id");--> statement-breakpoint
 CREATE UNIQUE INDEX "ownership_entities_org_external_uq" ON "ownership_entities" USING btree ("organization_id","external_id");--> statement-breakpoint
 CREATE INDEX "planning_items_org_date_idx" ON "planning_items" USING btree ("organization_id","starts_at");--> statement-breakpoint
 CREATE INDEX "planning_projects_org_idx" ON "planning_projects" USING btree ("organization_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "pms_action_flow_uq" ON "pms_action_flows" USING btree ("organization_id","provider","action","version");--> statement-breakpoint
+CREATE INDEX "pms_action_flow_lookup_idx" ON "pms_action_flows" USING btree ("organization_id","provider","action","status");--> statement-breakpoint
+CREATE INDEX "pms_seat_messages_org_idx" ON "pms_seat_messages" USING btree ("organization_id","disposition");--> statement-breakpoint
+CREATE INDEX "pms_seat_messages_held_idx" ON "pms_seat_messages" USING btree ("organization_id","authenticated_domain");--> statement-breakpoint
+CREATE INDEX "pms_seat_messages_digest_idx" ON "pms_seat_messages" USING btree ("digest");--> statement-breakpoint
+CREATE UNIQUE INDEX "pms_seat_senders_uq" ON "pms_seat_senders" USING btree ("organization_id","domain");--> statement-breakpoint
+CREATE INDEX "pms_seat_senders_org_idx" ON "pms_seat_senders" USING btree ("organization_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "pms_write_auth_uq" ON "pms_write_authorizations" USING btree ("organization_id","provider","action");--> statement-breakpoint
+CREATE INDEX "pms_write_auth_org_idx" ON "pms_write_authorizations" USING btree ("organization_id","status");--> statement-breakpoint
+CREATE UNIQUE INDEX "pms_write_queue_idem_uq" ON "pms_write_queue" USING btree ("organization_id","idempotency_key");--> statement-breakpoint
+CREATE INDEX "pms_write_queue_drain_idx" ON "pms_write_queue" USING btree ("organization_id","status","created_at");--> statement-breakpoint
 CREATE INDEX "portfolio_snapshots_org_captured_idx" ON "portfolio_snapshots" USING btree ("organization_id","captured_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "portfolios_org_id_uq" ON "portfolios" USING btree ("organization_id","id");--> statement-breakpoint
 CREATE UNIQUE INDEX "portfolios_org_name_uq" ON "portfolios" USING btree ("organization_id","name");--> statement-breakpoint
 CREATE UNIQUE INDEX "properties_org_id_uq" ON "properties" USING btree ("organization_id","id");--> statement-breakpoint
 CREATE UNIQUE INDEX "properties_org_source_external_uq" ON "properties" USING btree ("organization_id","source_provider","external_id");--> statement-breakpoint
 CREATE INDEX "properties_org_status_idx" ON "properties" USING btree ("organization_id","status");--> statement-breakpoint
-CREATE INDEX "rate_limit_hits_scope_created_idx" ON "rate_limit_hits" USING btree ("scope_key","created_at");--> statement-breakpoint
+CREATE INDEX "rate_limit_hits_org_scope_created_idx" ON "rate_limit_hits" USING btree ("organization_id","scope_key","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "regions_org_id_uq" ON "regions" USING btree ("organization_id","id");--> statement-breakpoint
 CREATE UNIQUE INDEX "regions_org_code_uq" ON "regions" USING btree ("organization_id","code");--> statement-breakpoint
 CREATE UNIQUE INDEX "residents_org_source_external_uq" ON "residents" USING btree ("organization_id","source_provider","external_id");--> statement-breakpoint

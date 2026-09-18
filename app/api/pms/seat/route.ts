@@ -9,7 +9,7 @@
  *
  * ## What this endpoint will not render
  *
- * Held senders come from `seatReview()`, which returns only domains that
+ * Held senders come from `seatReview(dbSession)`, which returns only domains that
  * *authenticated*. A held message's `From` is chosen by whoever sent it, and
  * this response is read by a component that draws an Allow button next to each
  * one. Mail that authenticated nothing is returned as a count with no domain,
@@ -30,6 +30,8 @@ import { seatReview } from "@/lib/pms/inbound/messages.ts";
 import { claimSeatSlug, seatAddressesFor } from "@/lib/pms/inbound/seats.ts";
 import { suggestedSenderDomains } from "@/lib/pms/inbound/sender-domain.ts";
 import { allowSender, readSeatAllowlist, revokeSender } from "@/lib/pms/inbound/senders.ts";
+import type { DbSession } from "@/db/postgres/session";
+import { withApiSession } from "@/lib/api/with-session";
 
 /**
  * `generic_email` is always offerable, even when no PMS is connected.
@@ -40,8 +42,8 @@ import { allowSender, readSeatAllowlist, revokeSender } from "@/lib/pms/inbound/
  */
 const ALWAYS_OFFERED = "generic_email";
 
-async function providerChoices(organizationId: string) {
-  const connected = await connectedPmsProviders(organizationId);
+async function providerChoices(dbSession: DbSession, organizationId: string) {
+  const connected = await connectedPmsProviders(dbSession, organizationId);
   const ids = [...new Set([...connected, ALWAYS_OFFERED])];
   return ids.map((id) => ({
     id,
@@ -50,18 +52,18 @@ async function providerChoices(organizationId: string) {
   }));
 }
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   try {
-    await ensureOrganization(identity);
+    await ensureOrganization(dbSession, identity);
     const [addresses, allowlist, review, choices, role] = await Promise.all([
-      seatAddressesFor(identity.organizationId),
-      readSeatAllowlist(identity.organizationId),
-      seatReview(identity.organizationId),
-      providerChoices(identity.organizationId),
-      roleFor(identity.userId, identity.organizationId).catch(() => null),
+      seatAddressesFor(dbSession, identity.organizationId),
+      readSeatAllowlist(dbSession, identity.organizationId),
+      seatReview(dbSession, identity.organizationId),
+      providerChoices(dbSession, identity.organizationId),
+      roleFor(dbSession, identity.userId, identity.organizationId).catch(() => null),
     ]);
 
     const held = allowlist.map((sender) => sender.domain);
@@ -117,8 +119,8 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   // A demo workspace must not be able to claim a real address or consent to a
   // real sender. Both outlive the demo: the slug is permanent, and the consent
@@ -135,19 +137,19 @@ export async function POST(request: Request) {
   const payload = (body ?? {}) as Record<string, unknown>;
   const intent = typeof payload.intent === "string" ? payload.intent : "";
 
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   // Owner-only, the same gate as PMS write authorization. Allowing a sender
   // decides what may enter an agent's context and claiming a slug hands a
   // customer an address they cannot change later; neither is a preference.
-  const role = await roleFor(identity.userId, identity.organizationId).catch(() => null);
+  const role = await roleFor(dbSession, identity.userId, identity.organizationId).catch(() => null);
   if (!role || !canManagePolicy(role)) {
     return Response.json({ error: "Only the workspace owner can change the Aval seat" }, { status: 403 });
   }
 
   if (intent === "claim") {
     const slug = typeof payload.slug === "string" ? payload.slug : "";
-    const claim = await claimSeatSlug(identity.organizationId, slug, identity.userId);
+    const claim = await claimSeatSlug(dbSession, identity.organizationId, slug, identity.userId);
     if (!claim.ok) return Response.json({ error: claim.reason }, { status: 422 });
     return Response.json({ slug: claim.slug, address: claim.address, alias: claim.alias });
   }
@@ -155,7 +157,7 @@ export async function POST(request: Request) {
   if (intent === "allow") {
     const domain = typeof payload.domain === "string" ? payload.domain : "";
     const providerId = typeof payload.providerId === "string" ? payload.providerId : "";
-    const allowed = await allowSender(identity.organizationId, domain, providerId, identity.userId);
+    const allowed = await allowSender(dbSession, identity.organizationId, domain, providerId, identity.userId);
     if (!allowed.ok) return Response.json({ error: allowed.reason }, { status: 422 });
     return Response.json({
       domain: allowed.sender.domain,
@@ -171,9 +173,12 @@ export async function POST(request: Request) {
 
   if (intent === "revoke") {
     const domain = typeof payload.domain === "string" ? payload.domain : "";
-    const revoked = await revokeSender(identity.organizationId, domain);
+    const revoked = await revokeSender(dbSession, identity.organizationId, domain);
     return Response.json({ domain, revoked });
   }
 
   return Response.json({ error: "Unknown intent" }, { status: 400 });
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

@@ -21,7 +21,7 @@
  * the provider with a message about a missing field nobody can trace back.
  */
 
-import type { ToolSchema } from "@/lib/ask-aval/anthropic.ts";
+import type { ToolSchema } from "@/lib/ask-aval/model-types.ts";
 import { PMS_PROVIDERS } from "./providers/index.ts";
 
 const PROVIDER_IDS = PMS_PROVIDERS.map((provider) => provider.id);

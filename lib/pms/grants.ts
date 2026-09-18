@@ -18,8 +18,8 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections } from "@/db/postgres/schema";
 import { type GrantSet, type PmsAction } from "./types.ts";
 import { pmsProvider } from "./providers/index.ts";
 
@@ -60,9 +60,8 @@ export function grantsAreStale(grants: GrantSet, now = Date.now()): boolean {
 
 export type { GrantSet };
 
-export async function readGrants(organizationId: string, providerId: string): Promise<GrantSet> {
-  const db = getDb();
-  const [connection] = await db
+export async function readGrants(dbSession: DbSession, organizationId: string, providerId: string): Promise<GrantSet> {
+  const [connection] = await dbSession.db
     .select({ metadataJson: integrationConnections.metadataJson })
     .from(integrationConnections)
     .where(and(eq(integrationConnections.organizationId, organizationId), eq(integrationConnections.provider, providerId)))
@@ -88,7 +87,7 @@ export async function readGrants(organizationId: string, providerId: string): Pr
  * provider yields an un-probed GrantSet, which resolves to `blocked` with a
  * remediation naming what is needed — not to `allow`, and not to a silent pass.
  */
-export type GrantProbe = (organizationId: string, providerId: string) => Promise<Omit<GrantSet, "probedAt" | "probed">>;
+export type GrantProbe = (dbSession: DbSession, organizationId: string, providerId: string) => Promise<Omit<GrantSet, "probedAt" | "probed">>;
 
 const PROBES = new Map<string, GrantProbe>();
 
@@ -100,7 +99,7 @@ export function hasGrantProbe(providerId: string): boolean {
   return PROBES.has(providerId);
 }
 
-export async function discoverGrants(organizationId: string, providerId: string): Promise<GrantSet> {
+export async function discoverGrants(dbSession: DbSession, organizationId: string, providerId: string): Promise<GrantSet> {
   const descriptor = pmsProvider(providerId);
   if (!descriptor) return { ...EMPTY, error: `No provider descriptor for "${providerId}".` };
 
@@ -111,7 +110,7 @@ export async function discoverGrants(organizationId: string, providerId: string)
 
   let result: Omit<GrantSet, "probedAt" | "probed">;
   try {
-    result = await probe(organizationId, providerId);
+    result = await probe(dbSession, organizationId, providerId);
   } catch (error) {
     // A failed probe must not look like a probe that found nothing permitted:
     // `probed: false` keeps the resolver in "unknown" rather than "denied", so
@@ -120,13 +119,12 @@ export async function discoverGrants(organizationId: string, providerId: string)
   }
 
   const grants: GrantSet = { ...result, probedAt: new Date().toISOString(), probed: true };
-  await persistGrants(organizationId, providerId, grants);
+  await persistGrants(dbSession, organizationId, providerId, grants);
   return grants;
 }
 
-async function persistGrants(organizationId: string, providerId: string, grants: GrantSet): Promise<void> {
-  const db = getDb();
-  const [connection] = await db
+async function persistGrants(dbSession: DbSession, organizationId: string, providerId: string, grants: GrantSet): Promise<void> {
+  const [connection] = await dbSession.db
     .select({ metadataJson: integrationConnections.metadataJson })
     .from(integrationConnections)
     .where(and(eq(integrationConnections.organizationId, organizationId), eq(integrationConnections.provider, providerId)))
@@ -135,7 +133,7 @@ async function persistGrants(organizationId: string, providerId: string, grants:
 
   const metadata = parseMetadata(connection.metadataJson);
   metadata.pmsGrants = grants;
-  await db
+  await dbSession.db
     .update(integrationConnections)
     .set({ metadataJson: JSON.stringify(metadata), updatedAt: new Date() })
     .where(and(eq(integrationConnections.organizationId, organizationId), eq(integrationConnections.provider, providerId)));

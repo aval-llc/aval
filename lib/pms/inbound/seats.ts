@@ -15,8 +15,8 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { organizations, organizationSeatSlugs } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { organizations, organizationSeatSlugs } from "@/db/postgres/schema";
 import { describeSlugRejection, seatAddress, seatSlugOf, slugRejection } from "./seat-address.ts";
 
 export type ClaimResult =
@@ -31,6 +31,7 @@ export type ClaimResult =
  * holds fails, and cannot be made to succeed by any argument to this function.
  */
 export async function claimSeatSlug(
+  dbSession: DbSession,
   organizationId: string,
   slug: string,
   userId: string,
@@ -39,8 +40,7 @@ export async function claimSeatSlug(
   const rejection = slugRejection(normalized);
   if (rejection) return { ok: false, reason: describeSlugRejection(rejection) };
 
-  const db = getDb();
-  const [existing] = await db
+  const [existing] = await dbSession.db
     .select({ organizationId: organizationSeatSlugs.organizationId })
     .from(organizationSeatSlugs)
     .where(eq(organizationSeatSlugs.slug, normalized))
@@ -55,7 +55,7 @@ export async function claimSeatSlug(
 
   const alias = existing !== undefined;
   if (!alias) {
-    await db.insert(organizationSeatSlugs).values({
+    await dbSession.db.insert(organizationSeatSlugs).values({
       slug: normalized,
       organizationId,
       createdBy: userId,
@@ -63,7 +63,7 @@ export async function claimSeatSlug(
     });
   }
 
-  await db
+  await dbSession.db
     .update(organizations)
     .set({ seatSlug: normalized, updatedAt: new Date() })
     .where(eq(organizations.id, organizationId));
@@ -72,8 +72,8 @@ export async function claimSeatSlug(
 }
 
 /** Which workspace a slug belongs to, including retired-but-still-live aliases. */
-export async function organizationForSeatSlug(slug: string): Promise<string | null> {
-  const [row] = await getDb()
+export async function organizationForSeatSlug(dbSession: DbSession, slug: string): Promise<string | null> {
+  const [row] = await dbSession.db
     .select({ organizationId: organizationSeatSlugs.organizationId })
     .from(organizationSeatSlugs)
     .where(eq(organizationSeatSlugs.slug, slug.trim().toLowerCase()))
@@ -89,24 +89,23 @@ export async function organizationForSeatSlug(slug: string): Promise<string | nu
  * because none of them is a message we may act on, and distinguishing them for
  * the caller would invite a caller that treats one of them as good enough.
  */
-export async function organizationForRecipient(recipient: string): Promise<string | null> {
+export async function organizationForRecipient(dbSession: DbSession, recipient: string): Promise<string | null> {
   const slug = seatSlugOf(recipient);
-  return slug === null ? null : organizationForSeatSlug(slug);
+  return slug === null ? null : organizationForSeatSlug(dbSession, slug);
 }
 
 /** Every address that reaches this workspace, current one first. */
-export async function seatAddressesFor(organizationId: string): Promise<{
+export async function seatAddressesFor(dbSession: DbSession, organizationId: string): Promise<{
   primary: string | null;
   all: string[];
 }> {
-  const db = getDb();
-  const [org] = await db
+  const [org] = await dbSession.db
     .select({ seatSlug: organizations.seatSlug })
     .from(organizations)
     .where(eq(organizations.id, organizationId))
     .limit(1);
 
-  const rows = await db
+  const rows = await dbSession.db
     .select({ slug: organizationSeatSlugs.slug })
     .from(organizationSeatSlugs)
     .where(eq(organizationSeatSlugs.organizationId, organizationId));
@@ -127,8 +126,8 @@ export async function seatAddressesFor(organizationId: string): Promise<{
  * gone — an operator who renamed should be able to see that the old address
  * still works, because their PMS may well still be using it.
  */
-export async function workspaceHoldsSlug(organizationId: string, slug: string): Promise<boolean> {
-  const [row] = await getDb()
+export async function workspaceHoldsSlug(dbSession: DbSession, organizationId: string, slug: string): Promise<boolean> {
+  const [row] = await dbSession.db
     .select({ slug: organizationSeatSlugs.slug })
     .from(organizationSeatSlugs)
     .where(

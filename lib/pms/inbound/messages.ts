@@ -13,8 +13,8 @@
  */
 
 import { and, desc, eq, sql } from "drizzle-orm";
-import { getDb } from "@/db";
-import { pmsSeatMessages } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { pmsSeatMessages } from "@/db/postgres/schema";
 import type { SeatDisposition } from "./disposition.ts";
 
 export interface SeatMessageRecord {
@@ -51,7 +51,7 @@ export function seatMessageId(recipient: string, digest: string): string {
  * allowed overwrites its row, which is how the review empties out on its own
  * once a sender is allowed — no separate reconciliation step to forget.
  */
-export async function recordSeatMessage(record: SeatMessageRecord): Promise<void> {
+export async function recordSeatMessage(dbSession: DbSession, record: SeatMessageRecord): Promise<void> {
   const processedAt = new Date();
   const values = {
     id: seatMessageId(record.recipient, record.digest),
@@ -69,7 +69,7 @@ export async function recordSeatMessage(record: SeatMessageRecord): Promise<void
     processedAt,
   };
 
-  await getDb()
+  await dbSession.db
     .insert(pmsSeatMessages)
     .values(values)
     .onConflictDoUpdate({
@@ -112,14 +112,13 @@ export interface SeatReview {
 }
 
 /** What the seat's settings panel shows: who is waiting, and what got through. */
-export async function seatReview(organizationId: string): Promise<SeatReview> {
-  const db = getDb();
+export async function seatReview(dbSession: DbSession, organizationId: string): Promise<SeatReview> {
 
-  const heldRows = await db
+  const heldRows = await dbSession.db
     .select({
       domain: pmsSeatMessages.authenticatedDomain,
       method: sql<string | null>`max(${pmsSeatMessages.method})`,
-      messages: sql<number>`count(*)`,
+      messages: sql<number>`count(dbSession, *)`,
       firstSeen: sql<number>`min(${pmsSeatMessages.receivedAt})`,
       lastSeen: sql<number>`max(${pmsSeatMessages.receivedAt})`,
     })
@@ -131,11 +130,11 @@ export async function seatReview(organizationId: string): Promise<SeatReview> {
       ),
     )
     .groupBy(pmsSeatMessages.authenticatedDomain)
-    .orderBy(desc(sql`count(*)`));
+    .orderBy(desc(sql`count(dbSession, *)`));
 
-  const [unauthenticated] = await db
+  const [unauthenticated] = await dbSession.db
     .select({
-      messages: sql<number>`count(*)`,
+      messages: sql<number>`count(dbSession, *)`,
       lastSeen: sql<number | null>`max(${pmsSeatMessages.receivedAt})`,
     })
     .from(pmsSeatMessages)
@@ -146,8 +145,8 @@ export async function seatReview(organizationId: string): Promise<SeatReview> {
       ),
     );
 
-  const [verified] = await db
-    .select({ messages: sql<number>`count(*)` })
+  const [verified] = await dbSession.db
+    .select({ messages: sql<number>`count(dbSession, *)` })
     .from(pmsSeatMessages)
     .where(
       and(
@@ -186,9 +185,9 @@ export async function seatReview(organizationId: string): Promise<SeatReview> {
  * that test exists to catch — and "it is only for diagnostics" is an assumption
  * about callers that nothing in the code holds.
  */
-export async function seatMessageCounts(organizationId: string): Promise<Record<string, number>> {
-  const rows = await getDb()
-    .select({ disposition: pmsSeatMessages.disposition, messages: sql<number>`count(*)` })
+export async function seatMessageCounts(dbSession: DbSession, organizationId: string): Promise<Record<string, number>> {
+  const rows = await dbSession.db
+    .select({ disposition: pmsSeatMessages.disposition, messages: sql<number>`count(dbSession, *)` })
     .from(pmsSeatMessages)
     .where(eq(pmsSeatMessages.organizationId, organizationId))
     .groupBy(pmsSeatMessages.disposition);

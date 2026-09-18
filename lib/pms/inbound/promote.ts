@@ -16,6 +16,7 @@
 
 import { captureNotification } from "./notifications.ts";
 import { pmsProvider } from "../providers/index.ts";
+import type { DbSession } from "@/db/postgres/session";
 
 export interface VerifiedMessage {
   organizationId: string;
@@ -34,7 +35,7 @@ export interface PromotionOutcome {
   reason: string;
 }
 
-export async function promoteVerifiedMessage(message: VerifiedMessage): Promise<PromotionOutcome> {
+export async function promoteVerifiedMessage(dbSession: DbSession, message: VerifiedMessage): Promise<PromotionOutcome> {
   const descriptor = pmsProvider(message.providerId);
   if (!descriptor) {
     // An allowlist row naming a provider that no longer exists. `allowSender`
@@ -47,7 +48,7 @@ export async function promoteVerifiedMessage(message: VerifiedMessage): Promise<
     };
   }
 
-  const captured = await captureNotification(message);
+  const captured = await captureNotification(dbSession, message);
 
   return {
     promoted: true,

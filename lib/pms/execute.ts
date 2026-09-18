@@ -20,8 +20,8 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { pmsWriteQueue } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { pmsWriteQueue } from "@/db/postgres/schema";
 import { pmsProvider } from "./providers/index.ts";
 import { pmsWriteAllowed } from "./assembly.ts";
 import { activeFlow } from "./flows.ts";
@@ -62,7 +62,7 @@ export interface PmsWriteRequest {
 /** A runner that has asked for work inside this window is considered online. */
 const RUNNER_ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
-export async function executePmsWrite(request: PmsWriteRequest): Promise<PmsWriteResult> {
+export async function executePmsWrite(dbSession: DbSession, request: PmsWriteRequest): Promise<PmsWriteResult> {
   ensurePmsAdaptersRegistered();
   const action = actionForTool(request.toolName);
   if (!action) return { status: "denied", reason: `"${request.toolName}" is not a PMS write tool.` };
@@ -77,6 +77,7 @@ export async function executePmsWrite(request: PmsWriteRequest): Promise<PmsWrit
   // without it, pausing only stopped the *next* turn's assembly, and a turn
   // already in flight kept its tools.
   const gate = await pmsWriteAllowed(
+    dbSession,
     request.organizationId,
     request.providerId,
     request.toolName,
@@ -95,11 +96,12 @@ export async function executePmsWrite(request: PmsWriteRequest): Promise<PmsWrit
   }
 
   const mechanism = descriptor.write.mechanisms[0];
-  if (mechanism === "api") return runAdapter(request, action);
-  return enqueueForRunner(request, action);
+  if (mechanism === "api") return runAdapter(dbSession, request, action);
+  return enqueueForRunner(dbSession, request, action);
 }
 
 async function runAdapter(
+  dbSession: DbSession,
   request: PmsWriteRequest,
   action: ReturnType<typeof actionForTool> & string,
 ): Promise<PmsWriteResult> {
@@ -110,7 +112,7 @@ async function runAdapter(
     return { status: "denied", reason: "No adapter is implemented for this action." };
   }
   try {
-    const result = await adapter({
+    const result = await adapter(dbSession, {
       organizationId: request.organizationId,
       providerId: request.providerId,
       action,
@@ -125,19 +127,19 @@ async function runAdapter(
 }
 
 async function enqueueForRunner(
+  dbSession: DbSession,
   request: PmsWriteRequest,
   action: ReturnType<typeof actionForTool> & string,
 ): Promise<PmsWriteResult> {
-  const db = getDb();
   const now = new Date();
 
-  const flow = await activeFlow(request.organizationId, request.providerId, action);
+  const flow = await activeFlow(dbSession, request.organizationId, request.providerId, action);
   if (!flow) {
     return { status: "denied", reason: "No approved flow exists for this action yet." };
   }
 
   const id = crypto.randomUUID();
-  await db
+  await dbSession.db
     .insert(pmsWriteQueue)
     .values({
       id,
@@ -160,7 +162,7 @@ async function enqueueForRunner(
     // error: the original row is already queued or done.
     .onConflictDoNothing();
 
-  const [row] = await db
+  const [row] = await dbSession.db
     .select({ id: pmsWriteQueue.id })
     .from(pmsWriteQueue)
     .where(
@@ -175,7 +177,7 @@ async function enqueueForRunner(
     status: "queued",
     queueId: row?.id ?? id,
     provider: request.providerId,
-    runnerOnline: await runnerIsOnline(request.organizationId),
+    runnerOnline: await runnerIsOnline(dbSession, request.organizationId),
   };
 }
 
@@ -187,10 +189,9 @@ async function enqueueForRunner(
  * lower bound — reporting "offline" for a runner that is actually up costs a
  * pessimistic message, while the reverse costs a promise we cannot keep.
  */
-async function runnerIsOnline(organizationId: string): Promise<boolean> {
+async function runnerIsOnline(dbSession: DbSession, organizationId: string): Promise<boolean> {
   try {
-    const db = getDb();
-    const rows = await db
+    const rows = await dbSession.db
       .select({ leaseExpiresAt: pmsWriteQueue.leaseExpiresAt })
       .from(pmsWriteQueue)
       .where(and(eq(pmsWriteQueue.organizationId, organizationId), eq(pmsWriteQueue.status, "leased")))

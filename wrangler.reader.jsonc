@@ -35,7 +35,14 @@
     // the forgery it exists to stop. So this value is unverified until a real
     // message confirms it, and the failure mode is closed: nothing verifies, and
     // `pms_seat_messages.observed_authserv_ids` records what actually arrived.
-    "PMS_SEAT_AUTHSERV_ID": "mx.cloudflare.net"
+    "PMS_SEAT_AUTHSERV_ID": "mx.cloudflare.net",
+
+    // Where the decision happens. This Worker holds the inbox and no database;
+    // the app holds the database and no inbox. See the note in the Worker.
+    // The matching secret is PMS_SEAT_READER_TOKEN, set with
+    // `npx wrangler secret put PMS_SEAT_READER_TOKEN --config wrangler.reader.jsonc`
+    // and never written here.
+    "PMS_SEAT_ADJUDICATOR_URL": "https://aval.llc"
   },
 
   "r2_buckets": [
@@ -44,24 +51,4 @@
       "bucket_name": "aval-pms-seat-inbox"
     }
   ],
-
-  // The app's database, and deliberately without `migrations_dir`: the reader
-  // reads and writes rows, and must never be the thing that applies a schema
-  // change. Migrations stay with the app Worker.
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "aval-production",
-      "database_id": "d82f33a0-a119-436c-85ec-b79873247fe9"
-    }
-  ],
-
-  // The app uses `@/` through vite; wrangler bundles this Worker with esbuild
-  // and does not read tsconfig paths. Only two aliased specifiers exist in this
-  // Worker's import graph, so they are mapped explicitly rather than by a
-  // prefix rule that could quietly pull in more of the app.
-  "alias": {
-    "@/db": "./db/index.ts",
-    "@/db/schema": "./db/schema.ts"
-  }
 }

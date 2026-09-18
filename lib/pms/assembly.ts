@@ -16,8 +16,8 @@
  */
 
 import { and, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections } from "@/db/postgres/schema";
 import { PMS_PROVIDERS } from "./providers/index.ts";
 import { resolveMatrix } from "./capability.ts";
 import { actionForTool, PMS_WRITE_TOOL_NAMES } from "./tool-map.ts";
@@ -34,9 +34,8 @@ import {
 const PMS_PROVIDER_IDS = PMS_PROVIDERS.map((provider) => provider.id);
 
 /** Which PMS providers this workspace has actually connected. */
-export async function connectedPmsProviders(organizationId: string): Promise<string[]> {
-  const db = getDb();
-  const rows = await db
+export async function connectedPmsProviders(dbSession: DbSession, organizationId: string): Promise<string[]> {
+  const rows = await dbSession.db
     .select({ provider: integrationConnections.provider })
     .from(integrationConnections)
     .where(
@@ -77,12 +76,13 @@ const NONE: PmsToolAvailability = {
  * passes one; omitting it skips the deployment narrowing and nothing else.
  */
 export async function pmsToolAvailability(
+  dbSession: DbSession,
   organizationId: string,
   personaId?: string,
 ): Promise<PmsToolAvailability> {
   ensurePmsAdaptersRegistered();
   try {
-    let providers = await connectedPmsProviders(organizationId);
+    let providers = await connectedPmsProviders(dbSession, organizationId);
     if (providers.length === 0) return NONE;
 
     // Deployments narrow both which providers this agent may target and which
@@ -90,12 +90,12 @@ export async function pmsToolAvailability(
     // does not thereby own arrears in DoorLoop, nor maintenance in AppFolio.
     let deployments: readonly AgentDeployment[] | null = null;
     if (personaId !== undefined) {
-      const forAgent = await deploymentsForAgent(organizationId, personaId);
+      const forAgent = await deploymentsForAgent(dbSession, organizationId, personaId);
       if (forAgent.length > 0) {
         deployments = forAgent;
         const deployed = new Set(forAgent.map((deployment) => deployment.provider));
         providers = providers.filter((provider) => deployed.has(provider));
-      } else if (!unconfiguredAgentMayUseEveryProvider(await organizationHasDeployments(organizationId))) {
+      } else if (!unconfiguredAgentMayUseEveryProvider(await organizationHasDeployments(dbSession, organizationId))) {
         // The workspace governs agents by deployment and this one has none.
         // Not an error and not a refusal — it was left out on purpose.
         return NONE;
@@ -104,7 +104,7 @@ export async function pmsToolAvailability(
     if (providers.length === 0) return NONE;
 
     const matrices = await Promise.all(
-      providers.map(async (provider) => [provider, await resolveMatrix(organizationId, provider)] as const),
+      providers.map(async (provider) => [provider, await resolveMatrix(dbSession, organizationId, provider)] as const),
     );
 
     const toolNames = new Set<string>();
@@ -144,6 +144,7 @@ export async function pmsToolAvailability(
  * is what makes "revoke within one business day" mean revoke now.
  */
 export async function pmsWriteAllowed(
+  dbSession: DbSession,
   organizationId: string,
   providerId: string,
   toolName: string,
@@ -160,7 +161,7 @@ export async function pmsWriteAllowed(
     // reaches for when something is going wrong, so "takes effect next turn" is
     // the wrong answer at exactly the moment it matters.
     if (personaId !== undefined) {
-      const deployments = await deploymentsForAgent(organizationId, personaId);
+      const deployments = await deploymentsForAgent(dbSession, organizationId, personaId);
       if (deployments.length > 0) {
         const owns = deployments.some((deployment) =>
           deployment.provider === providerId && deploymentOwnsAction(deployment, action)
@@ -172,7 +173,7 @@ export async function pmsWriteAllowed(
             mandatoryApproval: false,
           };
         }
-      } else if (!unconfiguredAgentMayUseEveryProvider(await organizationHasDeployments(organizationId))) {
+      } else if (!unconfiguredAgentMayUseEveryProvider(await organizationHasDeployments(dbSession, organizationId))) {
         return {
           allowed: false,
           reason: "This workspace governs agents by deployment and this agent has none.",
@@ -181,7 +182,7 @@ export async function pmsWriteAllowed(
       }
     }
 
-    const matrix = await resolveMatrix(organizationId, providerId);
+    const matrix = await resolveMatrix(dbSession, organizationId, providerId);
     const resolution = matrix.get(action);
     if (!resolution) return { allowed: false, reason: "Unknown action.", mandatoryApproval: false };
     return {

@@ -12,6 +12,7 @@
 import { executePmsWrite, describeWriteResult } from "./execute.ts";
 import { isPmsWriteTool } from "./tool-map.ts";
 import { SPEC_BY_NAME, str, compact } from "./tool-schemas.ts";
+import type { DbSession } from "@/db/postgres/session";
 
 export { PMS_WRITE_TOOL_SCHEMAS } from "./tool-schemas.ts";
 
@@ -31,6 +32,7 @@ export interface PmsWriteContext {
  * all, which the executor records as a tool error.
  */
 export async function runPmsWriteTool(
+  dbSession: DbSession,
   toolName: string,
   args: Record<string, unknown>,
   organizationId: string,
@@ -51,7 +53,7 @@ export async function runPmsWriteTool(
   const providerId = str(args.provider);
   if (!providerId) return { error: "A connected PMS provider must be named." };
 
-  const result = await executePmsWrite({
+  const result = await executePmsWrite(dbSession, {
     organizationId,
     providerId,
     toolName,

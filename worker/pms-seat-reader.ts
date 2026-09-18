@@ -8,22 +8,36 @@
  *     parsing, no HTTP surface. It stores bytes.
  *   - `aval` (the app) serves authenticated users. No handle on the unverified
  *     inbox — `d9210f8` removed one that had been pasted in.
- *   - this, on a schedule. The only component holding both, and its input is
- *     already-stored bytes rather than a live conversation with a sender.
+ *   - this, on a schedule. It holds the only handle on the unverified inbox.
  *
- * So the crossing happens in one place, on a cron, with no public surface, and
- * neither of the other two has to be widened to make the seat work.
+ * This Worker used to hold both halves: the bucket and a D1 binding. The app's
+ * move to Supabase Postgres took the database out from under it, and rather than
+ * give this Worker Postgres credentials — or give the app the bucket, which is
+ * the handle `d9210f8` deliberately removed — the decision now happens behind one
+ * authenticated call to `/api/pms/seat/adjudicate`, per message.
+ *
+ * The sweep itself still lives in `lib/pms/inbound/sweep.ts`: which prefixes are
+ * re-listed, in what order, under what per-prefix budget, and where a decided
+ * object is moved to. Only the decision is remote. Reimplementing any of that
+ * here would be a second copy to keep in step with the first.
  *
  * Deploy:  npx wrangler deploy --config wrangler.reader.jsonc
  */
 
-import { sweepSeatInbox, type SeatBucket } from "../lib/pms/inbound/sweep.ts";
+import {
+  sweepSeatInbox,
+  type SeatAdjudication,
+  type SeatAdjudicateInput,
+  type SeatBucket,
+} from "../lib/pms/inbound/sweep.ts";
 
 export interface ReaderEnv {
   /** The unverified inbox the mail Worker writes. Read, moved, never forwarded. */
   PMS_SEAT_INBOX: R2Bucket;
-  /** The app's database. `getDb()` reads this binding by name. */
-  DB: D1Database;
+  /** Origin of the app that owns the database, e.g. https://aval.llc */
+  PMS_SEAT_ADJUDICATOR_URL?: string;
+  /** Shared secret for that call. Set with `wrangler secret put`, never a var. */
+  PMS_SEAT_READER_TOKEN?: string;
   /**
    * The authserv-id the receiving MTA stamps on `Authentication-Results`.
    *
@@ -51,11 +65,38 @@ export default {
       );
     }
 
+    const origin = env.PMS_SEAT_ADJUDICATOR_URL?.trim();
+    const token = env.PMS_SEAT_READER_TOKEN?.trim();
+    if (!origin || !token) {
+      // Same reasoning. A reader that cannot reach the adjudicator must fail
+      // loudly rather than walk the inbox deciding nothing.
+      throw new Error(
+        "PMS_SEAT_ADJUDICATOR_URL and PMS_SEAT_READER_TOKEN must both be set. The reader holds "
+        + "the inbox but no database, and cannot decide a message on its own.",
+      );
+    }
+
+    /** One message, one authenticated call. Never a handle on the bucket. */
+    const adjudicate = async (input: SeatAdjudicateInput): Promise<SeatAdjudication> => {
+      const response = await fetch(new URL("/api/pms/seat/adjudicate", origin), {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ ...input, receivedAt: input.receivedAt.getTime() }),
+      });
+      if (!response.ok) {
+        // Thrown so the sweep counts it as failed and leaves the object where
+        // it is. The next run retries it; a persistent failure fails the cron.
+        throw new Error(`Adjudicator returned ${response.status}.`);
+      }
+      return (await response.json()) as SeatAdjudication;
+    };
+
     const limit = Number(env.PMS_SEAT_SWEEP_LIMIT ?? "");
     const summary = await sweepSeatInbox({
       bucket: env.PMS_SEAT_INBOX as unknown as SeatBucket,
       authservId,
       limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+      adjudicate,
     });
 
     // One line, all counts, no message content: this log is the evidence that

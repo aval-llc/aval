@@ -10,12 +10,12 @@
  */
 
 import { and, desc, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { pmsActionFlows } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { pmsActionFlows } from "@/db/postgres/schema";
 import type { PmsAction } from "./types.ts";
 
 /** An adapter that performs one action against one provider's API. */
-export type WriteAdapter = (input: {
+export type WriteAdapter = (dbSession: DbSession, input: {
   organizationId: string;
   providerId: string;
   action: PmsAction;
@@ -55,12 +55,12 @@ export interface ActiveFlow {
  * retired row is excluded for the same reason it is kept — history, not use.
  */
 export async function activeFlow(
+  dbSession: DbSession,
   organizationId: string,
   providerId: string,
   action: PmsAction,
 ): Promise<ActiveFlow | null> {
-  const db = getDb();
-  const [row] = await db
+  const [row] = await dbSession.db
     .select({
       id: pmsActionFlows.id,
       version: pmsActionFlows.version,
@@ -97,14 +97,14 @@ export async function activeFlow(
  * answer "is this learned" would make tool assembly quadratic in flow size.
  */
 export async function hasExecutablePath(
+  dbSession: DbSession,
   organizationId: string,
   providerId: string,
   action: PmsAction,
   mechanism: "api" | "ui",
 ): Promise<boolean> {
   if (mechanism === "api") return hasWriteAdapter(providerId, action);
-  const db = getDb();
-  const [row] = await db
+  const [row] = await dbSession.db
     .select({ id: pmsActionFlows.id })
     .from(pmsActionFlows)
     .where(
@@ -126,9 +126,8 @@ export async function hasExecutablePath(
  * all fourteen actions at once; calling `hasExecutablePath` in a loop would put
  * fourteen round-trips on the hot path of every agent turn.
  */
-export async function learnedFlowActions(organizationId: string, providerId: string): Promise<ReadonlySet<PmsAction>> {
-  const db = getDb();
-  const rows = await db
+export async function learnedFlowActions(dbSession: DbSession, organizationId: string, providerId: string): Promise<ReadonlySet<PmsAction>> {
+  const rows = await dbSession.db
     .select({ action: pmsActionFlows.action })
     .from(pmsActionFlows)
     .where(

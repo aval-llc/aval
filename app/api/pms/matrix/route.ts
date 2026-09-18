@@ -10,8 +10,8 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { pmsWriteAuthorizations } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { pmsWriteAuthorizations } from "@/db/postgres/schema";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { roleFor } from "@/lib/organizations/membership";
@@ -20,6 +20,7 @@ import { connectedPmsProviders } from "@/lib/pms/assembly.ts";
 import { resolveMatrix } from "@/lib/pms/capability.ts";
 import { pmsProvider } from "@/lib/pms/providers/index.ts";
 import { toolForAction } from "@/lib/pms/tool-map.ts";
+import { withApiSession } from "@/lib/api/with-session";
 import {
   isReadAction,
   MANDATORY_HUMAN_CHECKPOINT,
@@ -36,18 +37,18 @@ function isPmsAction(value: unknown): value is PmsAction {
   return typeof value === "string" && (ALL_ACTIONS as readonly string[]).includes(value);
 }
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   try {
-    await ensureOrganization(identity);
-    const providers = await connectedPmsProviders(identity.organizationId);
+    await ensureOrganization(dbSession, identity);
+    const providers = await connectedPmsProviders(dbSession, identity.organizationId);
 
     const rendered = await Promise.all(
       providers.map(async (providerId) => {
         const descriptor = pmsProvider(providerId);
-        const matrix = await resolveMatrix(identity.organizationId, providerId);
+        const matrix = await resolveMatrix(dbSession, identity.organizationId, providerId);
         return {
           provider: providerId,
           displayName: descriptor?.displayName ?? providerId,
@@ -90,8 +91,8 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   // A demo workspace must never be able to authorize a write into a real PMS.
   if (isGuestIdentity(identity)) return Response.json({ error: "Not available in the demo workspace" }, { status: 403 });
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
   // reach Settings should not be able to put their employer in breach of its PMS
   // contract. `canManagePolicy` is the existing owner-only gate on financial
   // limits and approval tiers, which is the same family of decision.
-  const role = await roleFor(identity.userId, identity.organizationId).catch(() => null);
+  const role = await roleFor(dbSession, identity.userId, identity.organizationId).catch(() => null);
   if (!role || !canManagePolicy(role)) {
     return Response.json({ error: "Only the workspace owner can change PMS write authorization" }, { status: 403 });
   }
@@ -142,8 +143,7 @@ export async function POST(request: Request) {
   }
 
   const now = new Date();
-  const db = getDb();
-  const [existing] = await db
+  const [existing] = await dbSession.db
     .select({ id: pmsWriteAuthorizations.id, version: pmsWriteAuthorizations.version })
     .from(pmsWriteAuthorizations)
     .where(
@@ -160,7 +160,7 @@ export async function POST(request: Request) {
   const status = enabled ? "approved" : existing ? "suspended" : "draft";
 
   if (existing) {
-    await db
+    await dbSession.db
       .update(pmsWriteAuthorizations)
       .set({
         status,
@@ -173,7 +173,7 @@ export async function POST(request: Request) {
       })
       .where(eq(pmsWriteAuthorizations.id, existing.id));
   } else {
-    await db.insert(pmsWriteAuthorizations).values({
+    await dbSession.db.insert(pmsWriteAuthorizations).values({
       id: crypto.randomUUID(),
       organizationId: identity.organizationId,
       provider,
@@ -190,7 +190,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const matrix = await resolveMatrix(identity.organizationId, provider);
+  const matrix = await resolveMatrix(dbSession, identity.organizationId, provider);
   const resolution = matrix.get(action);
   return Response.json({
     provider,
@@ -199,3 +199,6 @@ export async function POST(request: Request) {
     reason: resolution?.reason ?? null,
   });
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

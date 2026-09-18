@@ -23,8 +23,8 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationEvents } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationEvents } from "@/db/postgres/schema";
 import { parseMessage, type ParsedMessage } from "./mime.ts";
 
 /** What a per-provider parser would receive. Declared now so the seam is typed. */
@@ -116,7 +116,7 @@ function payloadOf(message: ParsedMessage, digest: string, objectKey: string) {
  * sweep re-reading a message after a provider change or a redeploy cannot
  * duplicate an event.
  */
-export async function captureNotification(options: {
+export async function captureNotification(dbSession: DbSession, options: {
   organizationId: string;
   providerId: string;
   digest: string;
@@ -134,9 +134,8 @@ export async function captureNotification(options: {
   const { organizationId, providerId, digest, objectKey, raw } = options;
   const message = parseMessage(raw);
   const externalEventId = seatEventId(organizationId, digest);
-  const db = getDb();
 
-  const [existing] = await db
+  const [existing] = await dbSession.db
     .select({ id: integrationEvents.id })
     .from(integrationEvents)
     // The organization is in `externalEventId` already, so this filter is
@@ -163,7 +162,7 @@ export async function captureNotification(options: {
   if (existing) return { eventId: existing.id, created: false, extraction, message };
 
   const eventId = crypto.randomUUID();
-  await db
+  await dbSession.db
     .insert(integrationEvents)
     .values({
       id: eventId,

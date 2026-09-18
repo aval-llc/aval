@@ -27,19 +27,12 @@
  * nothing after clicking Allow would have been lied to.
  */
 
-import { observedAuthservIds, parseAuthenticationResults, type SenderVerdict } from "./authentication.ts";
 import {
-  disposeMessage,
-  dispositionKey,
   REPROCESS_PREFIXES,
   type SeatDisposition,
   UNVERIFIED_PREFIX,
 } from "./disposition.ts";
-import { recordSeatMessage } from "./messages.ts";
-import { promoteVerifiedMessage, type PromotionOutcome } from "./promote.ts";
 import { seatSlugOf } from "./seat-address.ts";
-import { organizationForRecipient } from "./seats.ts";
-import { resolveSeatSender } from "./senders.ts";
 
 /**
  * The slice of R2 this needs, declared structurally so the sweep can be tested
@@ -82,8 +75,38 @@ export interface SweepOptions {
   authservId: string;
   /** Objects per run. The cron has a CPU budget and a backlog is not urgent. */
   limit?: number;
-  promote?: (message: Parameters<typeof promoteVerifiedMessage>[0]) => Promise<PromotionOutcome>;
+  /**
+   * How one message is decided.
+   *
+   * Injected because the component holding the unverified inbox and the one
+   * holding the database are deliberately different Workers. The reader passes
+   * a function that calls `/api/pms/seat/adjudicate`; anything running with a
+   * DbSession in hand passes `adjudicateSeatMessage` bound to it. Either way the
+   * listing, prefix budget and object move below stay in one place.
+   */
+  adjudicate: SeatAdjudicator;
 }
+
+export type SeatAdjudicateInput = {
+  digest: string;
+  recipient: string | null;
+  fallbackRecipient: string | null;
+  raw: string;
+  authservId: string;
+  currentKey: string;
+  receivedAt: Date;
+};
+
+export type SeatAdjudication = {
+  disposition: SeatDisposition;
+  /** Where the object belongs now. The caller moves it; this never does. */
+  targetKey: string;
+  captured: boolean;
+  extracted: boolean;
+  observedAuthservIds: readonly string[];
+};
+
+export type SeatAdjudicator = (input: SeatAdjudicateInput) => Promise<SeatAdjudication>;
 
 export interface SweepSummary {
   processed: number;
@@ -147,15 +170,9 @@ function recipientOf(object: SeatObjectRef): string | null {
   return seatSlugOf(recipient) === null ? null : recipient;
 }
 
-const NO_WORKSPACE: SenderVerdict = {
-  verified: false,
-  reason: "Addressed to a seat slug that belongs to no workspace.",
-};
-
 export async function sweepSeatInbox(options: SweepOptions): Promise<SweepSummary> {
   const { bucket, authservId } = options;
   const limit = options.limit ?? DEFAULT_LIMIT;
-  const promote = options.promote ?? promoteVerifiedMessage;
 
   const summary: SweepSummary = {
     processed: 0,
@@ -199,7 +216,7 @@ export async function sweepSeatInbox(options: SweepOptions): Promise<SweepSummar
       for (const object of page.objects) {
         handled += 1;
         try {
-          const state = await processObject(object, { bucket, authservId, promote });
+          const state = await processObject(object, { bucket, authservId, adjudicate: options.adjudicate });
           if (state.disposition === null) continue;
           summary.processed += 1;
           summary[state.disposition] += 1;
@@ -230,7 +247,7 @@ async function processObject(
   context: {
     bucket: SeatBucket;
     authservId: string;
-    promote: NonNullable<SweepOptions["promote"]>;
+    adjudicate: SeatAdjudicator;
   },
 ): Promise<{
   disposition: SeatDisposition | null;
@@ -238,7 +255,7 @@ async function processObject(
   extracted: boolean;
   observedAuthservIds: readonly string[];
 }> {
-  const { bucket, authservId, promote } = context;
+  const { bucket, authservId, adjudicate } = context;
   const { digest } = partsFromKey(object.key);
   const recipient = recipientOf(object);
 
@@ -255,71 +272,31 @@ async function processObject(
   // content readable for header parsing instead of throwing on it.
   const raw = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 
-  const organizationId = recipient ? await organizationForRecipient(recipient) : null;
-  const auth = parseAuthenticationResults(raw, authservId);
-
-  const resolution = organizationId
-    ? await resolveSeatSender(organizationId, auth)
-    : { verdict: NO_WORKSPACE, providerId: undefined };
-
-  const disposition = disposeMessage({
-    organizationId,
-    verdict: resolution.verdict,
-    providerId: resolution.providerId,
+  const decision = await adjudicate({
+    digest,
+    recipient,
+    fallbackRecipient: object.customMetadata?.recipient ?? null,
+    raw,
+    authservId,
+    currentKey: object.key,
+    receivedAt: receivedAtOf(object),
   });
 
-  const key = dispositionKey(disposition, digest);
-  if (key !== object.key) {
-    await bucket.put(key, bytes, {
+  if (decision.targetKey !== object.key) {
+    await bucket.put(decision.targetKey, bytes, {
       httpMetadata: { contentType: "message/rfc822" },
       customMetadata: {
         ...(body.customMetadata ?? {}),
         // Overwrites the mail Worker's `verified: "false"` with what was
         // actually decided, so the object and the row cannot disagree.
-        verified: String(disposition.state === "verified"),
-        disposition: disposition.state,
+        verified: String(decision.disposition === "verified"),
+        disposition: decision.disposition,
       },
     });
     await bucket.delete(object.key);
   }
 
-  let captured = false;
-  let extracted = false;
-  let reason = resolution.verdict.reason;
-  if (disposition.state === "verified" && organizationId && disposition.providerId) {
-    const outcome = await promote({
-      organizationId,
-      providerId: disposition.providerId,
-      digest,
-      objectKey: key,
-      raw,
-    });
-    captured = outcome.promoted;
-    extracted = outcome.extracted;
-    // Appended whether or not it succeeded. "Verified, captured, no parser yet"
-    // is the normal state today and the row is where anyone would look for it.
-    reason = `${reason} ${outcome.reason}`;
-  }
-
-  const observed = disposition.state === "unauthenticated" ? observedAuthservIds(raw) : [];
-
-  await recordSeatMessage({
-    digest,
-    recipient: recipient ?? object.customMetadata?.recipient ?? "(unparsable)",
-    organizationId,
-    disposition: disposition.state,
-    domain: disposition.domain,
-    method: disposition.method,
-    providerId: disposition.providerId,
-    reason,
-    // Only worth storing when nothing authenticated: that is the case where the
-    // expected authserv-id being wrong is indistinguishable from an empty inbox.
-    observedAuthservIds: observed.join(", ") || null,
-    objectKey: key,
-    receivedAt: receivedAtOf(object),
-  });
-
-  return { disposition: disposition.state, captured, extracted, observedAuthservIds: observed };
+  return { disposition: decision.disposition, captured: decision.captured, extracted: decision.extracted, observedAuthservIds: decision.observedAuthservIds };
 }
 
 /**

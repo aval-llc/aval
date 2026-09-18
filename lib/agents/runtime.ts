@@ -172,7 +172,7 @@ export async function advanceTask(dbSession: DbSession,
   // Scoped to this agent's deployments: which PMS it works inside and which
   // workflows it owns there. A workspace with no deployments configured is
   // unchanged; one with any is governed by them (lib/pms/deployments.ts).
-  const pmsAvailability = await pmsToolAvailability(organizationId, task.agentId);
+  const pmsAvailability = await pmsToolAvailability(dbSession, organizationId, task.agentId);
   let tools: ToolSchema[] = personaTools(TOOLS, persona, "render_answer")
     .filter((tool) => tool.name === "render_answer" || permitted.has(tool.name))
     .filter((tool) => !isPmsWriteTool(tool.name) || pmsAvailability.toolNames.has(tool.name));

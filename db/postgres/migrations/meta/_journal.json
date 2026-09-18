@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1789149628825,
+      "when": 1789767225175,
       "tag": "0000_superb_black_knight",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1789766095483,
-      "tag": "0001_brief_silver_surfer",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1789766143854,
-      "tag": "0002_hard_franklin_storm",
       "breakpoints": true
     }
   ]
