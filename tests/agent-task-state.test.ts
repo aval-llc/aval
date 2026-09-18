@@ -80,7 +80,30 @@ test("the implemented mutation inventory is explicit", () => {
   // A drifting version of this test is the early warning that a mutating tool
   // shipped without an approval posture being chosen for it.
   const mutating = implementedTools().filter((tool) => tool.mutates).map((tool) => tool.name);
-  assert.deepEqual(mutating, ["plan_goal", "write_memory", "record_preference", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"]);
+  assert.deepEqual(mutating, [
+    "plan_goal",
+    "write_memory",
+    "record_preference",
+    "create_maintenance_work_order",
+    "send_external_message",
+    "place_call",
+    "publish_listing",
+    // PMS writes. Being in this list is not authority: each one is additionally
+    // gated per org and per provider by lib/pms/capability.ts, which assembles
+    // it into a request's tool list only when the provider supports and permits
+    // the action, the connection grants it, the workspace enabled it, and Aval
+    // has built the path. See tests/pms-capability.test.ts.
+    "create_work_order",
+    "update_work_order_status",
+    "close_work_order",
+    "dispatch_vendor",
+    "create_payment_plan",
+    "post_payment",
+    "reply_to_inquiry",
+    "book_viewing",
+    "send_application",
+    "update_lease_status",
+  ]);
 });
 
 test("every tool declares a positive timeout and a non-negative retry budget", () => {

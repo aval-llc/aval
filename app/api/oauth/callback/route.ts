@@ -9,6 +9,7 @@ import { encryptSecret } from "@/lib/integrations/crypto";
 import { getProvider } from "@/lib/integrations/catalog";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { oauthAccount, oauthScopes, requestOAuthToken, safeReturnTo, type IntegrationEnv } from "@/lib/integrations/oauth";
+import { providerIsReadOnly } from "@/lib/pms/derive.ts";
 
 async function GETWithSession(dbSession: DbSession, request: Request) {
   const url = new URL(request.url);
@@ -48,7 +49,7 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
       status: account.id ? "connected" : "verification_required", authMode: provider.authMode,
       externalAccountId: account.id || null, externalAccountName: account.name,
       scopesJson: JSON.stringify(oauthScopes(provider.id)), accessTokenCiphertext, refreshTokenCiphertext, expiresAt,
-      lastSyncAt: null, metadataJson: JSON.stringify({ readOnly: provider.readOnly, webhook: provider.webhook, quickbooksEnvironment: provider.id === "quickbooks" ? config.QUICKBOOKS_ENVIRONMENT ?? "production" : undefined }), updatedAt: now,
+      lastSyncAt: null, metadataJson: JSON.stringify({ readOnly: providerIsReadOnly(provider.id, provider.readOnly), webhook: provider.webhook, quickbooksEnvironment: provider.id === "quickbooks" ? config.QUICKBOOKS_ENVIRONMENT ?? "production" : undefined }), updatedAt: now,
     };
     await db.insert(integrationConnections).values({ id: crypto.randomUUID(), organizationId: identity.organizationId, provider: provider.id, category: provider.category, createdBy: identity.userId, createdAt: now, ...values }).onConflictDoUpdate({ target: [integrationConnections.organizationId, integrationConnections.provider], set: values });
     const redirect = new URL(safeReturnTo(state.returnTo, url.origin), url.origin);

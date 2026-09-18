@@ -75,9 +75,19 @@ export const organizations = sqliteTable("organizations", {
   // Setup. Null means the built-in "general" persona, matching this app's
   // behavior before this column existed.
   defaultPersonaId: text("default_persona_id"),
+  // The seat slug currently shown to this workspace — its address is
+  // `agent-{seatSlug}@aval.llc`. Null until an operator picks one during setup;
+  // a workspace without one has no inbound seat and no PMS can mail it.
+  //
+  // This is the *current* address, not the set of addresses that reach here.
+  // Renaming adds a slug rather than replacing one, because a customer's PMS
+  // already has the old address on file and nothing we do should make mail they
+  // send disappear. `organization_seat_slugs` is that permanent set, and every
+  // value here must also exist there.
+  seatSlug: text("seat_slug"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+}, (table) => [uniqueIndex("organizations_seat_slug_uq").on(table.seatSlug)]);
 
 export const ssoConnections = sqliteTable("sso_connections", {
   id: text("id").primaryKey(),
@@ -1524,3 +1534,324 @@ export const agentPlanNodes = sqliteTable("agent_plan_nodes", {
 export const agentModelContexts = sqliteTable("agent_model_contexts", {
  id:text("id").primaryKey(),organizationId:text("organization_id").notNull().references(()=>organizations.id),taskId:text("task_id").notNull().references(()=>agentTasks.id),stepIndex:integer("step_index").notNull(),contextJson:text("context_json").notNull(),digest:text("digest").notNull(),createdAt:integer("created_at",{mode:"timestamp_ms"}).notNull(),
 },t=>[index("agent_model_context_task_idx").on(t.organizationId,t.taskId,t.stepIndex)]);
+
+/**
+ * Per-org authorization for a PMS write action (docs/PMS_INTEGRATION.md, P0/P2).
+ *
+ * Deliberately shaped like `agent_execution_policies` and deliberately NOT like
+ * `communication_settings`. A `signed_authorization` that cannot say who signed
+ * it and when is not an authorization, it is a checkbox — and for the actions
+ * gated here (money in a trust account, a message to a housing applicant) the
+ * identity of the approver is the entire control.
+ *
+ * One row per (org, provider, action). Absence means not enabled: the resolver
+ * reads a missing row as `off`, never as permitted. `status` exists because an
+ * authorization is revocable without being deleted — `suspended` preserves the
+ * audit trail of who had once signed for it.
+ */
+export const pmsWriteAuthorizations = sqliteTable(
+  "pms_write_authorizations",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    // A PmsAction from lib/pms/types.ts. Stored as text because the enum lives
+    // in code, where a test can assert every stored value still resolves.
+    action: text("action").notNull(),
+    status: text("status").notNull().default("draft"), // draft | approved | suspended
+    // True only when a human countersigned the provider's terms override. The
+    // resolver requires this for any action whose descriptor says permitted:false.
+    signedAuthorization: integer("signed_authorization", { mode: "boolean" }).notNull().default(false),
+    // Free text naming the document or counsel sign-off. Not parsed; it exists
+    // so an auditor can find the paper.
+    authorizationReference: text("authorization_reference"),
+    version: integer("version").notNull().default(1),
+    approvedByUserId: text("approved_by_user_id"),
+    approvedAt: integer("approved_at", { mode: "timestamp_ms" }),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_write_auth_uq").on(table.organizationId, table.provider, table.action),
+    index("pms_write_auth_org_idx").on(table.organizationId, table.status),
+  ],
+);
+
+/**
+ * A recorded, replayable path for one (provider, action) — the cache behind the
+ * `unlearned` state.
+ *
+ * The first time an action is needed on a provider whose mechanism is `ui`, the
+ * agent reads the page's semantic tree, works out the path, and proposes it on
+ * an approval card. On approval it executes *and* stores the path here. Every
+ * later run replays this row: no model call, deterministic, and renderable on an
+ * approval card before it runs, which a live vision agent can never be.
+ *
+ * `version` is part of the key rather than a mutable column because a provider
+ * UI redesign does not invalidate history — it creates a new flow. Keeping the
+ * old row lets an audit entry from last month still resolve to the steps that
+ * actually ran.
+ *
+ * `provider` is scoped per-org rather than global on purpose: two AppFolio
+ * tenants can have different field layouts, and a flow learned in one workspace
+ * is not evidence about another. Global promotion is a later decision, and it
+ * needs to be a deliberate one.
+ */
+export const pmsActionFlows = sqliteTable(
+  "pms_action_flows",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    action: text("action").notNull(),
+    version: integer("version").notNull().default(1),
+    // Ordered, declarative steps — selectors and values, no executable code.
+    // Reviewed on an approval card, so it has to be readable by a person.
+    stepsJson: text("steps_json").notNull(),
+    // SHA-256 of stepsJson. An approval binds to this, so a flow edited after
+    // approval fails to replay rather than running something unapproved.
+    digest: text("digest").notNull(),
+    status: text("status").notNull().default("candidate"), // candidate | active | retired
+    learnedByUserId: text("learned_by_user_id"),
+    lastReplayAt: integer("last_replay_at", { mode: "timestamp_ms" }),
+    lastReplayOk: integer("last_replay_ok", { mode: "boolean" }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_action_flow_uq").on(table.organizationId, table.provider, table.action, table.version),
+    index("pms_action_flow_lookup_idx").on(table.organizationId, table.provider, table.action, table.status),
+  ],
+);
+
+/**
+ * Pending PMS writes awaiting the desktop runner.
+ *
+ * No new queue infrastructure: this follows the `integration_events` pattern the
+ * WhatsApp discovery identified as the one that works on D1 — an append-only log
+ * with primary-key dedupe, drained by a poller. The difference is who drains it.
+ * `integration_events` is drained by the one-minute cron; this is drained by the
+ * Electron runner asking for its own org's pending rows, because the whole point
+ * of `runner: 'desktop'` is that the cron cannot do this work.
+ *
+ * `leaseId`-style provider ids are NOT stored here; `payloadJson` holds only what
+ * the approved flow needs, and the approval it binds to is the record of intent.
+ */
+export const pmsWriteQueue = sqliteTable(
+  "pms_write_queue",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    action: text("action").notNull(),
+    // The approval that authorized this write. Null is only valid for actions
+    // whose resolution did not require one; the drainer re-checks either way.
+    approvalId: text("approval_id"),
+    flowId: text("flow_id"),
+    payloadJson: text("payload_json").notNull(),
+    // Caller-supplied idempotency key. Unique per org so a retried enqueue
+    // collides on the index instead of queueing a second write.
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"), // pending | leased | done | failed | abandoned
+    // Set while a runner holds it, so two desktop instances for one org cannot
+    // both execute. Expires, because a laptop closing mid-write is normal.
+    leasedBy: text("leased_by"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_write_queue_idem_uq").on(table.organizationId, table.idempotencyKey),
+    index("pms_write_queue_drain_idx").on(table.organizationId, table.status, table.createdAt),
+  ],
+);
+
+/**
+ * Which system an agent works inside (docs/PMS_INTEGRATION_DISCOVERY.md).
+ *
+ * `agent_personas` says what an agent *is* and which tools it may frame; nothing
+ * said which PMS it works in. Without that, `pmsToolAvailability()` had to
+ * resolve across every connected provider and let the model name one as a tool
+ * argument — so an org with two PMSs offered every agent both.
+ *
+ * A join row, not a `provider` column on `agent_personas`, because one persona
+ * should be deployable into several PMSs at different autonomy levels and one
+ * PMS should host several personas. A column forces one-to-one and makes "the
+ * maintenance agent in AppFolio is supervised while the one in DoorLoop is
+ * autonomous" unrepresentable.
+ *
+ * `personaId` carries no foreign key on purpose: it holds either an
+ * `agent_personas.id` or a built-in PersonaId that has no row to point at.
+ */
+export const agentDeployments = sqliteTable(
+  "agent_deployments",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    // An agent_personas.id, or a built-in PersonaId. No FK — see above.
+    personaId: text("persona_id").notNull(),
+    // The PMS this deployment works inside. Matches integration_connections.provider.
+    provider: text("provider").notNull(),
+    // JSON string array of PmsWorkflow this deployment owns here. A deployment
+    // that owns "maintenance" does not thereby own "arrears" in the same system.
+    workflowsJson: text("workflows_json").notNull().default("[]"),
+    autonomyMode: text("autonomy_mode").notNull().default("supervised"), // supervised | assisted | autonomous
+    status: text("status").notNull().default("active"), // active | paused
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("agent_deployments_uq").on(table.organizationId, table.personaId, table.provider),
+    index("agent_deployments_lookup_idx").on(table.organizationId, table.personaId, table.status),
+  ],
+);
+
+/**
+ * Every seat slug ever issued, and who it belongs to. Permanently.
+ *
+ * `slug` is the primary key and rows are **never deleted**, which is the whole
+ * design: a slug cannot be reissued, so mail a PMS is still sending to a
+ * workspace's old address can never arrive at a different workspace. That is not
+ * a hypothetical — a seat address lives inside a customer's PMS configuration,
+ * outside our control, and may be used for years after they stopped thinking
+ * about it.
+ *
+ * A workspace that renames gains a row. It never gives one up, and every row it
+ * holds keeps resolving to it. `organizations.seatSlug` names which of them is
+ * the current one to display; this table decides which mail is whose.
+ */
+export const organizationSeatSlugs = sqliteTable(
+  "organization_seat_slugs",
+  {
+    slug: text("slug").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** Who claimed it, for the audit trail on an address a customer will type. */
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("organization_seat_slugs_org_idx").on(table.organizationId)],
+);
+
+/**
+ * Who may write to a workspace's seat address.
+ *
+ * `verifySender` (lib/pms/inbound/authentication.ts) refuses every message when
+ * this table has no row for the workspace, and that is the intended reading: a
+ * workspace that has not said who may write to its seat has not consented. Same
+ * rule as `pms_write_authorizations` — absence is never permission.
+ *
+ * A row is (workspace, domain, provider). The provider is not decoration: it is
+ * how the read envelope knows which system's format a verified message is in,
+ * without inferring it from content an attacker could shape. Mail that
+ * authenticates as `mail.appfolio.com` is parsed as AppFolio because an operator
+ * said that domain is their AppFolio, not because the body looked like it.
+ *
+ * Domains are stored as the operator confirmed them, and matched by
+ * `domainMatches`, which accepts subdomains. So a row for `appfolio.com` covers
+ * `mail.appfolio.com` without an operator having to predict which subdomains
+ * their PMS will send from next year.
+ *
+ * Unlike `organization_seat_slugs`, rows here are deletable. Revoking a sender
+ * has to be possible and immediate — the address is permanent precisely so that
+ * consent does not have to be.
+ */
+export const pmsSeatSenders = sqliteTable(
+  "pms_seat_senders",
+  {
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** Normalized by `sender-domain.ts` before it gets here: lowercase, no scheme, no leading dot. */
+    domain: text("domain").notNull(),
+    /** A provider id from lib/pms/providers. Verified mail from this domain is read as this system. */
+    providerId: text("provider_id").notNull(),
+    /** Who allowed it. This is a consent record, so the approver is part of it. */
+    addedBy: text("added_by").notNull(),
+    addedAt: integer("added_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_seat_senders_uq").on(table.organizationId, table.domain),
+    index("pms_seat_senders_org_idx").on(table.organizationId),
+  ],
+);
+
+/**
+ * One row per message the seat has processed — the reader's ledger.
+ *
+ * Written by `aval-pms-seat-reader` (worker/pms-seat-reader.ts), which is the
+ * only component holding both the unverified inbox and the database. The app
+ * never reads R2; it reads this. That split is deliberate and is the reason this
+ * table exists at all rather than the review surface listing the bucket:
+ * `d9210f8` took the inbox binding off the app Worker, and re-adding it to draw
+ * a settings panel would undo the boundary both wrangler configs exist to hold.
+ *
+ * `digest` is the primary key and is the message's own content hash, so a sweep
+ * that runs twice, or a PMS that sends the same notice twice, writes the same
+ * row. The sweep is therefore safe to re-run at any point, including mid-failure.
+ *
+ * ## What may be rendered from this table
+ *
+ * `authenticated_domain` is null unless the domain was actually authenticated by
+ * the topmost trusted `Authentication-Results`. That is a storage-level control,
+ * not a convention: a held message's `From` is chosen by whoever sent it, and a
+ * review surface that rendered a claimed domain would be putting attacker-picked
+ * text on an operator's screen next to an "Allow" button. Mail that authenticated
+ * nothing is counted, never named.
+ *
+ * `reason` and `observed_authserv_ids` are triage fields. They can contain
+ * sender-influenced text and are for a developer reading a query result, never
+ * for a customer-facing surface.
+ */
+export const pmsSeatMessages = sqliteTable(
+  "pms_seat_messages",
+  {
+    /**
+     * `<recipient>:<digest>` — a key Aval constructs, not one taken from the mail.
+     *
+     * The digest alone cannot be the key. It is a content hash, and two
+     * workspaces can be sent the *same bytes* — one vendor notice addressed to
+     * both, or the same announcement to two seats. Keyed on the digest, the
+     * second workspace's row would overwrite the first, taking its
+     * organization_id with it: one customer's held mail silently reattributed
+     * to another. The recipient is in the key for that reason, and it works
+     * because a seat address belongs to one workspace forever
+     * (`organization_seat_slugs`).
+     */
+    id: text("id").primaryKey(),
+    /** SHA-256 of the raw message, and the last segment of its R2 key. */
+    digest: text("digest").notNull(),
+    /** The seat address it was sent to. Ours, not the sender's, so safe to display. */
+    recipient: text("recipient").notNull(),
+    /** Null when the slug belongs to no workspace — mail to an address never issued. */
+    organizationId: text("organization_id"),
+    /** verified | held | unauthenticated | unassigned — see lib/pms/inbound/disposition.ts. */
+    disposition: text("disposition").notNull(),
+    /** Set only when authentication established it. Null is the signal not to name a sender. */
+    authenticatedDomain: text("authenticated_domain"),
+    /** dmarc | dkim, whichever established the domain. */
+    method: text("method"),
+    /** The provider from the matching allowlist row, so the parser is chosen by consent. */
+    providerId: text("provider_id"),
+    /** Triage only. May contain sender-influenced text; never render to an operator. */
+    reason: text("reason"),
+    /**
+     * The authserv-ids actually seen on the message, recorded because the one
+     * Cloudflare uses is not documented anywhere we could find. If verification
+     * fails across the board, this column is the difference between a one-query
+     * answer and a blind hunt. Triage only — a sender can put ids here too.
+     */
+    observedAuthservIds: text("observed_authserv_ids"),
+    /** Where the object now lives, so a later sweep or an audit can fetch it. */
+    objectKey: text("object_key").notNull(),
+    receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
+    processedAt: integer("processed_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("pms_seat_messages_org_idx").on(table.organizationId, table.disposition),
+    index("pms_seat_messages_held_idx").on(table.organizationId, table.authenticatedDomain),
+    index("pms_seat_messages_digest_idx").on(table.digest),
+  ],
+);

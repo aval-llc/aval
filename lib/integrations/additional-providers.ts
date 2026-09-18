@@ -1,15 +1,21 @@
-import type { IntegrationProvider } from "./catalog";
+import type { IntegrationProvider } from "./catalog.ts";
 
 export type AdditionalProviderId = "yardi_breeze" | "reapit" | "sme_professional" | "10ninety" | "arthur" | "joblogic" | "rentvine" | "asana" | "buildingstack" | "gohighlevel" | "igloohome" | "peach" | "propstack" | "resharmonics" | "realpad" | "rentvision" | "rm_cloud" | "showmojo" | "tenantcloud" | "street" | "yardi_kube" | "google_chat" | "microsoft_teams" | "imessage" | "google_drive" | "google_sheets" | "onedrive" | "box" | "rightmove" | "zoopla" | "onthemarket" | "meta";
 
 function partner(id: AdditionalProviderId, title: string, documentationUrl: string, setupBlocker: string, category: IntegrationProvider["category"] = "Leasing & PMS"): IntegrationProvider {
-  return { id, title, category, description: `Connect ${title} to your Aval workspace once the provider adapter is approved.`, authMode: "credentials", permissions: [], credentialFields: [], env: [], webhook: false, readOnly: true, note: setupBlocker, setupBlocker, documentationUrl };
+  // readOnly is deliberately absent — derived from the PMS descriptor.
+  return { id, title, category, description: `Connect ${title} to your Aval workspace once the provider adapter is approved.`, authMode: "credentials", permissions: [], credentialFields: [], env: [], webhook: false, note: setupBlocker, setupBlocker, documentationUrl };
 }
 function key(id: AdditionalProviderId, title: string, documentationUrl: string, credentialFields: NonNullable<IntegrationProvider["credentialFields"]>, note: string): IntegrationProvider {
-  return { id, title, category: "Leasing & PMS", description: `Connect your ${title} account and verify API access.`, authMode: "credentials", permissions: ["Read connected account records"], credentialFields, env: [], webhook: false, readOnly: true, note, documentationUrl };
+  // Always Leasing & PMS, so readOnly is derived from the provider descriptor.
+  return { id, title, category: "Leasing & PMS", description: `Connect your ${title} account and verify API access.`, authMode: "credentials", permissions: ["Read connected account records"], credentialFields, env: [], webhook: false, note, documentationUrl };
 }
 function oauth(id: AdditionalProviderId, title: string, category: IntegrationProvider["category"], env: string[], permissions: string[], documentationUrl: string, note: string): IntegrationProvider {
-  return { id, title, category, description: `Connect your ${title} account with read permissions.`, authMode: "oauth2", permissions, env, webhook: false, readOnly: category !== "Communication", note, documentationUrl };
+  // A PMS omits readOnly entirely — lib/pms/derive.ts computes it. Knowledge and
+  // Communication connections keep the stored value, since the PMS capability
+  // layer says nothing about them.
+  const base = { id, title, category, description: `Connect your ${title} account with read permissions.`, authMode: "oauth2" as const, permissions, env, webhook: false, note, documentationUrl };
+  return category === "Leasing & PMS" ? base : { ...base, readOnly: category !== "Communication" };
 }
 export const additionalProviders: IntegrationProvider[] = [
   partner("yardi_breeze", "Yardi Breeze", "https://www.yardibreeze.com/", "Breeze requires a product-specific agreement and interface specification. A Voyager key does not establish Breeze access."),

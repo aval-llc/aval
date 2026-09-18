@@ -16,10 +16,17 @@
  *    be able to answer "what is the worst this agent can do" from this file
  *    alone, without tracing executors.
  *
- * Today every registered tool is read-only, `record_preference` excepted.
- * The gated entries at the bottom are declared with no executor: they define
- * the envelope the first mutating tool will land inside, and `policy.ts`
- * denies them until an executor is wired, so declaring one grants nothing.
+ * The PMS write tools are the first mutating capabilities with real executors.
+ * They are not gated by `unimplemented` — they are gated by
+ * `lib/pms/capability.ts`, which assembles them into a request's tool list only
+ * when the provider supports and permits the action, the customer's connection
+ * grants it, the workspace enabled it, and Aval has actually built the path.
+ * That is a stronger gate than `unimplemented`, because it is evaluated per org
+ * and per provider rather than once at build time.
+ *
+ * The remaining gated entries at the bottom still have no executor: they define
+ * the envelope a future capability will land inside, and `policy.ts` denies them
+ * until one is wired, so declaring one grants nothing.
  */
 
 import type { Permission } from "./permissions.ts";
@@ -149,7 +156,40 @@ const DESCRIPTORS: ToolDescriptor[] = [
   { ...READ_DEFAULTS, name: "request_execution_plan", summary: "Approve exact actions in a task plan.", requiredPermission: "preferences.write", requiresApproval: true },
   { ...READ_DEFAULTS, name: "get_marketing_channels", summary: "Marketing channel readiness.", requiredPermission: "leasing.read" },
   { name: "publish_listing", summary: "Publish a unit listing to an external marketplace.", riskLevel: "high", mutates: true, requiredPermission: "listing.publish", timeoutMs: 20_000, maxRetries: 0, idempotent: false, requiresApproval: true },
-  { name: "dispatch_vendor", summary: "Dispatch a vendor to a work order.", riskLevel: "high", mutates: true, requiredPermission: "vendor.dispatch", timeoutMs: 20_000, maxRetries: 0, idempotent: false, requiresApproval: true, unimplemented: true },
+
+  /* ── PMS writes ──────────────────────────────────────────────────────────
+   * Ten tools, one machinery. Whether any of them is offered to the model is
+   * decided per request by `lib/pms/capability.ts`, not here: this file only
+   * says what each one costs if it runs.
+   *
+   * All ten are `idempotent: true` despite mutating, which is unusual enough to
+   * justify: every one is enqueued with a caller-supplied idempotency key that
+   * is unique per org (`pms_write_queue.idempotencyKey`), so a repeat collides
+   * on the index rather than writing twice. `maxRetries` stays 0 regardless —
+   * the queue owns retries, and a tool-level retry would race the drainer.
+   *
+   * `requiresApproval` is true on all of them. The autonomy mode can relax a
+   * `routine` mutation elsewhere in this registry; a write into someone else's
+   * system of record is never routine, because the customer — not Aval — is the
+   * party who answers for what appears in their PMS.
+   */
+  { name: "create_work_order", summary: "Create a work order in the connected PMS.", riskLevel: "high", mutates: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "update_work_order_status", summary: "Change a work order's status in the connected PMS.", riskLevel: "medium", mutates: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "close_work_order", summary: "Close a work order in the connected PMS.", riskLevel: "medium", mutates: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "dispatch_vendor", summary: "Dispatch a vendor to a work order.", riskLevel: "high", mutates: true, requiredPermission: "vendor.dispatch", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  // Arrears: a payment plan is a commitment about someone's housing, and a
+  // posting lands in a trust ledger. `critical` puts both behind the elevated
+  // approval tier (two distinct approvers) rather than a single sign-off.
+  { name: "create_payment_plan", summary: "Record a payment plan against a delinquent account.", riskLevel: "critical", mutates: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "post_payment", summary: "Post a payment to a resident ledger in the connected PMS.", riskLevel: "critical", mutates: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  // Leasing: the two applicant-facing tools are also in
+  // MANDATORY_HUMAN_CHECKPOINT, which is enforced independently of this flag so
+  // that no future edit here can make them autonomous.
+  { name: "reply_to_inquiry", summary: "Reply to a leasing inquiry through the connected PMS.", riskLevel: "high", mutates: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "book_viewing", summary: "Book a viewing in the connected PMS calendar.", riskLevel: "medium", mutates: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "send_application", summary: "Send a rental application to a prospect.", riskLevel: "high", mutates: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "update_lease_status", summary: "Update a lease's status in the connected PMS.", riskLevel: "high", mutates: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+
   {
     name: "authorize_vendor_spend",
     summary: "Authorize spend against a vendor estimate.",

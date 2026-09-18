@@ -232,6 +232,41 @@
       "when": 1789149151312,
       "tag": "0032_enterprise_identity_hierarchy",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1789671749607,
+      "tag": "0033_productive_zuras",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1789678406703,
+      "tag": "0034_silent_kang",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1789695129015,
+      "tag": "0035_mute_firebird",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1789696318055,
+      "tag": "0036_safe_jazinda",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1789698756350,
+      "tag": "0037_bouncy_matthew_murdock",
+      "breakpoints": true
     }
   ]
 }

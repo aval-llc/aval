@@ -10,6 +10,8 @@ SELECT 'agent_approvals' AS table_name, count(*) AS row_count FROM "agent_approv
 UNION ALL
 SELECT 'agent_checks' AS table_name, count(*) AS row_count FROM "agent_checks"
 UNION ALL
+SELECT 'agent_deployments' AS table_name, count(*) AS row_count FROM "agent_deployments"
+UNION ALL
 SELECT 'agent_execution_policies' AS table_name, count(*) AS row_count FROM "agent_execution_policies"
 UNION ALL
 SELECT 'agent_financial_events' AS table_name, count(*) AS row_count FROM "agent_financial_events"
@@ -88,6 +90,8 @@ SELECT 'organization_invitations' AS table_name, count(*) AS row_count FROM "org
 UNION ALL
 SELECT 'organization_members' AS table_name, count(*) AS row_count FROM "organization_members"
 UNION ALL
+SELECT 'organization_seat_slugs' AS table_name, count(*) AS row_count FROM "organization_seat_slugs"
+UNION ALL
 SELECT 'organizations' AS table_name, count(*) AS row_count FROM "organizations"
 UNION ALL
 SELECT 'ownership_entities' AS table_name, count(*) AS row_count FROM "ownership_entities"
@@ -95,6 +99,16 @@ UNION ALL
 SELECT 'planning_items' AS table_name, count(*) AS row_count FROM "planning_items"
 UNION ALL
 SELECT 'planning_projects' AS table_name, count(*) AS row_count FROM "planning_projects"
+UNION ALL
+SELECT 'pms_action_flows' AS table_name, count(*) AS row_count FROM "pms_action_flows"
+UNION ALL
+SELECT 'pms_seat_messages' AS table_name, count(*) AS row_count FROM "pms_seat_messages"
+UNION ALL
+SELECT 'pms_seat_senders' AS table_name, count(*) AS row_count FROM "pms_seat_senders"
+UNION ALL
+SELECT 'pms_write_authorizations' AS table_name, count(*) AS row_count FROM "pms_write_authorizations"
+UNION ALL
+SELECT 'pms_write_queue' AS table_name, count(*) AS row_count FROM "pms_write_queue"
 UNION ALL
 SELECT 'portfolio_snapshots' AS table_name, count(*) AS row_count FROM "portfolio_snapshots"
 UNION ALL
@@ -148,6 +162,8 @@ SELECT 'agent_approvals' AS table_name, status, count(*) AS row_count FROM "agen
 
 SELECT 'agent_approvals' AS table_name, 'amount_cents' AS column_name, CAST(sum("amount_cents") AS TEXT) AS total FROM "agent_approvals";
 
+SELECT 'agent_deployments' AS table_name, status, count(*) AS row_count FROM "agent_deployments" GROUP BY status;
+
 SELECT 'agent_execution_policies' AS table_name, status, count(*) AS row_count FROM "agent_execution_policies" GROUP BY status;
 
 SELECT 'agent_execution_policies' AS table_name, 'single_approval_max_cents' AS column_name, CAST(sum("single_approval_max_cents") AS TEXT) AS total FROM "agent_execution_policies";
@@ -199,6 +215,12 @@ SELECT 'operations_conflicts' AS table_name, status, count(*) AS row_count FROM 
 SELECT 'ownership_entities' AS table_name, status, count(*) AS row_count FROM "ownership_entities" GROUP BY status;
 
 SELECT 'planning_items' AS table_name, status, count(*) AS row_count FROM "planning_items" GROUP BY status;
+
+SELECT 'pms_action_flows' AS table_name, status, count(*) AS row_count FROM "pms_action_flows" GROUP BY status;
+
+SELECT 'pms_write_authorizations' AS table_name, status, count(*) AS row_count FROM "pms_write_authorizations" GROUP BY status;
+
+SELECT 'pms_write_queue' AS table_name, status, count(*) AS row_count FROM "pms_write_queue" GROUP BY status;
 
 SELECT 'portfolios' AS table_name, status, count(*) AS row_count FROM "portfolios" GROUP BY status;
 

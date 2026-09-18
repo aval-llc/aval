@@ -1,6 +1,8 @@
 "use client";
 import { ConnectionOperations } from "./connection-operations";
 import { CommunicationSettings } from "./communication-settings";
+import { PmsMatrix } from "./pms-matrix";
+import { PmsSeat } from "./pms-seat";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -51,6 +53,8 @@ export function IntegrationsCatalog({
         </span>
       </header>
       <CommunicationSettings/>
+      <PmsSeat/>
+      <PmsMatrix/>
       <ConnectionOperations/>
       <div className="enterprise-toolbar">
         <div className="segmented" role="group" aria-label={t("browse")}>
