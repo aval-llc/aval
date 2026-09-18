@@ -179,7 +179,9 @@ export default {
     // later. Same dedupe-on-primary-key discipline as `integration_events`.
     const digest = await sha256Hex(raw);
 
-    await env.PMS_SEAT_INBOX.put(`unverified/${recipient}/${digest}`, raw as unknown as ArrayBuffer, {
+    const key = `unverified/${recipient}/${digest}`;
+
+    await env.PMS_SEAT_INBOX.put(key, raw as unknown as ArrayBuffer, {
       httpMetadata: { contentType: "message/rfc822" },
       customMetadata: {
         // Envelope facts only. Every one of these is attacker-controlled and is
@@ -197,8 +199,11 @@ export default {
       },
     });
 
-    // The recipient is the routing key that tells P1 which workspace this
-    // belongs to. Logged without the body, which is unverified content.
-    console.log(`[pms-seat] stored unverified message for ${recipient} (${size} bytes, ${digest.slice(0, 12)})`);
+    // The full key, not a digest prefix. R2 has no list operation in wrangler —
+    // `r2 object get` takes an exact path — so a truncated hash here would mean
+    // a stored message nobody can retrieve. The key is a content hash and a
+    // recipient, both already known to whoever sent the message; the body,
+    // which is unverified content, is never logged.
+    console.log(`[pms-seat] stored ${key} (${size} bytes)`);
   },
 };
