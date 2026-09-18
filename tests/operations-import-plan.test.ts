@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import {
   IMPORT_ORDER,
   planImport,
@@ -268,41 +267,5 @@ test("planning is pure — the same batch always plans identically", () => {
   for (let i = 0; i < 200; i++) assert.equal(JSON.stringify(planImport(batch)), first);
 });
 
-/* ── structural: idempotency coverage ────────────────────────────────────── */
 
-test("every importable entity has an existence check, so a re-send cannot report failures", () => {
-  // The regression this pins. `ledgerEntries`, `glTransactions` and `leads`
-  // originally had no existence check: a re-sent batch reached the insert, the
-  // (organization_id, source_provider, external_id) unique index rejected it,
-  // and 19 rows surfaced as failures. The index did its job — nothing was
-  // duplicated — but a nightly connector re-sending its last 30 days would
-  // report a wall of spurious failures and mark every run
-  // `completed_with_errors`, which is the case the endpoint exists to serve.
-  //
-  // Asserted against the source because the bug lives in the D1-bound applier,
-  // where a behavioral test would need a Worker. Found by re-sending a batch
-  // against production; caught here from now on.
-  const source = readFileSync(new URL("../lib/operations/import-apply.ts", import.meta.url).pathname, "utf8");
-
-  const uncovered = IMPORT_ORDER.filter((entity) => {
-    const guarded = source.includes(`ids.${entity}.has(externalId)`) || source.includes(`existingEvents.${entity}.has(externalId)`);
-    // properties and units go through upsert*FromSource, which does its own
-    // match-then-merge and reports `created: false` for a row already present.
-    const upserted = entity === "properties" || entity === "units";
-    return !guarded && !upserted;
-  });
-
-  assert.deepEqual(uncovered, [], "these entities would report index violations instead of `unchanged` on a re-send");
-});
-
-test("the two idempotency loaders together cover every entity that needs one", () => {
-  const source = readFileSync(new URL("../lib/operations/import-apply.ts", import.meta.url).pathname, "utf8");
-  // Each loader must actually query for the entities it claims to cover, so
-  // adding a guard without adding the query cannot pass the test above.
-  for (const entity of ["residents", "vendors", "glAccounts", "leases", "workOrders"]) {
-    assert.ok(source.includes(`${entity}: toMap(`), `loadIdMap does not load ${entity}`);
-  }
-  for (const entity of ["ledgerEntries", "glTransactions", "leads"]) {
-    assert.ok(source.includes(`${entity}: setOf(`), `loadExistingEventIds does not load ${entity}`);
-  }
-});
+// Re-import behavior is exercised against PostgreSQL in pilot-cases.mjs.

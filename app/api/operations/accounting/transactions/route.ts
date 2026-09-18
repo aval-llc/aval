@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET  /api/operations/accounting/transactions — posted amounts.
  * POST /api/operations/accounting/transactions — post one.
@@ -14,26 +16,26 @@ import { listGlTransactions, postGlTransaction } from "@/lib/operations/accounti
 import { operationsErrorResponse } from "@/lib/operations/errors";
 import { optionalString, readJsonBody, requireCents, requireDate, requireString } from "@/lib/operations/validation";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const url = new URL(request.url);
-  const transactions = await listGlTransactions(identity.organizationId, {
+  const transactions = await listGlTransactions(dbSession, identity.organizationId, {
     propertyId: url.searchParams.get("propertyId") ?? undefined,
     accountId: url.searchParams.get("accountId") ?? undefined,
   });
   return Response.json({ transactions });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
-    const transaction = await postGlTransaction(identity.organizationId, {
+    const transaction = await postGlTransaction(dbSession, identity.organizationId, {
       accountId: requireString(body, "accountId", 64),
       propertyId: optionalString(body, "propertyId", 64),
       // Negative is allowed here and only here: a credit note or a reversal
@@ -48,3 +50,6 @@ export async function POST(request: Request) {
     return operationsErrorResponse(error);
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

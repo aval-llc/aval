@@ -1,4 +1,4 @@
-import type { Message } from '@/lib/ask-aval/anthropic';
+import type { Message } from '@/lib/ask-aval/model-types';
 export const MAX_CONTEXT_BYTES = 48000;
 export const byteCount = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
 /** Whole tool-call/result groups are evicted from model context; full history stays in D1. */

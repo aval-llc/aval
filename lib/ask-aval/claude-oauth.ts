@@ -5,11 +5,11 @@
  * The wire format is otherwise identical to anthropic.ts's callClaude — the
  * SDK there is built around `x-api-key` auth, so this bypasses it with a
  * plain fetch call rather than fighting the SDK's auth assumptions, but
- * returns the exact same MessagesResponse/AnthropicError contract every
+ * returns the exact same MessagesResponse/ModelProviderError contract every
  * other caller in this app already expects.
  */
 
-import { AnthropicError, type ContentBlock, type Message, type MessagesResponse, type ToolSchema } from "./anthropic";
+import { ModelProviderError, type ContentBlock, type Message, type MessagesResponse, type ToolSchema } from "./model-types";
 import { CLAUDE_OAUTH_HEADERS, claudeOAuthMessagesUrl } from "@/lib/integrations/subscription-oauth";
 
 const TIMEOUT_MS = 25_000;
@@ -51,7 +51,7 @@ export async function callClaudeOAuth(
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
       console.error("claude_oauth_error", response.status, body?.error?.message?.slice(0, 500));
-      throw new AnthropicError(`Claude subscription request failed (${response.status})`, response.status, response.status === 429 || response.status >= 500);
+      throw new ModelProviderError(`Claude subscription request failed (${response.status})`, response.status, response.status === 429 || response.status >= 500);
     }
 
     const payload = await response.json() as { id: string; content: ContentBlock[]; stop_reason: MessagesResponse["stop_reason"] | null; usage: { input_tokens: number; output_tokens: number } };
@@ -62,9 +62,9 @@ export async function callClaudeOAuth(
       usage: payload.usage,
     };
   } catch (err) {
-    if (err instanceof AnthropicError) throw err;
-    if (err instanceof Error && err.name === "AbortError") throw new AnthropicError("Model call timed out", 504, true);
-    throw new AnthropicError("Claude subscription request failed", 502, true);
+    if (err instanceof ModelProviderError) throw err;
+    if (err instanceof Error && err.name === "AbortError") throw new ModelProviderError("Model call timed out", 504, true);
+    throw new ModelProviderError("Claude subscription request failed", 502, true);
   } finally {
     clearTimeout(timeout);
   }

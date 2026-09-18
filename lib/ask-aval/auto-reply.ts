@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * Drafts a reply the instant an inbound message arrives (called from the
  * webhook consumer in app/api/webhooks/[provider]/route.ts), instead of
@@ -9,7 +10,7 @@
  * it to the vendor/tenant automatically.
  */
 
-import type { AskAvalEnv, Message } from "./anthropic";
+import type { AskAvalEnv, Message } from "./model-types";
 import type { AskAvalSession } from "./usage";
 import { runAskAvalLoop } from "./loop";
 import { getPreferenceContext } from "./preferences";
@@ -37,7 +38,7 @@ export interface AutoReplyResult {
   error?: string;
 }
 
-export async function draftAutoReply(
+export async function draftAutoReply(dbSession: DbSession,
   env: AskAvalEnv,
   session: AskAvalSession,
   contactDisplayName: string,
@@ -50,11 +51,11 @@ export async function draftAutoReply(
   const localeInstruction = locale === "es-mx" ? "Reply in Spanish (Mexico)." : "Reply in English.";
   const messages: Message[] = [{ role: "user", content: `Message just received from ${contactDisplayName}: "${trimmed}"\n\n(${localeInstruction})` }];
   const [preferenceContext, usagePatternContext] = await Promise.all([
-    getPreferenceContext(session.orgId),
-    getUsagePatternContext(session.orgId),
+    getPreferenceContext(dbSession, session.orgId),
+    getUsagePatternContext(dbSession, session.orgId),
   ]);
 
-  const response = await runAskAvalLoop(env, session, SYSTEM + preferenceContext + usagePatternContext, messages);
+  const response = await runAskAvalLoop(dbSession, env, session, SYSTEM + preferenceContext + usagePatternContext, messages);
   const data = (await response.json().catch(() => ({}))) as { narrative?: string; headline?: string; error?: string };
   if (!response.ok || typeof data.narrative !== "string") {
     return { ok: false, error: data.error ?? "Could not draft a reply right now." };

@@ -1,6 +1,6 @@
 import { and, eq, ne, inArray } from "drizzle-orm";
-import { getDb } from "@/db";
-import { draftDocuments } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { draftDocuments } from "@/db/postgres/schema";
 
 export const validDraftId = (id: unknown): id is string =>
   typeof id === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
@@ -14,7 +14,7 @@ const scope = (owner: Owner, id: string) =>
 
 // Reserve the browser's ID before generation. A unique attempt token prevents
 // an older paused/retried request from overwriting the latest result.
-export async function reserveDraft(
+export async function reserveDraft(dbSession: DbSession,
   owner: Owner,
   id: string,
   input: {
@@ -23,9 +23,9 @@ export async function reserveDraft(
     format: string;
     documentType: string | null;
     moduleLabel: string | null;
-  },
+  }
 ) {
-  const db = getDb(),
+  const db = dbSession.db,
     now = new Date(),
     token = `queued:${crypto.randomUUID()}`;
   await db
@@ -47,15 +47,15 @@ export async function reserveDraft(
   return rows.length ? token : null;
 }
 
-export async function finishDraft(
+export async function finishDraft(dbSession: DbSession,
   owner: Owner,
   id: string,
   token: string,
-  response: Response,
+  response: Response
 ) {
   const data = (await response.clone().json()) as Record<string, unknown>;
   const success = response.ok && typeof data.document === "string";
-  await getDb()
+  await dbSession.db
     .update(draftDocuments)
     .set({
       status: success ? "done" : "error",
@@ -78,8 +78,8 @@ export async function finishDraft(
     .where(and(scope(owner, id), eq(draftDocuments.status, token)));
 }
 
-export async function removeDrafts(owner: Owner, ids: string[]) {
-  const db = getDb(),
+export async function removeDrafts(dbSession: DbSession, owner: Owner, ids: string[]) {
+  const db = dbSession.db,
     now = new Date();
   // Content-free tombstones also cover a delete that arrives before generation
   // is registered. Late model responses can never recreate a removed draft.

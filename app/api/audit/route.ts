@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { recentAuditEntries, verifyOrganizationChain } from "@/lib/audit/log";
@@ -16,18 +18,18 @@ import { recentAuditEntries, verifyOrganizationChain } from "@/lib/audit/log";
  * answer text (see lib/audit/chain.ts). It is scoped to the caller's own
  * organization like every other row in this app.
  */
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   const limitParam = Number(new URL(request.url).searchParams.get("limit") ?? "50");
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(Math.trunc(limitParam), 1), 200) : 50;
 
   try {
     const [report, entries] = await Promise.all([
-      verifyOrganizationChain(identity.organizationId),
-      recentAuditEntries(identity.organizationId, limit),
+      verifyOrganizationChain(dbSession, identity.organizationId),
+      recentAuditEntries(dbSession, identity.organizationId, limit),
     ]);
     return Response.json({ ...report, entries });
   } catch (error) {
@@ -35,3 +37,5 @@ export async function GET(request: Request) {
     return Response.json({ error: "Could not verify the audit trail." }, { status: 502 });
   }
 }
+
+export const GET = withApiSession(GETWithSession);

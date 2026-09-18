@@ -23,7 +23,6 @@ export type ProviderId = AdditionalProviderId
   | "telegram"
   | "twilio"
   | "granola"
-  | "anthropic"
   | "openai"
   | "google_gemini"
   | "openrouter"
@@ -67,7 +66,6 @@ export type IntegrationProvider = {
 };
 
 export const MODEL_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set([
-  "anthropic",
   "openai",
   "google_gemini",
   "openrouter",
@@ -158,6 +156,7 @@ export const integrationCatalog: IntegrationProvider[] = [
     credentialFields: [
       { key: "clientId", label: "Buildium client ID" },
       { key: "clientSecret", label: "Buildium client secret", secret: true },
+      { key: "environment", label: "Environment: sandbox or production" },
     ],
     env: [],
     webhook: false,
@@ -385,20 +384,6 @@ export const integrationCatalog: IntegrationProvider[] = [
     note: "Uses Granola's public API; its MCP OAuth route can be added for agent-to-agent access.",
   },
   {
-    id: "anthropic",
-    title: "Anthropic",
-    category: "Model",
-    description: "Bring your own Anthropic key so agents and Ask Aval run against your own account and budget instead of Aval's shared one.",
-    authMode: "api_key",
-    permissions: ["Model calls (Messages API)"],
-    credentialFields: [{ key: "apiKey", label: "Anthropic API key", secret: true }],
-    env: [],
-    webhook: false,
-    readOnly: true,
-    note: "Same Messages API Aval's own default connection uses — nothing else about the agent loop changes.",
-    defaultModel: "claude-sonnet-5",
-  },
-  {
     id: "openai",
     title: "OpenAI",
     category: "Model",
@@ -529,7 +514,6 @@ export const integrationCatalog: IntegrationProvider[] = [
     webhook: false,
     readOnly: true,
     note: "Uses the same OAuth client Claude Code uses. Aval never sees your Anthropic password — only a subscription access token you authorize, which you can revoke anytime from your Anthropic account.",
-    subscriptionOf: "anthropic",
   },
   {
     id: "chatgpt",

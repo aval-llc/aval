@@ -1,19 +1,17 @@
 /**
  * The financial reservation statement, built as a value rather than issued.
  *
- * It lives outside `financial-operations.ts` for the same reason the other
- * `*-rules` modules do: that file resolves the D1 binding at module scope, so
- * a node test cannot load it, and the statement is precisely the part that has
- * to be exactly right. A rolling cap checked by a separate `SELECT` before an
+ * It lives outside `financial-operations.ts` because the statement is the
+ * part that has to be exactly right. A rolling cap checked by a separate `SELECT` before an
  * `INSERT` is not a cap — two approved operations both read the same remaining
- * budget and both spend it. Here the cap is the insert's own predicate, so
- * SQLite arbitrates it at write time, and a test can render this and run it
- * against the project's real migrations.
+ * budget and both spend it. Here the cap is the insert's own predicate. The
+ * PostgreSQL runtime also takes an organization-scoped transaction lock, so
+ * concurrent reservations cannot both observe the same remaining allowance.
  */
 
 import { getTableColumns, sql, type SQL } from "drizzle-orm";
-import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
-import { agentFinancialOperations } from "../../db/schema.ts";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { agentFinancialOperations } from "../../db/postgres/schema.ts";
 
 const operations = agentFinancialOperations;
 
@@ -34,7 +32,7 @@ export function financialReservationStatement(
   row: FinancialReservationRow,
   limit: { dailyLimitCents: number; since: Date },
 ): SQL {
-  const columns = Object.entries(getTableColumns(operations)) as [keyof FinancialReservationRow, AnySQLiteColumn][];
+  const columns = Object.entries(getTableColumns(operations)) as [keyof FinancialReservationRow, AnyPgColumn][];
   // Bare identifiers: a column interpolated directly renders table-qualified,
   // which is correct in a predicate and a syntax error in an INSERT name list.
   const names = sql.join(columns.map(([, column]) => sql.identifier(column.name)), sql`, `);
@@ -48,15 +46,14 @@ export function financialReservationStatement(
       select coalesce(sum(${operations.amountCents}), 0)
       from ${operations}
       where ${operations.organizationId} = ${row.organizationId}
-        and ${operations.createdAt} > ${limit.since.getTime()}
+        and ${operations.createdAt} > ${limit.since}
         and ${operations.status} in (${spending})
     ) + ${row.amountCents} <= ${limit.dailyLimitCents}
+    on conflict (idempotency_key) do nothing
   `;
 }
 
-/** Raw parameters bypass drizzle's column mappers, so timestamps are widened here. */
-function toParameter(value: unknown): string | number | null {
-  if (value instanceof Date) return value.getTime();
+function toParameter(value: unknown): string | number | Date | null {
   if (value === null || value === undefined) return null;
-  return value as string | number;
+  return value as string | number | Date;
 }

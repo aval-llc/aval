@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET  /api/operations/properties — the property list, with the portfolio rollup.
  * POST /api/operations/properties — add a property by hand.
@@ -17,25 +19,25 @@ import {
   requireString,
 } from "@/lib/operations/validation";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const [properties, summary] = await Promise.all([
-    listProperties(identity.organizationId),
-    summarizePortfolio(identity.organizationId),
+    listProperties(dbSession, identity.organizationId),
+    summarizePortfolio(dbSession, identity.organizationId),
   ]);
   return Response.json({ properties, summary });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
-    const property = await createProperty(identity.organizationId, {
+    const property = await createProperty(dbSession, identity.organizationId, {
       name: requireString(body, "name"),
       addressLine1: optionalString(body, "addressLine1"),
       city: optionalString(body, "city"),
@@ -54,3 +56,6 @@ export async function POST(request: Request) {
     return operationsErrorResponse(error);
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

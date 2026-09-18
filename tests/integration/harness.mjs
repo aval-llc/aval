@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
 
-export const ENV = { ANTHROPIC_API_KEY: "test-key", ANTHROPIC_MODEL: "claude-opus-5" };
+export const ENV = {};
 
 /**
  * Builds the schema from the project's own generated migrations and points the

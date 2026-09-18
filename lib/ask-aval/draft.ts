@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * POST /api/assistant/draft
  *
@@ -13,7 +14,7 @@
  * structure so client-side export has something regular to parse.
  */
 
-import type { AskAvalEnv, Message } from "./anthropic";
+import type { AskAvalEnv, Message } from "./model-types";
 import type { AskAvalSession } from "./usage";
 import { DRAFT_TOOLS } from "./tools";
 import { runAskAvalLoop, json } from "./loop";
@@ -53,7 +54,7 @@ Always fill in \`document\` with the full deliverable in markdown. This is a dra
 Finish by calling compose_document exactly once. Write no prose outside it.
 Tone: plain, specific, and written for the reader named in the brief. No greeting, no sign-off, no exclamation marks, no em dashes (use a period, comma, or colon instead).`;
 
-export async function handleAskAvalDraft(
+export async function handleAskAvalDraft(dbSession: DbSession,
   input: { title: string; instructions: string; format: DraftFormat },
   env: AskAvalEnv,
   session: AskAvalSession,
@@ -78,15 +79,15 @@ export async function handleAskAvalDraft(
 
   const messages: Message[] = [{ role: "user", content: prompt }];
   const [persona, preferenceContext, usagePatternContext] = await Promise.all([
-    resolvePersona(personaId, session.orgId),
-    getPreferenceContext(session.orgId),
-    getUsagePatternContext(session.orgId),
+    resolvePersona(dbSession, personaId, session.orgId),
+    getPreferenceContext(dbSession, session.orgId),
+    getUsagePatternContext(dbSession, session.orgId),
   ]);
 
   // Drafting a full document takes longer per call than a quick chat answer
   // (more output tokens, same tool-round budget) — the default 25s timeout
   // is tuned for /ask and is too tight here.
-  return runAskAvalLoop(
+  return runAskAvalLoop(dbSession,
     env,
     session,
     SYSTEM + persona.systemPromptAddition + preferenceContext + usagePatternContext,

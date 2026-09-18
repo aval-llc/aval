@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET   /api/operations/work-orders — the maintenance queue.
  * POST  /api/operations/work-orders — report work.
@@ -33,13 +35,13 @@ import {
 
 const WORK_ORDER_ACTIONS = ["assign", "start", "complete", "link_callback"] as const;
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const url = new URL(request.url);
   const statusParam = url.searchParams.get("status");
-  const workOrders = await listWorkOrders(identity.organizationId, {
+  const workOrders = await listWorkOrders(dbSession, identity.organizationId, {
     status: WORK_ORDER_STATUSES.includes(statusParam as (typeof WORK_ORDER_STATUSES)[number])
       ? (statusParam as (typeof WORK_ORDER_STATUSES)[number])
       : undefined,
@@ -50,14 +52,14 @@ export async function GET(request: Request) {
   return Response.json({ workOrders });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
-    const workOrder = await createWorkOrder(identity.organizationId, {
+    const workOrder = await createWorkOrder(dbSession, identity.organizationId, {
       propertyId: requireString(body, "propertyId", 64),
       unitId: optionalString(body, "unitId", 64),
       leaseId: optionalString(body, "leaseId", 64),
@@ -75,8 +77,8 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PATCH(request: Request) {
-  const identity = await getApiIdentity(request);
+async function PATCHWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   try {
@@ -88,13 +90,13 @@ export async function PATCH(request: Request) {
     switch (action) {
       case "assign":
         return Response.json({
-          workOrder: await assignWorkOrder(identity.organizationId, workOrderId, requireString(body, "vendorId", 64), at),
+          workOrder: await assignWorkOrder(dbSession, identity.organizationId, workOrderId, requireString(body, "vendorId", 64), at),
         });
       case "start":
-        return Response.json({ workOrder: await startWorkOrder(identity.organizationId, workOrderId, at) });
+        return Response.json({ workOrder: await startWorkOrder(dbSession, identity.organizationId, workOrderId, at) });
       case "complete":
         return Response.json({
-          workOrder: await completeWorkOrder(identity.organizationId, workOrderId, {
+          workOrder: await completeWorkOrder(dbSession, identity.organizationId, workOrderId, {
             at,
             actualCostCents: optionalCents(body, "actualCostCents"),
           }),
@@ -104,7 +106,7 @@ export async function PATCH(request: Request) {
         // automatically — first-time-fix feeds vendor renewals, and an
         // inferred callback is a guess with a contract attached to it.
         return Response.json({
-          workOrder: await linkCallback(
+          workOrder: await linkCallback(dbSession,
             identity.organizationId,
             workOrderId,
             requireString(body, "originalWorkOrderId", 64),
@@ -115,3 +117,7 @@ export async function PATCH(request: Request) {
     return operationsErrorResponse(error);
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);
+export const PATCH = withApiSession(PATCHWithSession);

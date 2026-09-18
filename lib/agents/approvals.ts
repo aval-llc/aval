@@ -16,8 +16,8 @@
  */
 
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import { getDb } from "@/db";
-import { agentApprovalDecisions, agentApprovals } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { agentApprovalDecisions, agentApprovals } from "@/db/postgres/schema";
 import { approvalTierFor, requiredApprovalsFor, type ApprovalTier } from "./financial.ts";
 import type { ToolDescriptor } from "./registry.ts";
 
@@ -32,6 +32,8 @@ export { APPROVAL_TTL_MS } from "./approvals-ttl.ts";
 export interface ApprovalRequest {
   taskId: string;
   organizationId: string;
+  /** Property the proposed action affects. Null means organization-wide authority is required. */
+  propertyId?: string;
   stepIndex: number;
   tool: ToolDescriptor;
   /** Redacted argument summary plus whatever the agent assembled to justify the action. Shown to the approver verbatim. */
@@ -47,6 +49,7 @@ export interface ApprovalRecord {
   id: string;
   taskId: string;
   organizationId: string;
+  propertyId: string | null;
   stepIndex: number;
   toolName: string;
   riskLevel: string;
@@ -74,7 +77,7 @@ export interface ApprovalRecord {
  * "requested" and "task parked" is recoverable without creating a duplicate a
  * person would have to reconcile.
  */
-export async function requestApproval(request: ApprovalRequest): Promise<ApprovalRecord> {
+export async function requestApproval(dbSession: DbSession, request: ApprovalRequest): Promise<ApprovalRecord> {
   const now = new Date();
   const resolvedTier: ApprovalTier = request.tier
     ?? (request.amountCents === undefined ? "single_approver" : approvalTierFor(request.amountCents));
@@ -82,6 +85,7 @@ export async function requestApproval(request: ApprovalRequest): Promise<Approva
     id: crypto.randomUUID(),
     taskId: request.taskId,
     organizationId: request.organizationId,
+    propertyId: request.propertyId ?? null,
     stepIndex: request.stepIndex,
     toolName: request.tool.name,
     riskLevel: request.tool.riskLevel,
@@ -106,18 +110,15 @@ export async function requestApproval(request: ApprovalRequest): Promise<Approva
     policyVersion: request.policyVersion ?? 1,
   };
 
-  try {
-    await getDb().insert(agentApprovals).values(row);
-    return row;
-  } catch {
-    const existing = await findByStep(request.organizationId, request.taskId, request.stepIndex);
-    if (existing) return existing;
-    throw new Error("Could not open an approval request for this step.");
-  }
+  const inserted = await dbSession.db.insert(agentApprovals).values(row).onConflictDoNothing().returning({ id: agentApprovals.id });
+  if (inserted.length) return row;
+  const existing = await findByStep(dbSession, request.organizationId, request.taskId, request.stepIndex);
+  if (existing) return existing;
+  throw new Error("Could not open an approval request for this step.");
 }
 
-async function findByStep(organizationId: string, taskId: string, stepIndex: number): Promise<ApprovalRecord | null> {
-  const [row] = await getDb()
+async function findByStep(dbSession: DbSession, organizationId: string, taskId: string, stepIndex: number): Promise<ApprovalRecord | null> {
+  const [row] = await dbSession.db
     .select()
     .from(agentApprovals)
     .where(and(eq(agentApprovals.organizationId, organizationId), eq(agentApprovals.taskId, taskId), eq(agentApprovals.stepIndex, stepIndex)))
@@ -125,8 +126,8 @@ async function findByStep(organizationId: string, taskId: string, stepIndex: num
   return (row as ApprovalRecord | undefined) ?? null;
 }
 
-export async function getApproval(organizationId: string, approvalId: string): Promise<ApprovalRecord | null> {
-  const [row] = await getDb()
+export async function getApproval(dbSession: DbSession, organizationId: string, approvalId: string): Promise<ApprovalRecord | null> {
+  const [row] = await dbSession.db
     .select()
     .from(agentApprovals)
     .where(and(eq(agentApprovals.id, approvalId), eq(agentApprovals.organizationId, organizationId)))
@@ -143,8 +144,8 @@ export async function getApproval(organizationId: string, approvalId: string): P
  * pending call anywhere else, because the transcript already holds the real
  * arguments and this row already holds the decision.
  */
-export async function latestApprovalForTask(organizationId: string, taskId: string): Promise<ApprovalRecord | null> {
-  const [row] = await getDb()
+export async function latestApprovalForTask(dbSession: DbSession, organizationId: string, taskId: string): Promise<ApprovalRecord | null> {
+  const [row] = await dbSession.db
     .select()
     .from(agentApprovals)
     .where(and(eq(agentApprovals.organizationId, organizationId), eq(agentApprovals.taskId, taskId)))
@@ -153,8 +154,8 @@ export async function latestApprovalForTask(organizationId: string, taskId: stri
   return (row as ApprovalRecord | undefined) ?? null;
 }
 
-export async function listPendingApprovals(organizationId: string, limit = 50, taskIds?: string[]): Promise<ApprovalRecord[]> {
-  const rows = await getDb()
+export async function listPendingApprovals(dbSession: DbSession, organizationId: string, limit = 50, taskIds?: string[]): Promise<ApprovalRecord[]> {
+  const rows = await dbSession.db
     .select()
     .from(agentApprovals)
     .where(and(eq(agentApprovals.organizationId, organizationId), eq(agentApprovals.status, "pending"), taskIds ? inArray(agentApprovals.taskId, taskIds) : undefined))
@@ -184,63 +185,66 @@ export type DecisionOutcome =
  *   decorative. Applies to `critical` only, so a high-risk draft send does not
  *   need a second person present.
  */
-export async function decideApproval(
+export async function decideApproval(dbSession: DbSession,
   organizationId: string,
   approvalId: string,
   decision: "approved" | "rejected",
   decidedByUserId: string,
   requestedByUserId: string,
   deciderRole: WorkspaceRole,
-  note?: string,
+  note?: string
 ): Promise<DecisionOutcome> {
-  const approval = await getApproval(organizationId, approvalId);
+  await dbSession.db.execute(sql`select id from ${agentApprovals} where ${agentApprovals.id} = ${approvalId} for no key update`);
+  const approval = await getApproval(dbSession, organizationId, approvalId);
   if (!approval) return { ok: false, reason: "not_found" };
+
+  const authority = await dbSession.db.execute<{ allowed: boolean }>(sql`
+    select aval_private.can_decide_approval(${organizationId}, ${approvalId}) as allowed
+  `);
+  if (authority.rows[0]?.allowed !== true) return { ok: false, reason: "not_an_approver" };
 
   const guard = canDecide(approval, decision, decidedByUserId, requestedByUserId, deciderRole);
   if (!guard.ok) {
     // Expiry is also written through, so the row stops appearing as pending —
     // but the refusal above does not depend on that write succeeding.
     if (guard.reason === "expired") {
-      await getDb().update(agentApprovals).set({ status: "expired" }).where(eq(agentApprovals.id, approvalId)).catch(() => {});
+      await dbSession.db.update(agentApprovals).set({ status: "expired" }).where(eq(agentApprovals.id, approvalId)).catch(() => {});
     }
     return { ok: false, reason: guard.reason };
   }
 
   const now = new Date();
-  try {
-    await getDb().insert(agentApprovalDecisions).values({
-      id: crypto.randomUUID(),
-      approvalId,
-      organizationId,
-      userId: decidedByUserId,
-      decision,
-      note: note ?? null,
-      createdAt: now,
-    });
-  } catch {
-    return { ok: false, reason: "duplicate_approver" };
-  }
+  const inserted = await dbSession.db.insert(agentApprovalDecisions).values({
+    id: crypto.randomUUID(),
+    approvalId,
+    organizationId,
+    userId: decidedByUserId,
+    decision,
+    note: note ?? null,
+    createdAt: now,
+  }).onConflictDoNothing().returning({ id: agentApprovalDecisions.id });
+  if (!inserted.length) return { ok: false, reason: "duplicate_approver" };
 
   if (decision === "rejected") {
-    await getDb().update(agentApprovals)
+    await dbSession.db.update(agentApprovals)
       .set({ status: "rejected", decidedAt: now, decidedByUserId, decisionNote: note ?? null })
       .where(and(eq(agentApprovals.id, approvalId), eq(agentApprovals.status, "pending")));
-    const updated = await getApproval(organizationId, approvalId);
+    const updated = await getApproval(dbSession, organizationId, approvalId);
     if (!updated || updated.status !== "rejected") return { ok: false, reason: "already_decided" };
     return { ok: true, approval: updated, complete: true };
   }
 
-  const [count] = await getDb().select({ value: sql<number>`count(*)` })
+  const [count] = await dbSession.db.select({ value: sql<number>`count(*)` })
     .from(agentApprovalDecisions)
     .where(and(eq(agentApprovalDecisions.approvalId, approvalId), eq(agentApprovalDecisions.decision, "approved")));
   const approvalsReceived = Number(count?.value ?? 0);
   const complete = approvalsReceived >= approval.requiredApprovals;
-  await getDb().update(agentApprovals).set({
+  await dbSession.db.update(agentApprovals).set({
     approvalsReceived,
     ...(complete ? { status: "approved", decidedAt: now, decidedByUserId, decisionNote: note ?? null } : {}),
   }).where(and(eq(agentApprovals.id, approvalId), eq(agentApprovals.status, "pending")));
 
-  const updated = await getApproval(organizationId, approvalId);
+  const updated = await getApproval(dbSession, organizationId, approvalId);
   if (!updated) return { ok: false, reason: "already_decided" };
   if (complete && updated.status !== "approved") return { ok: false, reason: "already_decided" };
   if (!complete && updated.status !== "pending") return { ok: false, reason: "already_decided" };
@@ -248,8 +252,8 @@ export async function decideApproval(
 }
 
 /** Marks one workspace's overdue requests expired; the cron also sweeps globally. */
-export async function expireStaleApprovals(organizationId: string): Promise<void> {
-  await getDb()
+export async function expireStaleApprovals(dbSession: DbSession, organizationId: string): Promise<void> {
+  await dbSession.db
     .update(agentApprovals)
     .set({ status: "expired" })
     .where(and(eq(agentApprovals.organizationId, organizationId), eq(agentApprovals.status, "pending"), lt(agentApprovals.expiresAt, new Date())))
@@ -257,11 +261,11 @@ export async function expireStaleApprovals(organizationId: string): Promise<void
 }
 
 /** Scheduled-worker sweep across workspaces. It changes only overdue pending rows. */
-export async function expireAllStaleApprovals(): Promise<number> {
-  const result = await getDb()
+export async function expireAllStaleApprovals(dbSession: DbSession): Promise<number> {
+  const result = await dbSession.db
     .update(agentApprovals)
     .set({ status: "expired" })
     .where(and(eq(agentApprovals.status, "pending"), lt(agentApprovals.expiresAt, new Date())));
-  const value = result as { rowsAffected?: number; meta?: { changes?: number }; changes?: number };
-  return value.rowsAffected ?? value.meta?.changes ?? value.changes ?? 0;
+  const value = result as { rowCount?: number | null; rowsAffected?: number; meta?: { changes?: number }; changes?: number };
+  return value.rowCount ?? value.rowsAffected ?? value.meta?.changes ?? value.changes ?? 0;
 }

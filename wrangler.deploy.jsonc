@@ -24,15 +24,10 @@
     "directory": "dist/client",
     "binding": "ASSETS"
   },
-  "vars": {
-    "ANTHROPIC_MODEL": "claude-sonnet-5"
-  },
-  "d1_databases": [
+  "hyperdrive": [
     {
-      "binding": "DB",
-      "database_name": "aval-production",
-      "database_id": "d82f33a0-a119-436c-85ec-b79873247fe9",
-      "migrations_dir": "drizzle"
+      "binding": "HYPERDRIVE",
+      "id": "00000000-0000-0000-0000-000000000000"
     }
   ]
 }

@@ -16,7 +16,7 @@ for (const item of semanticCases) {
     report.results.push({ id: item.id, expectedPass: item.expectedPass, actualPass: verdict.exitCode === 0, matched: item.expectedPass === (verdict.exitCode === 0), durationMs: Date.now() - start, usage: response.usage, problems: verdict.problems });
   } catch (error) {
     report.status = 'blocked_provider';
-    report.error = { httpStatus: error.status ?? null, reason: String(error.message).replaceAll(env.ANTHROPIC_API_KEY || 'NO_KEY', '[REDACTED]') };
+    report.error = { httpStatus: error.status ?? null, reason: String(error.message) };
     break;
   }
 }

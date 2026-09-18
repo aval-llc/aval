@@ -5,21 +5,11 @@ import { hostedEdgeBlockedModelCatalog, isHostedEdgeChallenge } from "./provider
 /**
  * Validates a pasted model-provider API key by making the cheapest possible
  * real call against that provider — never a chat completion (costs money
- * and, for a wrong key, would just fail anyway). Anthropic and every
- * OpenAI-compatible provider in the catalog (everything but Anthropic
- * itself) all expose a `GET /models` listing that requires a valid key,
+ * and, for a wrong key, would just fail anyway). Every API-key model
+ * provider in the catalog exposes a `GET /models` listing that requires a valid key,
  * which is enough to prove the key works without spending tokens.
  */
 export async function verifyModelProviderKey(provider: string, apiKey: string): Promise<{ accountId: string; accountName: string; metadata: Record<string, unknown> }> {
-  if (provider === "anthropic") {
-    const response = await fetch("https://api.anthropic.com/v1/models", {
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    });
-    if (!response.ok) throw new Error(await describeError(response));
-    const payload = await response.json() as { data?: { id: string }[] };
-    return { accountId: "anthropic", accountName: "Anthropic account", metadata: { modelCount: payload.data?.length ?? 0 } };
-  }
-
   const catalogEntry = getProvider(provider);
   if (!catalogEntry?.baseUrl) throw new Error("No verification method is configured for this model provider yet.");
   const response = await fetch(`${catalogEntry.baseUrl}/models`, { headers: { authorization: `Bearer ${apiKey}` } });
@@ -122,8 +112,7 @@ async function listChatgptCodexModels(accessToken: string, accountId?: string, i
  * reflects what the connected account can actually call, not a hand-typed
  * guess frozen at whenever this catalog entry was written. Every
  * OpenAI-compatible provider shares one `GET {baseUrl}/models` call, since
- * they all return the same `{ data: [{ id }] }` shape; Anthropic uses its
- * own equivalent endpoint; the two subscription providers fall back to the
+ * they all return the same `{ data: [{ id }] }` shape; the two subscription providers fall back to the
  * short hand list above.
  */
 /**
@@ -181,15 +170,6 @@ export async function listModels(provider: string, apiKey: string, accountId?: s
   // publishes no equivalent endpoint, so it keeps the short static list.
   if (provider === "chatgpt") return listChatgptCodexModels(apiKey, accountId, installationId);
   if (provider === "claude") return SUBSCRIPTION_MODELS[provider] ?? [];
-
-  if (provider === "anthropic") {
-    const response = await fetch("https://api.anthropic.com/v1/models?limit=100", {
-      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    });
-    if (!response.ok) throw new Error(await describeError(response));
-    const payload = await response.json() as { data?: { id: string }[] };
-    return (payload.data ?? []).map((model) => model.id);
-  }
 
   const catalogEntry = getProvider(provider);
   if (!catalogEntry?.baseUrl) throw new Error("No model list is available for this provider yet.");

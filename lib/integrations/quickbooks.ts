@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections } from "@/db/postgres/schema";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { ProviderHttpError, providerJson, record, requiredString } from "./http";
 import { requestOAuthToken, type IntegrationEnv } from "./oauth";
@@ -20,7 +20,7 @@ export function syncCursor(raw: string, now: Date): QboCursor {
 }
 
 /** Called only while holding the connection's durable worker lease. */
-export async function quickbooksClient(connection: Connection, config: IntegrationEnv) {
+export async function quickbooksClient(dbSession: DbSession, connection: Connection, config: IntegrationEnv) {
   const key = config.INTEGRATION_TOKEN_ENCRYPTION_KEY;
   if (!key || !connection.accessTokenCiphertext || !connection.externalAccountId || !/^\d{1,32}$/.test(connection.externalAccountId)) throw new Error("Reconnect QuickBooks with a valid company and encrypted credentials.");
   let ciphertext = connection.accessTokenCiphertext;
@@ -31,10 +31,11 @@ export async function quickbooksClient(connection: Connection, config: Integrati
   const base = `https://${host}/v3/company/${connection.externalAccountId}`;
   async function refresh() {
     if (!refreshCiphertext) throw new ProviderHttpError(401, false);
-    const token = await requestOAuthToken("quickbooks", config, { grant_type: "refresh_token", refresh_token: await decryptSecret(refreshCiphertext, key!) });
+    const refreshToken = await decryptSecret(refreshCiphertext, key!);
+    const token = await dbSession.outsideTransaction(() => requestOAuthToken("quickbooks", config, { grant_type: "refresh_token", refresh_token: refreshToken }));
     const nextAccess = await encryptSecret(token.access_token, key!);
     const nextRefresh = token.refresh_token ? await encryptSecret(token.refresh_token, key!) : refreshCiphertext;
-    const updated = await getDb().update(integrationConnections).set({ accessTokenCiphertext: nextAccess, refreshTokenCiphertext: nextRefresh, expiresAt: new Date(Date.now() + (token.expires_in ?? 3600) * 1000), updatedAt: new Date() })
+    const updated = await dbSession.db.update(integrationConnections).set({ accessTokenCiphertext: nextAccess, refreshTokenCiphertext: nextRefresh, expiresAt: new Date(Date.now() + (token.expires_in ?? 3600) * 1000), updatedAt: new Date() })
       .where(and(eq(integrationConnections.id, connection.id), eq(integrationConnections.organizationId, connection.organizationId), eq(integrationConnections.status, "connected"), eq(integrationConnections.accessTokenCiphertext, ciphertext))).returning({ id: integrationConnections.id });
     if (!updated.length) throw new Error("Connection changed during token refresh. Retry the import.");
     access = token.access_token; ciphertext = nextAccess; refreshCiphertext = nextRefresh;
@@ -45,7 +46,7 @@ export async function quickbooksClient(connection: Connection, config: Integrati
     async get(path: string): Promise<Record<string, unknown>> {
       for (;;) {
         try {
-          const payload = record(await providerJson(`${base}${path}`, { headers: { authorization: `Bearer ${access}`, accept: "application/json" } }));
+          const payload = record(await dbSession.outsideTransaction(() => providerJson(`${base}${path}`, { headers: { authorization: `Bearer ${access}`, accept: "application/json" } })));
           if (payload.Fault) throw new Error("QuickBooks rejected this query. Check the account and application permissions.");
           return payload;
         } catch (error) {

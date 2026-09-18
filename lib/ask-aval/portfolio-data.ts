@@ -15,8 +15,8 @@
  */
 
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/db";
-import { funnelSnapshots, portfolioSnapshots } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { funnelSnapshots, portfolioSnapshots } from "@/db/postgres/schema";
 
 /** Metric keys the sync layer writes into `portfolio_snapshots`. */
 export const METRIC_KEYS = [
@@ -46,8 +46,8 @@ export interface MetricPoint {
  * exists. A metric with a single reading reports no delta rather than
  * comparing against zero, which would render as a fictitious +100%.
  */
-export async function readMetrics(organizationId: string, keys: readonly MetricKey[] = METRIC_KEYS): Promise<Map<MetricKey, { current: MetricPoint; prior: MetricPoint | null }>> {
-  const rows = await getDb()
+export async function readMetrics(dbSession: DbSession, organizationId: string, keys: readonly MetricKey[] = METRIC_KEYS): Promise<Map<MetricKey, { current: MetricPoint; prior: MetricPoint | null }>> {
+  const rows = await dbSession.db
     .select({
       metricKey: portfolioSnapshots.metricKey,
       numericValue: portfolioSnapshots.numericValue,
@@ -79,8 +79,8 @@ export async function readMetrics(organizationId: string, keys: readonly MetricK
 }
 
 /** A metric's full history, newest first, for trend questions. */
-export async function readMetricSeries(organizationId: string, key: string, limit = 24): Promise<MetricPoint[]> {
-  const rows = await getDb()
+export async function readMetricSeries(dbSession: DbSession, organizationId: string, key: string, limit = 24): Promise<MetricPoint[]> {
+  const rows = await dbSession.db
     .select({
       numericValue: portfolioSnapshots.numericValue,
       capturedAt: portfolioSnapshots.capturedAt,
@@ -106,8 +106,8 @@ export async function readMetricSeries(organizationId: string, key: string, limi
 export interface FunnelStageCount { stage: string; count: number; capturedAt: Date; source: string }
 
 /** The most recent reading per funnel stage. */
-export async function readFunnel(organizationId: string): Promise<FunnelStageCount[]> {
-  const rows = await getDb()
+export async function readFunnel(dbSession: DbSession, organizationId: string): Promise<FunnelStageCount[]> {
+  const rows = await dbSession.db
     .select({
       stage: funnelSnapshots.stage,
       count: funnelSnapshots.count,

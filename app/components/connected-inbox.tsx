@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Search, SendDiagonal } from "iconoir-react";
 import { BrandMark } from "./brand-mark";
+import { InboundPending } from "./inbound-pending";
 
 interface Conversation {
   id: string;
@@ -102,6 +103,7 @@ export function ConnectedInbox() {
           </p>
         </div>
       </header>
+      <InboundPending />
       {error && (
         <div className="enterprise-error" role="alert">
           {error}

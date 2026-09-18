@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET /api/operations/accounting
  *
@@ -13,11 +15,13 @@ import { getApiIdentity } from "@/lib/integrations/session";
 import { summarizeAccounting } from "@/lib/operations/accounting";
 import { parsePeriod } from "@/lib/operations/summary";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const period = parsePeriod(new URL(request.url).searchParams.get("period"));
-  const report = await summarizeAccounting(identity.organizationId, period.start, period.end);
+  const report = await summarizeAccounting(dbSession, identity.organizationId, period.start, period.end);
   return Response.json({ report });
 }
+
+export const GET = withApiSession(GETWithSession);

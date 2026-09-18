@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * Per-organization utility KPI rollup — the read side the
  * GET /api/infrastructure/summary route exposes to the dashboard.
@@ -30,15 +31,15 @@ function primaryCurrency(bills: { currency: string }[]): SupportedCurrency {
   return (mostCommon?.[0] as SupportedCurrency) ?? "USD";
 }
 
-export async function summarizeOrganizationUtilities(organizationId: string): Promise<UtilityTypeSummary[]> {
+export async function summarizeOrganizationUtilities(dbSession: DbSession, organizationId: string): Promise<UtilityTypeSummary[]> {
   const utilityTypes: UtilityType[] = ["electricity", "water", "gas"];
   const summaries: UtilityTypeSummary[] = [];
 
   for (const utilityType of utilityTypes) {
-    const meters = await listMeters(organizationId, utilityType);
+    const meters = await listMeters(dbSession, organizationId, utilityType);
     if (meters.length === 0) continue;
 
-    const bills = await listBills(organizationId, { utilityType });
+    const bills = await listBills(dbSession, organizationId, { utilityType });
     if (bills.length === 0) {
       summaries.push({
         utilityType,

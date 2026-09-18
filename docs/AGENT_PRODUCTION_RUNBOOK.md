@@ -67,7 +67,7 @@ npm test
 npx wrangler d1 migrations list aval-production --remote --config wrangler.deploy.jsonc
 npx wrangler d1 migrations apply aval-production --remote --config wrangler.deploy.jsonc
 npx wrangler deploy --config wrangler.deploy.jsonc
-node scripts/smoke-durable-agent.mjs https://YOUR_PRODUCTION_HOST
+node scripts/smoke-production-readiness.mjs https://YOUR_PRODUCTION_HOST
 ```
 
 Migrations `0016` through `0019` are additive. They install durable tasks,
@@ -88,9 +88,8 @@ The Cloudflare Worker itself needs the existing application secrets plus:
 
 | Secret | Requirement |
 |---|---|
-| `ANTHROPIC_API_KEY` | Required unless every production workspace uses a valid supported override |
 | `SESSION_SECRET` | Required for authenticated sessions |
-| `INTEGRATION_TOKEN_ENCRYPTION_KEY` | Required before storing provider credentials |
+| `INTEGRATION_TOKEN_ENCRYPTION_KEY` | Required before storing workspace-owned provider credentials |
 | `AGENT_HEALTH_TOKEN` | Required for the external health monitor |
 | `AGENT_ALERT_WEBHOOK_URL` | Recommended HTTPS incident destination |
 | `AGENT_ALERT_WEBHOOK_TOKEN` | Recommended authentication for that destination |
@@ -99,16 +98,28 @@ The Cloudflare Worker itself needs the existing application secrets plus:
 Set Worker secrets with `npx wrangler secret put NAME --config
 wrangler.deploy.jsonc`; never commit their values.
 
-## Live acceptance proof
+Aval has no shared model-provider API key. Each workspace must connect and
+select its own supported provider in Settings -> Intelligence. A missing,
+disconnected, or unreadable provider fails closed before any model call.
 
-The production smoke must prove all of these, not merely return HTTP 200:
+## Deployment readiness proof
 
-- enqueue returned `202` with a task id;
-- polling only read the task;
-- a background worker/cron progressed it;
-- a real model call and a real read tool appear in the persisted trace;
-- the task reached `COMPLETED` with a persisted, faithfulness-checked result;
-- the model/provider fields are present on model-call trace rows.
+The automatic production smoke is provider-free and must prove all of these:
+
+- the reserved verification account can authenticate;
+- integration configuration is readable within that workspace;
+- workspace-scoped agent health is readable;
+- no model credit is spent and no task or business record is created.
+
+Before enabling model-backed production use for a workspace, run the separate
+durable smoke with that workspace's connected provider:
+
+```bash
+node scripts/smoke-durable-agent.mjs https://YOUR_PRODUCTION_HOST
+```
+
+That manual gate must reach `COMPLETED` and retain both model/provider
+provenance and a real read-tool call in its persisted trace.
 
 After smoke, inspect one task row and its ordered steps when authorized:
 

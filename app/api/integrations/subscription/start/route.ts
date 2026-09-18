@@ -1,6 +1,8 @@
+import { withApiSession } from "@/lib/api/with-session";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
 import { env } from "cloudflare:workers";
-import { getDb } from "@/db";
-import { oauthStates } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { oauthStates } from "@/db/postgres/schema";
 import { getProvider } from "@/lib/integrations/catalog";
 import { isSubscriptionProviderId, startSubscriptionAuthorize } from "@/lib/integrations/subscription-oauth";
 import { getApiIdentity } from "@/lib/integrations/session";
@@ -22,8 +24,9 @@ const START_RULE = { limit: 10, windowMs: 10 * 60 * 1000 };
  * is what happens after (see .../complete/route.ts): the user pastes back
  * what they see rather than the browser redirecting to a server Aval runs.
  */
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  if (!PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   const body = await request.json().catch(() => ({})) as { provider?: string };
   if (!body.provider || !isSubscriptionProviderId(body.provider)) return Response.json({ error: "Unknown subscription provider" }, { status: 400 });
@@ -33,16 +36,16 @@ export async function POST(request: Request) {
 
   const scope = `subscription-start:org:${identity.organizationId}`;
   const ipScope = `subscription-start:ip:${clientIp(request)}`;
-  if ((await isRateLimited(scope, START_RULE)) || (await isRateLimited(ipScope, START_RULE))) {
+  if ((await isRateLimited(dbSession, scope, START_RULE)) || (await isRateLimited(dbSession, ipScope, START_RULE))) {
     return Response.json({ error: "Too many connection attempts. Wait a few minutes and try again." }, { status: 429 });
   }
-  await recordAttempt(scope);
-  await recordAttempt(ipScope);
+  await recordAttempt(dbSession, scope);
+  await recordAttempt(dbSession, ipScope);
 
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   const session = await startSubscriptionAuthorize(body.provider);
-  const db = getDb();
+  const db = dbSession.db;
   await db.insert(oauthStates).values({
     state: session.state,
     organizationId: identity.organizationId,
@@ -54,3 +57,5 @@ export async function POST(request: Request) {
   });
   return Response.json({ authorizeUrl: session.authorizeUrl, state: session.state });
 }
+
+export const POST = withApiSession(POSTWithSession);

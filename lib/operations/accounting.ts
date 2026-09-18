@@ -13,8 +13,8 @@ import { financialTimeline } from "@/lib/charts/financial-timeline";
  */
 
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/db";
-import { glAccounts, glTransactions, leases, ledgerEntries, utilityBills } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { glAccounts, glTransactions, leases, ledgerEntries, utilityBills } from "@/db/postgres/schema";
 import { EntityNotFoundError, getProperty, propertyNames, unitCountsByProperty } from "./portfolio";
 import { manualSource, type SourceRef } from "./provenance";
 import {
@@ -54,7 +54,7 @@ export interface GlAccountInput {
   isTrustAccount?: boolean;
 }
 
-export async function createGlAccount(organizationId: string, input: GlAccountInput, source: SourceRef = manualSource()) {
+export async function createGlAccount(dbSession: DbSession, organizationId: string, input: GlAccountInput, source: SourceRef = manualSource()) {
   const now = new Date();
   const row = {
     id: crypto.randomUUID(),
@@ -71,12 +71,12 @@ export async function createGlAccount(organizationId: string, input: GlAccountIn
     createdAt: now,
     updatedAt: now,
   };
-  await getDb().insert(glAccounts).values(row).onConflictDoNothing();
+  await dbSession.db.insert(glAccounts).values(row).onConflictDoNothing();
   return row;
 }
 
-export async function listGlAccounts(organizationId: string) {
-  return getDb().select().from(glAccounts).where(eq(glAccounts.organizationId, organizationId)).orderBy(glAccounts.code);
+export async function listGlAccounts(dbSession: DbSession, organizationId: string) {
+  return dbSession.db.select().from(glAccounts).where(eq(glAccounts.organizationId, organizationId)).orderBy(glAccounts.code);
 }
 
 /* ── posted amounts ─────────────────────────────────────────────────────── */
@@ -90,8 +90,8 @@ export interface GlTransactionInput {
   memo?: string | null;
 }
 
-export async function postGlTransaction(organizationId: string, input: GlTransactionInput, source: SourceRef = manualSource()) {
-  const [account] = await getDb()
+export async function postGlTransaction(dbSession: DbSession, organizationId: string, input: GlTransactionInput, source: SourceRef = manualSource()) {
+  const [account] = await dbSession.db
     .select({ id: glAccounts.id })
     .from(glAccounts)
     .where(and(eq(glAccounts.organizationId, organizationId), eq(glAccounts.id, input.accountId)))
@@ -99,7 +99,7 @@ export async function postGlTransaction(organizationId: string, input: GlTransac
   if (!account) throw new EntityNotFoundError("GL account", input.accountId);
 
   if (input.propertyId) {
-    const property = await getProperty(organizationId, input.propertyId);
+    const property = await getProperty(dbSession, organizationId, input.propertyId);
     if (!property) throw new EntityNotFoundError("Property", input.propertyId);
   }
 
@@ -115,15 +115,15 @@ export async function postGlTransaction(organizationId: string, input: GlTransac
     ...source,
     createdAt: new Date(),
   };
-  await getDb().insert(glTransactions).values(row);
+  await dbSession.db.insert(glTransactions).values(row);
   return row;
 }
 
-export async function listGlTransactions(organizationId: string, filters: { propertyId?: string; accountId?: string } = {}) {
+export async function listGlTransactions(dbSession: DbSession, organizationId: string, filters: { propertyId?: string; accountId?: string } = {}) {
   const conditions = [eq(glTransactions.organizationId, organizationId)];
   if (filters.propertyId) conditions.push(eq(glTransactions.propertyId, filters.propertyId));
   if (filters.accountId) conditions.push(eq(glTransactions.accountId, filters.accountId));
-  return getDb().select().from(glTransactions).where(and(...conditions)).orderBy(desc(glTransactions.postedAt));
+  return dbSession.db.select().from(glTransactions).where(and(...conditions)).orderBy(desc(glTransactions.postedAt));
 }
 
 /* ── receivables ledger ─────────────────────────────────────────────────── */
@@ -147,12 +147,12 @@ export interface LedgerEntryInput {
  * turn a payment into a charge silently, so it is rejected rather than
  * normalized.
  */
-export async function postLedgerEntry(organizationId: string, input: LedgerEntryInput, source: SourceRef = manualSource()) {
+export async function postLedgerEntry(dbSession: DbSession, organizationId: string, input: LedgerEntryInput, source: SourceRef = manualSource()) {
   if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
     throw new Error("Ledger amountCents must be a positive integer; direction is carried by entryType");
   }
 
-  const [lease] = await getDb()
+  const [lease] = await dbSession.db
     .select({ id: leases.id, propertyId: leases.propertyId })
     .from(leases)
     .where(and(eq(leases.organizationId, organizationId), eq(leases.id, input.leaseId)))
@@ -174,15 +174,15 @@ export async function postLedgerEntry(organizationId: string, input: LedgerEntry
     ...source,
     createdAt: new Date(),
   };
-  await getDb().insert(ledgerEntries).values(row);
+  await dbSession.db.insert(ledgerEntries).values(row);
   return row;
 }
 
-export async function listLedgerEntries(organizationId: string, filters: { leaseId?: string; propertyId?: string } = {}) {
+export async function listLedgerEntries(dbSession: DbSession, organizationId: string, filters: { leaseId?: string; propertyId?: string } = {}) {
   const conditions = [eq(ledgerEntries.organizationId, organizationId)];
   if (filters.leaseId) conditions.push(eq(ledgerEntries.leaseId, filters.leaseId));
   if (filters.propertyId) conditions.push(eq(ledgerEntries.propertyId, filters.propertyId));
-  return getDb().select().from(ledgerEntries).where(and(...conditions)).orderBy(desc(ledgerEntries.postedAt));
+  return dbSession.db.select().from(ledgerEntries).where(and(...conditions)).orderBy(desc(ledgerEntries.postedAt));
 }
 
 function toLedgerLike(row: typeof ledgerEntries.$inferSelect): LedgerEntryLike {
@@ -199,8 +199,8 @@ function toLedgerLike(row: typeof ledgerEntries.$inferSelect): LedgerEntryLike {
 }
 
 /** One lease's running balance, for a resident record or a collections message. */
-export async function leaseBalanceCents(organizationId: string, leaseId: string): Promise<number> {
-  const rows = await listLedgerEntries(organizationId, { leaseId });
+export async function leaseBalanceCents(dbSession: DbSession, organizationId: string, leaseId: string): Promise<number> {
+  const rows = await listLedgerEntries(dbSession, organizationId, { leaseId });
   return balanceCents(rows.map(toLedgerLike));
 }
 
@@ -240,15 +240,15 @@ export interface AccountingReport {
  * and spent nothing; "no connected source has provided general-ledger data" is
  * the truth, and the two must not look the same on a screen an owner reads.
  */
-export async function summarizeAccounting(
+export async function summarizeAccounting(dbSession: DbSession,
   organizationId: string,
   periodStart: Date,
   periodEnd: Date,
-  asOf = new Date(),
+  asOf = new Date()
 ): Promise<AccountingReport> {
-  const db = getDb();
+  const db = dbSession.db;
   const [accountRows, transactionRows, ledgerRows, leaseRows] = await Promise.all([
-    listGlAccounts(organizationId),
+    listGlAccounts(dbSession, organizationId),
     db.select().from(glTransactions).where(eq(glTransactions.organizationId, organizationId)),
     db.select().from(ledgerEntries).where(eq(ledgerEntries.organizationId, organizationId)),
     db.select().from(leases).where(eq(leases.organizationId, organizationId)),
@@ -276,7 +276,7 @@ export async function summarizeAccounting(
   if (!hasGl) notes.push("No general-ledger data has been provided for this workspace, so there is no profit and loss to report.");
   if (!hasLedger) notes.push("No resident ledger entries have been provided, so receivables, aging and collections cannot be computed.");
 
-  const unitCounts = await unitCountsByProperty(organizationId);
+  const unitCounts = await unitCountsByProperty(dbSession, organizationId);
   const statement = hasGl ? profitAndLoss(transactions, accounts, periodStart, periodEnd) : null;
   if (statement && statement.unmappedTransactionCount > 0) {
     notes.push(
@@ -300,7 +300,7 @@ export async function summarizeAccounting(
   const propertyIds = new Set<string>();
   for (const row of transactionRows) if (row.propertyId) propertyIds.add(row.propertyId);
   for (const charge of agedCharges) propertyIds.add(charge.propertyId);
-  const names = await propertyNames(organizationId, [...propertyIds]);
+  const names = await propertyNames(dbSession, organizationId, [...propertyIds]);
 
   const delinquents: DelinquentAccountWithContext[] = delinquentAccounts(agedCharges).map((account) => {
     const lease = leaseById.get(account.leaseId);
@@ -361,8 +361,8 @@ export async function summarizeAccounting(
 }
 
 /** Leases carrying any past-due balance, for collections surfaces that need the resident behind the number. */
-export async function delinquentLeaseIds(organizationId: string, asOf = new Date()): Promise<string[]> {
-  const rows = await getDb().select().from(ledgerEntries).where(eq(ledgerEntries.organizationId, organizationId));
+export async function delinquentLeaseIds(dbSession: DbSession, organizationId: string, asOf = new Date()): Promise<string[]> {
+  const rows = await dbSession.db.select().from(ledgerEntries).where(eq(ledgerEntries.organizationId, organizationId));
   const byLease = new Map<string, LedgerEntryLike[]>();
   for (const row of rows) {
     const entry = toLedgerLike(row);
@@ -378,8 +378,8 @@ export async function delinquentLeaseIds(organizationId: string, asOf = new Date
 }
 
 /** Seeds a minimal chart of accounts so a workspace with no accounting connector can still record expenses by hand. */
-export async function seedDefaultChartOfAccounts(organizationId: string) {
-  const existing = await listGlAccounts(organizationId);
+export async function seedDefaultChartOfAccounts(dbSession: DbSession, organizationId: string) {
+  const existing = await listGlAccounts(dbSession, organizationId);
   if (existing.length > 0) return existing;
 
   const defaults: GlAccountInput[] = [
@@ -395,14 +395,14 @@ export async function seedDefaultChartOfAccounts(organizationId: string) {
     { code: "2100", name: "Security deposits held", accountType: "liability", isTrustAccount: true },
   ];
 
-  for (const account of defaults) await createGlAccount(organizationId, account);
-  return listGlAccounts(organizationId);
+  for (const account of defaults) await createGlAccount(dbSession, organizationId, account);
+  return listGlAccounts(dbSession, organizationId);
 }
 
 /** Ledger entries for a set of leases, for callers that already know which leases they care about. */
-export async function ledgerForLeases(organizationId: string, leaseIds: string[]) {
+export async function ledgerForLeases(dbSession: DbSession, organizationId: string, leaseIds: string[]) {
   if (leaseIds.length === 0) return [];
-  return getDb()
+  return dbSession.db
     .select()
     .from(ledgerEntries)
     .where(and(eq(ledgerEntries.organizationId, organizationId), inArray(ledgerEntries.leaseId, leaseIds)))

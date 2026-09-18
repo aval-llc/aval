@@ -581,7 +581,10 @@ class CodexAppServerService extends EventEmitter {
       this.#setState({ rateLimits, status });
       return;
     }
-    const active = [...this.activeTurns.values()].find((turn) => turn.threadId === params.threadId && (!turn.turnId || turn.turnId === params.turnId));
+    // Turn lifecycle events carry their ID inside `turn`; item events use
+    // `turnId`. Match both after turn/start has acknowledged the active turn.
+    const notificationTurnId = params.turnId ?? params.turn?.id;
+    const active = [...this.activeTurns.values()].find((turn) => turn.threadId === params.threadId && (!turn.turnId || turn.turnId === notificationTurnId));
     if (!active) return;
     if (method === "item/agentMessage/delta" && typeof params.delta === "string") {
       active.text += params.delta;

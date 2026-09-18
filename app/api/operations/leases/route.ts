@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET   /api/operations/leases — leases, filterable by status, property or unit.
  * POST  /api/operations/leases — sign a lease (and occupy its unit).
@@ -27,13 +29,13 @@ import {
   requireString,
 } from "@/lib/operations/validation";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const url = new URL(request.url);
   const statusParam = url.searchParams.get("status");
-  const leases = await listLeases(identity.organizationId, {
+  const leases = await listLeases(dbSession, identity.organizationId, {
     status: LEASE_STATUSES.includes(statusParam as (typeof LEASE_STATUSES)[number])
       ? (statusParam as (typeof LEASE_STATUSES)[number])
       : undefined,
@@ -44,20 +46,20 @@ export async function GET(request: Request) {
   // Residents are returned alongside rather than in a second round trip: every
   // surface that lists leases (collections, renewals, the inbox) needs a name
   // to show, and a lease id on its own is not something a person can act on.
-  const residents = await residentsForLeases(identity.organizationId, leases.map((lease) => lease.id));
+  const residents = await residentsForLeases(dbSession, identity.organizationId, leases.map((lease) => lease.id));
   return Response.json({
     leases: leases.map((lease) => ({ ...lease, residents: residents.get(lease.id) ?? [] })),
   });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
-    const lease = await createLease(identity.organizationId, {
+    const lease = await createLease(dbSession, identity.organizationId, {
       unitId: requireString(body, "unitId", 64),
       status: optionalEnum(body, "status", LEASE_STATUSES),
       startDate: requireDate(body, "startDate"),
@@ -72,7 +74,7 @@ export async function POST(request: Request) {
 
     const residentId = optionalString(body, "residentId", 64);
     if (residentId) {
-      await attachResidentToLease(
+      await attachResidentToLease(dbSession,
         identity.organizationId,
         lease.id,
         residentId,
@@ -85,13 +87,13 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PATCH(request: Request) {
-  const identity = await getApiIdentity(request);
+async function PATCHWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   try {
     const body = await readJsonBody(request);
-    const lease = await endLease(identity.organizationId, requireString(body, "leaseId", 64), {
+    const lease = await endLease(dbSession, identity.organizationId, requireString(body, "leaseId", 64), {
       status: requireEnum(body, "status", ["expired", "terminated", "renewed"] as const),
       moveOutDate: optionalDate(body, "moveOutDate") ?? undefined,
       unitStatus: optionalEnum(body, "unitStatus", ["vacant_ready", "vacant_not_ready"] as const),
@@ -101,3 +103,7 @@ export async function PATCH(request: Request) {
     return operationsErrorResponse(error);
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);
+export const PATCH = withApiSession(PATCHWithSession);

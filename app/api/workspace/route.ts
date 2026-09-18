@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 
@@ -7,9 +9,11 @@ import { ensureOrganization } from "@/lib/integrations/organizations";
  * fetch rather than server-rendered into the page so the dashboard route
  * doesn't need the D1 binding just to draw a greeting.
  */
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  const organization = await ensureOrganization(identity);
+  const organization = await ensureOrganization(dbSession, identity);
   return Response.json({ createdAt: organization.createdAt.toISOString() });
 }
+
+export const GET = withApiSession(GETWithSession);

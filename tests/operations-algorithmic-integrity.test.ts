@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ageLeaseCharges, summarizeAging, type LedgerEntryLike } from "../lib/operations/metrics/receivables.ts";
 import { profitAndLoss, type GlAccountLike, type GlTransactionLike } from "../lib/operations/metrics/financials.ts";
 import { summarizeOccupancy, type UnitLike } from "../lib/operations/metrics/occupancy.ts";
@@ -52,7 +53,7 @@ function sourceFiles(dir: string): string[] {
   return found;
 }
 
-const OPERATIONS_DIR = new URL("../lib/operations", import.meta.url).pathname;
+const OPERATIONS_DIR = fileURLToPath(new URL("../lib/operations", import.meta.url));
 
 test("no module in the operations layer imports an LLM SDK or an HTTP client", () => {
   const banned = /from\s+["'](@anthropic-ai\/|openai|@openai\/|axios|node-fetch|undici|ollama|@google\/|cohere)/;

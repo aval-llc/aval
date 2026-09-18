@@ -1,0 +1,14 @@
+# Copy to .env.migration.local at repository root; that path is ignored by Git.
+# This is fixture infrastructure, not Aval's production environment.
+# Generate three distinct random secrets (database password, HTTP token, admin password).
+AVAL_BENCHMARK_ADMIN_URL=postgresql://postgres:LOCAL_PASSWORD@127.0.0.1:54322/postgres
+AVAL_BENCHMARK_DB_PASSWORD=
+AVAL_BENCHMARK_DATABASE_URL=postgresql://aval_benchmark_login:URL_ENCODED_PASSWORD@127.0.0.1:54322/postgres
+AVAL_BENCHMARK_TOKEN=
+AVAL_BENCHMARK_URL=http://127.0.0.1:8789
+AVAL_BENCHMARK_REPORT=outputs/migration/benchmark.json
+# Needed only for the dedicated hosted benchmark:
+AVAL_BENCHMARK_DEDICATED_PROJECT=no
+AVAL_SUPABASE_PROJECT_REF=
+AVAL_HYPERDRIVE_ID=
+AVAL_BENCHMARK_EVIDENCE=outputs/migration/connection-evidence.json

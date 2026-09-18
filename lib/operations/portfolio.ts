@@ -10,8 +10,8 @@
  */
 
 import { and, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/db";
-import { leases, properties, units } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { leases, properties, units } from "@/db/postgres/schema";
 import { manualSource, planMerge, recordConflicts, type SourceRef } from "./provenance";
 import {
   summarizeOccupancy,
@@ -66,8 +66,8 @@ const PROPERTY_SYNCABLE_FIELDS = [
   "status",
 ] as const;
 
-export async function createProperty(organizationId: string, input: PropertyInput, source: SourceRef = manualSource()) {
-  const db = getDb();
+export async function createProperty(dbSession: DbSession, organizationId: string, input: PropertyInput, source: SourceRef = manualSource()) {
+  const db = dbSession.db;
   const now = new Date();
   const row = {
     id: crypto.randomUUID(),
@@ -93,12 +93,12 @@ export async function createProperty(organizationId: string, input: PropertyInpu
   return row;
 }
 
-export async function listProperties(organizationId: string) {
-  return getDb().select().from(properties).where(eq(properties.organizationId, organizationId)).orderBy(properties.name);
+export async function listProperties(dbSession: DbSession, organizationId: string) {
+  return dbSession.db.select().from(properties).where(eq(properties.organizationId, organizationId)).orderBy(properties.name);
 }
 
-export async function getProperty(organizationId: string, propertyId: string) {
-  const [row] = await getDb()
+export async function getProperty(dbSession: DbSession, organizationId: string, propertyId: string) {
+  const [row] = await dbSession.db
     .select()
     .from(properties)
     .where(and(eq(properties.organizationId, organizationId), eq(properties.id, propertyId)))
@@ -118,10 +118,10 @@ export async function getProperty(organizationId: string, propertyId: string) {
  * fixable; a wrong merge silently combines two buildings' figures, which is
  * neither.
  */
-export async function upsertPropertyFromSource(organizationId: string, input: PropertyInput, source: SourceRef) {
-  const db = getDb();
-  const existing = await findPropertyMatch(organizationId, input.name, source);
-  if (!existing) return { property: await createProperty(organizationId, input, source), created: true, conflicts: 0 };
+export async function upsertPropertyFromSource(dbSession: DbSession, organizationId: string, input: PropertyInput, source: SourceRef) {
+  const db = dbSession.db;
+  const existing = await findPropertyMatch(dbSession, organizationId, input.name, source);
+  if (!existing) return { property: await createProperty(dbSession, organizationId, input, source), created: true, conflicts: 0 };
 
   const plan = planMerge(existing, existing.sourceProvider, input as Partial<typeof existing>, source.sourceProvider, PROPERTY_SYNCABLE_FIELDS);
   if (Object.keys(plan.updates).length > 0) {
@@ -130,12 +130,12 @@ export async function upsertPropertyFromSource(organizationId: string, input: Pr
       .set({ ...plan.updates, updatedAt: new Date() })
       .where(and(eq(properties.organizationId, organizationId), eq(properties.id, existing.id)));
   }
-  await recordConflicts(organizationId, "property", existing.id, plan.conflicts);
-  return { property: { ...existing, ...plan.updates }, created: false, conflicts: plan.conflicts.length };
+  await recordConflicts(dbSession, organizationId, "property", existing.id, plan.conflicts);
+  return { property: { ...existing, ...plan.updates }, created: false, updated: Object.keys(plan.updates).length > 0, conflicts: plan.conflicts.length };
 }
 
-async function findPropertyMatch(organizationId: string, name: string, source: SourceRef) {
-  const db = getDb();
+async function findPropertyMatch(dbSession: DbSession, organizationId: string, name: string, source: SourceRef) {
+  const db = dbSession.db;
   if (source.externalId) {
     const [byExternal] = await db
       .select()
@@ -181,8 +181,8 @@ const UNIT_SYNCABLE_FIELDS = [
   "vacantSince",
 ] as const;
 
-export async function createUnit(organizationId: string, input: UnitInput, source: SourceRef = manualSource()) {
-  const property = await getProperty(organizationId, input.propertyId);
+export async function createUnit(dbSession: DbSession, organizationId: string, input: UnitInput, source: SourceRef = manualSource()) {
+  const property = await getProperty(dbSession, organizationId, input.propertyId);
   if (!property) throw new EntityNotFoundError("Property", input.propertyId);
 
   const status = input.status ?? "vacant_ready";
@@ -205,19 +205,19 @@ export async function createUnit(organizationId: string, input: UnitInput, sourc
     createdAt: now,
     updatedAt: now,
   };
-  await getDb().insert(units).values(row);
+  await dbSession.db.insert(units).values(row);
   return row;
 }
 
-export async function listUnits(organizationId: string, filters: { propertyId?: string; status?: UnitStatus } = {}) {
+export async function listUnits(dbSession: DbSession, organizationId: string, filters: { propertyId?: string; status?: UnitStatus } = {}) {
   const conditions = [eq(units.organizationId, organizationId)];
   if (filters.propertyId) conditions.push(eq(units.propertyId, filters.propertyId));
   if (filters.status) conditions.push(eq(units.status, filters.status));
-  return getDb().select().from(units).where(and(...conditions)).orderBy(units.unitNumber);
+  return dbSession.db.select().from(units).where(and(...conditions)).orderBy(units.unitNumber);
 }
 
-export async function getUnit(organizationId: string, unitId: string) {
-  const [row] = await getDb()
+export async function getUnit(dbSession: DbSession, organizationId: string, unitId: string) {
+  const [row] = await dbSession.db
     .select()
     .from(units)
     .where(and(eq(units.organizationId, organizationId), eq(units.id, unitId)))
@@ -233,8 +233,8 @@ export async function getUnit(organizationId: string, unitId: string) {
  * would keep reporting a re-leased unit as vacant for months. Moving *into* a
  * vacant status stamps the date; moving out of one clears it.
  */
-export async function setUnitStatus(organizationId: string, unitId: string, status: UnitStatus, asOf = new Date()) {
-  const unit = await getUnit(organizationId, unitId);
+export async function setUnitStatus(dbSession: DbSession, organizationId: string, unitId: string, status: UnitStatus, asOf = new Date()) {
+  const unit = await getUnit(dbSession, organizationId, unitId);
   if (!unit) throw new EntityNotFoundError("Unit", unitId);
 
   const wasOccupied = OCCUPIED_UNIT_STATUSES.includes(unit.status as UnitStatus);
@@ -243,16 +243,16 @@ export async function setUnitStatus(organizationId: string, unitId: string, stat
   if (isOccupied) vacantSince = null;
   else if (wasOccupied || unit.vacantSince === null) vacantSince = asOf;
 
-  await getDb()
+  await dbSession.db
     .update(units)
     .set({ status, vacantSince, updatedAt: new Date() })
     .where(and(eq(units.organizationId, organizationId), eq(units.id, unitId)));
   return { ...unit, status, vacantSince };
 }
 
-export async function upsertUnitFromSource(organizationId: string, input: UnitInput, source: SourceRef) {
-  const db = getDb();
-  const property = await getProperty(organizationId, input.propertyId);
+export async function upsertUnitFromSource(dbSession: DbSession, organizationId: string, input: UnitInput, source: SourceRef) {
+  const db = dbSession.db;
+  const property = await getProperty(dbSession, organizationId, input.propertyId);
   if (!property) throw new EntityNotFoundError("Property", input.propertyId);
 
   let existing = null;
@@ -287,7 +287,7 @@ export async function upsertUnitFromSource(organizationId: string, input: UnitIn
     existing = byNumber ?? null;
   }
 
-  if (!existing) return { unit: await createUnit(organizationId, input, source), created: true, conflicts: 0 };
+  if (!existing) return { unit: await createUnit(dbSession, organizationId, input, source), created: true, conflicts: 0 };
 
   const plan = planMerge(existing, existing.sourceProvider, input as Partial<typeof existing>, source.sourceProvider, UNIT_SYNCABLE_FIELDS);
   if (Object.keys(plan.updates).length > 0) {
@@ -296,8 +296,8 @@ export async function upsertUnitFromSource(organizationId: string, input: UnitIn
       .set({ ...plan.updates, updatedAt: new Date() })
       .where(and(eq(units.organizationId, organizationId), eq(units.id, existing.id)));
   }
-  await recordConflicts(organizationId, "unit", existing.id, plan.conflicts);
-  return { unit: { ...existing, ...plan.updates }, created: false, conflicts: plan.conflicts.length };
+  await recordConflicts(dbSession, organizationId, "unit", existing.id, plan.conflicts);
+  return { unit: { ...existing, ...plan.updates }, created: false, updated: Object.keys(plan.updates).length > 0, conflicts: plan.conflicts.length };
 }
 
 /* ── read models ────────────────────────────────────────────────────────── */
@@ -316,10 +316,10 @@ export interface PortfolioSummary {
   unitCountMismatches: { propertyId: string; propertyName: string; reported: number; actual: number }[];
 }
 
-export async function summarizePortfolio(organizationId: string, asOf = new Date()): Promise<PortfolioSummary> {
-  const db = getDb();
+export async function summarizePortfolio(dbSession: DbSession, organizationId: string, asOf = new Date()): Promise<PortfolioSummary> {
+  const db = dbSession.db;
   const [propertyRows, unitRows] = await Promise.all([
-    listProperties(organizationId),
+    listProperties(dbSession, organizationId),
     db.select().from(units).where(eq(units.organizationId, organizationId)),
   ]);
 
@@ -359,8 +359,8 @@ export async function summarizePortfolio(organizationId: string, asOf = new Date
 }
 
 /** Units per property, for metrics that normalize by unit count (NOI per unit, maintenance cost per unit). */
-export async function unitCountsByProperty(organizationId: string): Promise<Map<string, number>> {
-  const rows = await getDb()
+export async function unitCountsByProperty(dbSession: DbSession, organizationId: string): Promise<Map<string, number>> {
+  const rows = await dbSession.db
     .select({ propertyId: units.propertyId })
     .from(units)
     .where(eq(units.organizationId, organizationId));
@@ -370,9 +370,9 @@ export async function unitCountsByProperty(organizationId: string): Promise<Map<
 }
 
 /** Property names by id, for read models that report per-property figures without joining in every query. */
-export async function propertyNames(organizationId: string, propertyIds: string[]): Promise<Map<string, string>> {
+export async function propertyNames(dbSession: DbSession, organizationId: string, propertyIds: string[]): Promise<Map<string, string>> {
   if (propertyIds.length === 0) return new Map();
-  const rows = await getDb()
+  const rows = await dbSession.db
     .select({ id: properties.id, name: properties.name })
     .from(properties)
     .where(and(eq(properties.organizationId, organizationId), inArray(properties.id, propertyIds)));

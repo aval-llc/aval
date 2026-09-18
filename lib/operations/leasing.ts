@@ -9,8 +9,8 @@
  */
 
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/db";
-import { leaseResidents, leases, leasingLeads, residents, units } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { leaseResidents, leases, leasingLeads, residents, units } from "@/db/postgres/schema";
 import { EntityNotFoundError, getUnit, setUnitStatus } from "./portfolio";
 import { manualSource, type SourceRef } from "./provenance";
 import {
@@ -40,7 +40,7 @@ export interface ResidentInput {
   status?: ResidentStatus;
 }
 
-export async function createResident(organizationId: string, input: ResidentInput, source: SourceRef = manualSource()) {
+export async function createResident(dbSession: DbSession, organizationId: string, input: ResidentInput, source: SourceRef = manualSource()) {
   const now = new Date();
   const row = {
     id: crypto.randomUUID(),
@@ -53,14 +53,14 @@ export async function createResident(organizationId: string, input: ResidentInpu
     createdAt: now,
     updatedAt: now,
   };
-  await getDb().insert(residents).values(row);
+  await dbSession.db.insert(residents).values(row);
   return row;
 }
 
-export async function listResidents(organizationId: string, status?: ResidentStatus) {
+export async function listResidents(dbSession: DbSession, organizationId: string, status?: ResidentStatus) {
   const conditions = [eq(residents.organizationId, organizationId)];
   if (status) conditions.push(eq(residents.status, status));
-  return getDb().select().from(residents).where(and(...conditions)).orderBy(residents.displayName);
+  return dbSession.db.select().from(residents).where(and(...conditions)).orderBy(residents.displayName);
 }
 
 /* ── leases ─────────────────────────────────────────────────────────────── */
@@ -88,12 +88,12 @@ export interface LeaseInput {
  * occupancy figure is computed from. `setUnitStatus` also clears
  * `vacantSince`, so days-vacant stops accruing on a unit that has been leased.
  */
-export async function createLease(organizationId: string, input: LeaseInput, source: SourceRef = manualSource()) {
-  const unit = await getUnit(organizationId, input.unitId);
+export async function createLease(dbSession: DbSession, organizationId: string, input: LeaseInput, source: SourceRef = manualSource()) {
+  const unit = await getUnit(dbSession, organizationId, input.unitId);
   if (!unit) throw new EntityNotFoundError("Unit", input.unitId);
 
   if (input.renewalOfLeaseId) {
-    const prior = await getLease(organizationId, input.renewalOfLeaseId);
+    const prior = await getLease(dbSession, organizationId, input.renewalOfLeaseId);
     if (!prior) throw new EntityNotFoundError("Lease", input.renewalOfLeaseId);
   }
 
@@ -118,14 +118,14 @@ export async function createLease(organizationId: string, input: LeaseInput, sou
     createdAt: now,
     updatedAt: now,
   };
-  await getDb().insert(leases).values(row);
+  await dbSession.db.insert(leases).values(row);
 
-  if (status === "active") await setUnitStatus(organizationId, input.unitId, "occupied", input.startDate);
+  if (status === "active") await setUnitStatus(dbSession, organizationId, input.unitId, "occupied", input.startDate);
   return row;
 }
 
-export async function getLease(organizationId: string, leaseId: string) {
-  const [row] = await getDb()
+export async function getLease(dbSession: DbSession, organizationId: string, leaseId: string) {
+  const [row] = await dbSession.db
     .select()
     .from(leases)
     .where(and(eq(leases.organizationId, organizationId), eq(leases.id, leaseId)))
@@ -133,15 +133,15 @@ export async function getLease(organizationId: string, leaseId: string) {
   return row ?? null;
 }
 
-export async function listLeases(
+export async function listLeases(dbSession: DbSession,
   organizationId: string,
-  filters: { status?: LeaseStatus; propertyId?: string; unitId?: string } = {},
+  filters: { status?: LeaseStatus; propertyId?: string; unitId?: string } = {}
 ) {
   const conditions = [eq(leases.organizationId, organizationId)];
   if (filters.status) conditions.push(eq(leases.status, filters.status));
   if (filters.propertyId) conditions.push(eq(leases.propertyId, filters.propertyId));
   if (filters.unitId) conditions.push(eq(leases.unitId, filters.unitId));
-  return getDb().select().from(leases).where(and(...conditions)).orderBy(desc(leases.startDate));
+  return dbSession.db.select().from(leases).where(and(...conditions)).orderBy(desc(leases.startDate));
 }
 
 /**
@@ -152,56 +152,57 @@ export async function listLeases(
  * rent-ready would report inventory as available that nobody has walked. The
  * caller can say otherwise when it knows better.
  */
-export async function endLease(
+export async function endLease(dbSession: DbSession,
   organizationId: string,
   leaseId: string,
-  options: { status?: Extract<LeaseStatus, "expired" | "terminated" | "renewed">; moveOutDate?: Date; unitStatus?: "vacant_ready" | "vacant_not_ready" } = {},
+  options: { status?: Extract<LeaseStatus, "expired" | "terminated" | "renewed">; moveOutDate?: Date; unitStatus?: "vacant_ready" | "vacant_not_ready" } = {}
 ) {
-  const lease = await getLease(organizationId, leaseId);
+  const lease = await getLease(dbSession, organizationId, leaseId);
   if (!lease) throw new EntityNotFoundError("Lease", leaseId);
 
   const moveOutDate = options.moveOutDate ?? new Date();
-  await getDb()
+  await dbSession.db
     .update(leases)
     .set({ status: options.status ?? "expired", moveOutDate, updatedAt: new Date() })
     .where(and(eq(leases.organizationId, organizationId), eq(leases.id, leaseId)));
 
   // A renewal keeps the same resident in place; the unit never goes vacant.
   if (options.status !== "renewed") {
-    await setUnitStatus(organizationId, lease.unitId, options.unitStatus ?? "vacant_not_ready", moveOutDate);
+    await setUnitStatus(dbSession, organizationId, lease.unitId, options.unitStatus ?? "vacant_not_ready", moveOutDate);
   }
   return { ...lease, status: options.status ?? "expired", moveOutDate };
 }
 
-export async function attachResidentToLease(
+export async function attachResidentToLease(dbSession: DbSession,
   organizationId: string,
   leaseId: string,
   residentId: string,
   role: LeaseResidentRole = "primary",
+  source?: SourceRef
 ) {
-  const [lease] = await getDb()
+  const [lease] = await dbSession.db
     .select({ id: leases.id })
     .from(leases)
     .where(and(eq(leases.organizationId, organizationId), eq(leases.id, leaseId)))
     .limit(1);
   if (!lease) throw new EntityNotFoundError("Lease", leaseId);
 
-  const [resident] = await getDb()
+  const [resident] = await dbSession.db
     .select({ id: residents.id })
     .from(residents)
     .where(and(eq(residents.organizationId, organizationId), eq(residents.id, residentId)))
     .limit(1);
   if (!resident) throw new EntityNotFoundError("Resident", residentId);
 
-  const row = { id: crypto.randomUUID(), organizationId, leaseId, residentId, role, createdAt: new Date() };
-  await getDb().insert(leaseResidents).values(row).onConflictDoNothing();
+  const row = { id: crypto.randomUUID(), organizationId, leaseId, residentId, role, sourceProvider: source?.sourceProvider ?? null, sourceConnectionId: source?.sourceConnectionId ?? null, createdAt: new Date() };
+  await dbSession.db.insert(leaseResidents).values(row).onConflictDoNothing();
   return row;
 }
 
 /** Residents on each of the given leases, for collections and inbox surfaces that need a name and a channel. */
-export async function residentsForLeases(organizationId: string, leaseIds: string[]) {
+export async function residentsForLeases(dbSession: DbSession, organizationId: string, leaseIds: string[]) {
   if (leaseIds.length === 0) return new Map<string, { id: string; displayName: string; email: string | null; phone: string | null; role: string }[]>();
-  const rows = await getDb()
+  const rows = await dbSession.db
     .select({
       leaseId: leaseResidents.leaseId,
       role: leaseResidents.role,
@@ -234,13 +235,13 @@ export interface LeadInput {
   inquiredAt?: Date;
 }
 
-export async function createLead(organizationId: string, input: LeadInput, source: SourceRef = manualSource()) {
+export async function createLead(dbSession: DbSession, organizationId: string, input: LeadInput, source: SourceRef = manualSource()) {
   // A lead pointing at a unit inherits that unit's type label when the caller
   // didn't supply one, so days-to-lease by unit type stays populated without
   // asking every connector to compute the same string.
   let label = input.unitTypeLabel ?? null;
   if (!label && input.unitId) {
-    const unit = await getUnit(organizationId, input.unitId);
+    const unit = await getUnit(dbSession, organizationId, input.unitId);
     if (unit) label = unitTypeLabel(unit);
   }
 
@@ -266,7 +267,7 @@ export async function createLead(organizationId: string, input: LeadInput, sourc
     createdAt: now,
     updatedAt: now,
   };
-  await getDb().insert(leasingLeads).values(row);
+  await dbSession.db.insert(leasingLeads).values(row);
   return row;
 }
 
@@ -290,8 +291,8 @@ const STAGE_COLUMN = {
  * at the top than it was. The timestamps are honest about being simultaneous
  * rather than invented spread over days.
  */
-export async function advanceLead(organizationId: string, leadId: string, stage: LeadStage, at = new Date()) {
-  const [lead] = await getDb()
+export async function advanceLead(dbSession: DbSession, organizationId: string, leadId: string, stage: LeadStage, at = new Date()) {
+  const [lead] = await dbSession.db
     .select()
     .from(leasingLeads)
     .where(and(eq(leasingLeads.organizationId, organizationId), eq(leasingLeads.id, leadId)))
@@ -309,30 +310,30 @@ export async function advanceLead(organizationId: string, leadId: string, stage:
     }
   }
 
-  await getDb()
+  await dbSession.db
     .update(leasingLeads)
     .set(updates)
     .where(and(eq(leasingLeads.organizationId, organizationId), eq(leasingLeads.id, leadId)));
   return { ...lead, ...updates };
 }
 
-export async function markLeadLost(organizationId: string, leadId: string, reason: string, at = new Date()) {
-  const [lead] = await getDb()
+export async function markLeadLost(dbSession: DbSession, organizationId: string, leadId: string, reason: string, at = new Date()) {
+  const [lead] = await dbSession.db
     .select({ id: leasingLeads.id })
     .from(leasingLeads)
     .where(and(eq(leasingLeads.organizationId, organizationId), eq(leasingLeads.id, leadId)))
     .limit(1);
   if (!lead) throw new EntityNotFoundError("Lead", leadId);
 
-  await getDb()
+  await dbSession.db
     .update(leasingLeads)
     .set({ stage: "lost", lostAt: at, lostReason: reason.trim().slice(0, 200) || null, updatedAt: new Date() })
     .where(and(eq(leasingLeads.organizationId, organizationId), eq(leasingLeads.id, leadId)));
 }
 
-export async function listLeads(organizationId: string, since?: Date) {
+export async function listLeads(dbSession: DbSession, organizationId: string, since?: Date) {
   const conditions = [eq(leasingLeads.organizationId, organizationId)];
-  return getDb()
+  return dbSession.db
     .select()
     .from(leasingLeads)
     .where(and(...conditions))
@@ -364,13 +365,13 @@ export interface LeasingSummary {
  * nobody", which is a performance claim, while null is the accurate "no
  * connected source has provided leasing data".
  */
-export async function summarizeLeasing(
+export async function summarizeLeasing(dbSession: DbSession,
   organizationId: string,
   periodStart: Date,
   periodEnd: Date,
-  asOf = new Date(),
+  asOf = new Date()
 ): Promise<LeasingSummary> {
-  const db = getDb();
+  const db = dbSession.db;
   const [leadRows, leaseRows] = await Promise.all([
     db.select().from(leasingLeads).where(eq(leasingLeads.organizationId, organizationId)),
     db.select().from(leases).where(eq(leases.organizationId, organizationId)),
@@ -409,8 +410,8 @@ export async function summarizeLeasing(
 }
 
 /** Units with no active lease, for the "what can we actually rent" question the Leasing tab opens on. */
-export async function availableUnits(organizationId: string) {
-  return getDb()
+export async function availableUnits(dbSession: DbSession, organizationId: string) {
+  return dbSession.db
     .select()
     .from(units)
     .where(and(eq(units.organizationId, organizationId), eq(units.status, "vacant_ready")))

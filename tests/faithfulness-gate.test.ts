@@ -90,6 +90,24 @@ test("comma-formatted and currency-prefixed figures are extracted, not skipped",
   assert.ok(claimed.includes(1_400_000));
 });
 
+test("time, date, and quantity ranges do not turn their upper bounds negative", () => {
+  const claimed = extractClaimedNumbers({
+    narrative: "Available 2026-09-11 from 09:00-12:00 or 14:00-16:00; allow 10-14 days.",
+  });
+  assert.ok(claimed.includes(12));
+  assert.ok(claimed.includes(16));
+  assert.ok(claimed.includes(14));
+  assert.ok(!claimed.some((value) => value < 0));
+});
+
+test("a real negative amount keeps its sign", () => {
+  const claimed = extractClaimedNumbers({ narrative: "NOI change: -125.50; adjustment (-40)." });
+  assert.ok(claimed.includes(-125.5));
+  assert.ok(claimed.includes(-40));
+  assert.equal(checkFaithfulness({ narrative: "NOI change: -125.50." }, new Set([-125.5])).ok, true);
+  assert.equal(checkFaithfulness({ narrative: "NOI change: -125.50." }, new Set([125.5])).ok, false);
+});
+
 /* ── it still allows what it is meant to allow ───────────────────────────── */
 
 test("ordinary arithmetic on a small verified set is still permitted", () => {

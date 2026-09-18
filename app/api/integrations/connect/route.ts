@@ -1,7 +1,8 @@
+import { withApiSession } from "@/lib/api/with-session";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections, oauthStates } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections, oauthStates } from "@/db/postgres/schema";
 import { encryptSecret } from "@/lib/integrations/crypto";
 import { configuredEnvironment, getProvider } from "@/lib/integrations/catalog";
 import { getApiIdentity } from "@/lib/integrations/session";
@@ -19,8 +20,8 @@ function randomBase64Url(bytes = 32) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   if (identity.role !== "owner") return Response.json({ error: "Only the workspace owner can manage connections" }, { status: 403 });
   const originHeader = request.headers.get("origin");
@@ -31,8 +32,8 @@ export async function POST(request: Request) {
   const blocker = connectionBlocker(provider.id);
   if (blocker) return Response.json({ error: blocker, code: "adapter_unavailable" }, { status: 409 });
   if (provider.authMode === "oauth_subscription_paste") return Response.json({ error: "Use the subscription authorization flow" }, { status: 409 });
-  await ensureOrganization(identity);
-  const db = getDb();
+  await ensureOrganization(dbSession, identity);
+  const db = dbSession.db;
   const now = new Date();
 
   if (provider.authMode === "oauth2") {
@@ -80,3 +81,5 @@ export async function POST(request: Request) {
   const [stored] = await db.select({ id: integrationConnections.id }).from(integrationConnections).where(and(eq(integrationConnections.organizationId, identity.organizationId), eq(integrationConnections.provider, provider.id))).limit(1);
   return Response.json({ connection: { id: stored?.id ?? connection.id, provider: provider.id, status }, next: provider.note });
 }
+
+export const POST = withApiSession(POSTWithSession);

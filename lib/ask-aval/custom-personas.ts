@@ -19,8 +19,8 @@
  */
 
 import { and, desc, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { agentPersonas } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { agentPersonas } from "@/db/postgres/schema";
 import type { AgentPersona } from "./personas";
 import type { ShapeId } from "@/app/components/agent-avatar/shapes";
 import type { ThemeId } from "@/app/components/agent-avatar/themes";
@@ -58,9 +58,9 @@ function toRow(record: {
   };
 }
 
-export async function createCustomPersona(organizationId: string, userId: string, input: CustomPersonaInput): Promise<CustomPersonaRow> {
+export async function createCustomPersona(dbSession: DbSession, organizationId: string, userId: string, input: CustomPersonaInput): Promise<CustomPersonaRow> {
   const clean = validateCustomPersonaInput(input);
-  const db = getDb();
+  const db = dbSession.db;
   const now = new Date();
   const record = {
     id: crypto.randomUUID(),
@@ -78,20 +78,20 @@ export async function createCustomPersona(organizationId: string, userId: string
   return toRow(record);
 }
 
-export async function listCustomPersonas(organizationId: string): Promise<CustomPersonaRow[]> {
-  const db = getDb();
+export async function listCustomPersonas(dbSession: DbSession, organizationId: string): Promise<CustomPersonaRow[]> {
+  const db = dbSession.db;
   const rows = await db.select().from(agentPersonas).where(eq(agentPersonas.organizationId, organizationId)).orderBy(desc(agentPersonas.createdAt));
   return rows.map(toRow);
 }
 
-export async function deleteCustomPersona(organizationId: string, id: string): Promise<void> {
-  const db = getDb();
+export async function deleteCustomPersona(dbSession: DbSession, organizationId: string, id: string): Promise<void> {
+  const db = dbSession.db;
   await db.delete(agentPersonas).where(and(eq(agentPersonas.id, id), eq(agentPersonas.organizationId, organizationId)));
 }
 
 /** Loads a custom persona and shapes it into the same AgentPersona interface the built-in roster uses, so personas.ts's resolvePersona() can treat both identically. Returns null if `id` doesn't exist in `organizationId` (never leaks another org's persona by id). */
-export async function getCustomPersonaAsAgentPersona(organizationId: string, id: string): Promise<AgentPersona | null> {
-  const db = getDb();
+export async function getCustomPersonaAsAgentPersona(dbSession: DbSession, organizationId: string, id: string): Promise<AgentPersona | null> {
+  const db = dbSession.db;
   const [record] = await db
     .select()
     .from(agentPersonas)

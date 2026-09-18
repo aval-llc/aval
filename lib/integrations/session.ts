@@ -1,7 +1,7 @@
-import { headers } from "next/headers";
-import { readSessionCookie } from "@/lib/auth/session-cookie";
+import type { DbSession } from "@/db/postgres/session";
 import type { AuthMode } from "@/app/components/auth-gate";
-import { IMPLICIT_OWNER_ROLE, type WorkspaceRole } from "@/lib/organizations/roles";
+import { type WorkspaceRole } from "@/lib/organizations/roles";
+import { roleFor } from "@/lib/organizations/membership";
 
 export type ApiIdentity = {
   userId: string;
@@ -42,66 +42,23 @@ export async function organizationIdForUser(userId: string): Promise<string> {
   return `org_${await digest(userId)}`;
 }
 
-export async function getApiIdentity(request: Request): Promise<ApiIdentity | null> {
-  // A real customer account (signup/login) takes priority over ChatGPT
-  // Sites' platform-injected headers — on a non-Sites deployment there are
-  // no such headers at all, so this is the only path real visitors have.
-  const sessionUser = await readSessionCookie(request);
-  if (sessionUser) {
-    const personal = await organizationIdForUser(sessionUser.userId);
-    // The cookie says which workspace was chosen; membership decides whether
-    // it still counts. A revoked member falls back to their own workspace
-    // rather than keeping access until the cookie expires.
-    // Dynamic for the same reason session-cookie.ts imports its secret that
-    // way: this module is reachable from page rendering, and membership.ts
-    // reaches db/index.ts, which statically imports the Workers-only
-    // `cloudflare:workers`. A static import there fails to *load* outside a
-    // real Workers runtime — before any code runs and with nothing to catch.
-    const { resolveMembership } = await import("@/lib/organizations/membership");
-    const membership = await resolveMembership(sessionUser.userId, personal, sessionUser.activeOrganizationId);
-    return {
-      userId: sessionUser.userId,
-      email: sessionUser.email,
-      displayName: sessionUser.displayName,
-      organizationId: membership.organizationId,
-      role: membership.role,
-      source: "password",
-    };
-  }
-
-  let hostname = "";
-  try { hostname = new URL(request.url).hostname; } catch { /* invalid request URL */ }
-  const local = hostname === "localhost" || hostname === "127.0.0.1";
-  const chatgptUserId = request.headers.get("oai-authenticated-user-id");
-  const userId = chatgptUserId ?? (local ? "local-preview" : null);
-  const email = request.headers.get("oai-authenticated-user-email") ?? (local ? "preview@aval.local" : null);
-
-  if (!userId || !email) {
-    return null;
-  }
-
-  const encodedName = request.headers.get("oai-authenticated-user-full-name");
-  let displayName = email;
-  if (encodedName) {
-    try { displayName = decodeURIComponent(encodedName); } catch { displayName = encodedName; }
-  }
-  // Platform-injected identity has no session cookie to carry a workspace
-  // choice, so it always resolves to its own workspace.
+export async function getApiIdentity(dbSession: DbSession, request: Request): Promise<ApiIdentity | null> {
+  void request;
+  const auth = dbSession.identity.auth;
+  if (!auth) return null;
+  const role = await roleFor(dbSession, auth.userId, dbSession.identity.organizationId);
+  if (!role) return null;
   return {
-    userId,
-    email,
-    displayName,
-    organizationId: await organizationIdForUser(userId),
-    role: IMPLICIT_OWNER_ROLE,
-    source: chatgptUserId ? "chatgpt" : "local",
+    userId: auth.userId,
+    email: auth.email,
+    displayName: auth.displayName,
+    organizationId: dbSession.identity.organizationId,
+    role,
+    source: auth.source,
   };
 }
 
-/** Same identity resolution as getApiIdentity, for use in a Server Component page (which gets `headers()`, not a `Request`). */
-export async function getPageIdentity(): Promise<ApiIdentity | null> {
-  const headersList = await headers();
-  const host = headersList.get("x-forwarded-host") ?? headersList.get("host") ?? "localhost";
-  const protocol = headersList.get("x-forwarded-proto") ?? (host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
-  const request = new Request(`${protocol}://${host}/`, { headers: headersList });
-  return getApiIdentity(request);
+/** Same identity resolution for Server Components after the Worker envelope is established. */
+export async function getPageIdentity(dbSession: DbSession): Promise<ApiIdentity | null> {
+  return getApiIdentity(dbSession, new Request("https://aval.invalid/"));
 }

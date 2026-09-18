@@ -8,8 +8,8 @@
  */
 
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/db";
-import { utilityBills, utilityMeters } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { utilityBills, utilityMeters } from "@/db/postgres/schema";
 import type { UnitOfMeasure, UtilityType } from "./types";
 
 export interface CreateMeterInput {
@@ -21,8 +21,8 @@ export interface CreateMeterInput {
   unitOfMeasure: UnitOfMeasure;
 }
 
-export async function createMeter(organizationId: string, input: CreateMeterInput) {
-  const db = getDb();
+export async function createMeter(dbSession: DbSession, organizationId: string, input: CreateMeterInput) {
+  const db = dbSession.db;
   const now = new Date();
   const meter = {
     id: crypto.randomUUID(),
@@ -40,8 +40,8 @@ export async function createMeter(organizationId: string, input: CreateMeterInpu
   return meter;
 }
 
-export async function listMeters(organizationId: string, utilityType?: UtilityType) {
-  const db = getDb();
+export async function listMeters(dbSession: DbSession, organizationId: string, utilityType?: UtilityType) {
+  const db = dbSession.db;
   const conditions = [eq(utilityMeters.organizationId, organizationId)];
   if (utilityType) conditions.push(eq(utilityMeters.utilityType, utilityType));
   return db
@@ -70,8 +70,8 @@ export class MeterNotFoundError extends Error {
   }
 }
 
-export async function recordBill(organizationId: string, input: RecordBillInput) {
-  const db = getDb();
+export async function recordBill(dbSession: DbSession, organizationId: string, input: RecordBillInput) {
+  const db = dbSession.db;
   const [meter] = await db
     .select({ id: utilityMeters.id })
     .from(utilityMeters)
@@ -97,12 +97,12 @@ export async function recordBill(organizationId: string, input: RecordBillInput)
   return bill;
 }
 
-export async function listBills(organizationId: string, filters: { meterId?: string; utilityType?: UtilityType } = {}) {
-  const db = getDb();
+export async function listBills(dbSession: DbSession, organizationId: string, filters: { meterId?: string; utilityType?: UtilityType } = {}) {
+  const db = dbSession.db;
 
   let meterIds: string[] | undefined;
   if (filters.utilityType) {
-    const meters = await listMeters(organizationId, filters.utilityType);
+    const meters = await listMeters(dbSession, organizationId, filters.utilityType);
     meterIds = meters.map((meter) => meter.id);
     if (meterIds.length === 0) return [];
   }

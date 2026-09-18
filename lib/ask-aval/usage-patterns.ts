@@ -16,8 +16,8 @@
  */
 
 import { and, eq, ne } from "drizzle-orm";
-import { getDb } from "@/db";
-import { automationRuns, draftDocuments, insightDecisions } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { automationRuns, draftDocuments, insightDecisions } from "@/db/postgres/schema";
 
 const MIN_OCCURRENCES = 3;
 
@@ -42,8 +42,8 @@ function topEntry(counts: Map<string, number>): [string, number] | null {
   return best && best[1] >= MIN_OCCURRENCES ? best : null;
 }
 
-export async function getUsagePatternContext(organizationId: string): Promise<string> {
-  const db = getDb();
+export async function getUsagePatternContext(dbSession: DbSession, organizationId: string): Promise<string> {
+  const db = dbSession.db;
   const [decisions, runs, drafts] = await Promise.all([
     db.select().from(insightDecisions).where(eq(insightDecisions.organizationId, organizationId)),
     db.select().from(automationRuns).where(eq(automationRuns.organizationId, organizationId)),

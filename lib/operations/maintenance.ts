@@ -8,9 +8,10 @@
  * took, which is the number that actually costs money.
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/db";
-import { units, vendors, workOrders } from "@/db/schema";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { InvalidWorkOrderTransitionError } from "./errors";
+import type { DbSession } from "@/db/postgres/session";
+import { units, vendors, workOrders } from "@/db/postgres/schema";
 import { EntityNotFoundError, getProperty, getUnit, propertyNames, unitCountsByProperty } from "./portfolio";
 import { manualSource, type SourceRef } from "./provenance";
 import {
@@ -48,7 +49,7 @@ export interface VendorInput {
   isActive?: boolean;
 }
 
-export async function createVendor(organizationId: string, input: VendorInput, source: SourceRef = manualSource()) {
+export async function createVendor(dbSession: DbSession, organizationId: string, input: VendorInput, source: SourceRef = manualSource()) {
   const now = new Date();
   const row = {
     id: crypto.randomUUID(),
@@ -63,18 +64,18 @@ export async function createVendor(organizationId: string, input: VendorInput, s
     createdAt: now,
     updatedAt: now,
   };
-  await getDb().insert(vendors).values(row);
+  await dbSession.db.insert(vendors).values(row);
   return row;
 }
 
-export async function listVendors(organizationId: string, activeOnly = false) {
+export async function listVendors(dbSession: DbSession, organizationId: string, activeOnly = false) {
   const conditions = [eq(vendors.organizationId, organizationId)];
   if (activeOnly) conditions.push(eq(vendors.isActive, true));
-  return getDb().select().from(vendors).where(and(...conditions)).orderBy(vendors.name);
+  return dbSession.db.select().from(vendors).where(and(...conditions)).orderBy(vendors.name);
 }
 
-export async function getVendor(organizationId: string, vendorId: string) {
-  const [row] = await getDb()
+export async function getVendor(dbSession: DbSession, organizationId: string, vendorId: string) {
+  const [row] = await dbSession.db
     .select()
     .from(vendors)
     .where(and(eq(vendors.organizationId, organizationId), eq(vendors.id, vendorId)))
@@ -97,25 +98,25 @@ export interface WorkOrderInput {
   callbackOfWorkOrderId?: string | null;
 }
 
-export async function createWorkOrder(organizationId: string, input: WorkOrderInput, source: SourceRef = manualSource()) {
-  const property = await getProperty(organizationId, input.propertyId);
+export async function createWorkOrder(dbSession: DbSession, organizationId: string, input: WorkOrderInput, source: SourceRef = manualSource()) {
+  const property = await getProperty(dbSession, organizationId, input.propertyId);
   if (!property) throw new EntityNotFoundError("Property", input.propertyId);
 
   // Every caller-supplied id is verified inside the org before it is stored —
   // an id in a request body is input, not a fact.
   if (input.unitId) {
-    const unit = await getUnit(organizationId, input.unitId);
+    const unit = await getUnit(dbSession, organizationId, input.unitId);
     if (!unit) throw new EntityNotFoundError("Unit", input.unitId);
     if (unit.propertyId !== input.propertyId) {
       throw new EntityNotFoundError("Unit", `${input.unitId} (belongs to a different property)`);
     }
   }
   if (input.vendorId) {
-    const vendor = await getVendor(organizationId, input.vendorId);
+    const vendor = await getVendor(dbSession, organizationId, input.vendorId);
     if (!vendor) throw new EntityNotFoundError("Vendor", input.vendorId);
   }
   if (input.callbackOfWorkOrderId) {
-    const original = await getWorkOrder(organizationId, input.callbackOfWorkOrderId);
+    const original = await getWorkOrder(dbSession, organizationId, input.callbackOfWorkOrderId);
     if (!original) throw new EntityNotFoundError("Work order", input.callbackOfWorkOrderId);
   }
 
@@ -147,12 +148,12 @@ export async function createWorkOrder(organizationId: string, input: WorkOrderIn
     createdAt: now,
     updatedAt: now,
   };
-  await getDb().insert(workOrders).values(row);
+  await dbSession.db.insert(workOrders).values(row);
   return row;
 }
 
-export async function getWorkOrder(organizationId: string, workOrderId: string) {
-  const [row] = await getDb()
+export async function getWorkOrder(dbSession: DbSession, organizationId: string, workOrderId: string) {
+  const [row] = await dbSession.db
     .select()
     .from(workOrders)
     .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId)))
@@ -160,16 +161,16 @@ export async function getWorkOrder(organizationId: string, workOrderId: string) 
   return row ?? null;
 }
 
-export async function listWorkOrders(
+export async function listWorkOrders(dbSession: DbSession,
   organizationId: string,
-  filters: { status?: WorkOrderStatus; openOnly?: boolean; propertyId?: string; vendorId?: string; since?: Date } = {},
+  filters: { status?: WorkOrderStatus; openOnly?: boolean; propertyId?: string; vendorId?: string; since?: Date } = {}
 ) {
   const conditions = [eq(workOrders.organizationId, organizationId)];
   if (filters.status) conditions.push(eq(workOrders.status, filters.status));
   if (filters.propertyId) conditions.push(eq(workOrders.propertyId, filters.propertyId));
   if (filters.vendorId) conditions.push(eq(workOrders.vendorId, filters.vendorId));
 
-  const rows = await getDb()
+  const rows = await dbSession.db
     .select()
     .from(workOrders)
     .where(and(...conditions))
@@ -182,51 +183,57 @@ export async function listWorkOrders(
   );
 }
 
-export async function assignWorkOrder(organizationId: string, workOrderId: string, vendorId: string, at = new Date()) {
-  const order = await getWorkOrder(organizationId, workOrderId);
+export async function assignWorkOrder(dbSession: DbSession, organizationId: string, workOrderId: string, vendorId: string, at = new Date()) {
+  const order = await getWorkOrder(dbSession, organizationId, workOrderId);
   if (!order) throw new EntityNotFoundError("Work order", workOrderId);
-  const vendor = await getVendor(organizationId, vendorId);
+  const vendor = await getVendor(dbSession, organizationId, vendorId);
   if (!vendor) throw new EntityNotFoundError("Vendor", vendorId);
 
-  await getDb()
+  const [updated] = await dbSession.db
     .update(workOrders)
     // `assignedAt` keeps its original value on reassignment. Response time is
     // measured to the *first* assignment; restamping it would let a work order
     // passed between three vendors report the last handoff as its response.
-    .set({ vendorId, status: "assigned", assignedAt: order.assignedAt ?? at, updatedAt: new Date() })
-    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId)));
-  return { ...order, vendorId, status: "assigned" as WorkOrderStatus, assignedAt: order.assignedAt ?? at };
+    .set({ vendorId, status: "assigned", assignedAt: sql`coalesce(${workOrders.assignedAt}, ${at})`, updatedAt: new Date() })
+    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId), inArray(workOrders.status, [...OPEN_WORK_ORDER_STATUSES])))
+    .returning();
+  if (!updated) throw new InvalidWorkOrderTransitionError();
+  return updated;
 }
 
-export async function startWorkOrder(organizationId: string, workOrderId: string, at = new Date()) {
-  const order = await getWorkOrder(organizationId, workOrderId);
+export async function startWorkOrder(dbSession: DbSession, organizationId: string, workOrderId: string, at = new Date()) {
+  const order = await getWorkOrder(dbSession, organizationId, workOrderId);
   if (!order) throw new EntityNotFoundError("Work order", workOrderId);
-  await getDb()
+  const [updated] = await dbSession.db
     .update(workOrders)
-    .set({ status: "in_progress", startedAt: order.startedAt ?? at, updatedAt: new Date() })
-    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId)));
-  return { ...order, status: "in_progress" as WorkOrderStatus, startedAt: order.startedAt ?? at };
+    .set({ status: "in_progress", startedAt: sql`coalesce(${workOrders.startedAt}, ${at})`, updatedAt: new Date() })
+    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId), inArray(workOrders.status, [...OPEN_WORK_ORDER_STATUSES])))
+    .returning();
+  if (!updated) throw new InvalidWorkOrderTransitionError();
+  return updated;
 }
 
-export async function completeWorkOrder(
+export async function completeWorkOrder(dbSession: DbSession,
   organizationId: string,
   workOrderId: string,
-  options: { at?: Date; actualCostCents?: number | null } = {},
+  options: { at?: Date; actualCostCents?: number | null } = {}
 ) {
-  const order = await getWorkOrder(organizationId, workOrderId);
+  const order = await getWorkOrder(dbSession, organizationId, workOrderId);
   if (!order) throw new EntityNotFoundError("Work order", workOrderId);
 
   const completedAt = options.at ?? new Date();
-  await getDb()
+  const [updated] = await dbSession.db
     .update(workOrders)
     .set({
       status: "completed",
       completedAt,
-      actualCostCents: options.actualCostCents ?? order.actualCostCents,
+      actualCostCents: options.actualCostCents ?? sql`${workOrders.actualCostCents}`,
       updatedAt: new Date(),
     })
-    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId)));
-  return { ...order, status: "completed" as WorkOrderStatus, completedAt };
+    .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId), inArray(workOrders.status, [...OPEN_WORK_ORDER_STATUSES])))
+    .returning();
+  if (!updated) throw new InvalidWorkOrderTransitionError();
+  return updated;
 }
 
 /**
@@ -238,16 +245,16 @@ export async function completeWorkOrder(
  * vendor renewals and an inferred callback is a guess with a vendor's contract
  * attached to it.
  */
-export async function linkCallback(organizationId: string, workOrderId: string, originalWorkOrderId: string) {
+export async function linkCallback(dbSession: DbSession, organizationId: string, workOrderId: string, originalWorkOrderId: string) {
   const [order, original] = await Promise.all([
-    getWorkOrder(organizationId, workOrderId),
-    getWorkOrder(organizationId, originalWorkOrderId),
+    getWorkOrder(dbSession, organizationId, workOrderId),
+    getWorkOrder(dbSession, organizationId, originalWorkOrderId),
   ]);
   if (!order) throw new EntityNotFoundError("Work order", workOrderId);
   if (!original) throw new EntityNotFoundError("Work order", originalWorkOrderId);
   if (workOrderId === originalWorkOrderId) throw new Error("A work order cannot be a callback of itself");
 
-  await getDb()
+  await dbSession.db
     .update(workOrders)
     .set({ callbackOfWorkOrderId: originalWorkOrderId, updatedAt: new Date() })
     .where(and(eq(workOrders.organizationId, organizationId), eq(workOrders.id, workOrderId)));
@@ -282,13 +289,13 @@ export interface MaintenanceReport {
   periodEnd: Date;
 }
 
-export async function summarizeMaintenanceOperations(
+export async function summarizeMaintenanceOperations(dbSession: DbSession,
   organizationId: string,
   periodStart: Date,
   periodEnd: Date,
-  asOf = new Date(),
+  asOf = new Date()
 ): Promise<MaintenanceReport> {
-  const db = getDb();
+  const db = dbSession.db;
   const rows = await db.select().from(workOrders).where(eq(workOrders.organizationId, organizationId));
   const inPeriod = rows.filter((row) => row.reportedAt >= periodStart && row.reportedAt <= periodEnd);
 
@@ -309,8 +316,8 @@ export async function summarizeMaintenanceOperations(
   }));
 
   const [vendorRows, unitCounts] = await Promise.all([
-    listVendors(organizationId),
-    unitCountsByProperty(organizationId),
+    listVendors(dbSession, organizationId),
+    unitCountsByProperty(dbSession, organizationId),
   ]);
   const vendorById = new Map(vendorRows.map((vendor) => [vendor.id, vendor]));
 
@@ -323,7 +330,7 @@ export async function summarizeMaintenanceOperations(
     entry.totalCostCents += order.actualCostCents ?? 0;
     spendByPropertyMap.set(order.propertyId, entry);
   }
-  const names = await propertyNames(organizationId, [...spendByPropertyMap.keys()]);
+  const names = await propertyNames(dbSession, organizationId, [...spendByPropertyMap.keys()]);
 
   return {
     summary: summarizeMaintenance(likes, asOf),
@@ -381,8 +388,8 @@ export async function summarizeMaintenanceOperations(
 }
 
 /** Units with an open work order, for the Properties tab's "why is this unit not rent-ready" question. */
-export async function unitsWithOpenWork(organizationId: string) {
-  const rows = await getDb()
+export async function unitsWithOpenWork(dbSession: DbSession, organizationId: string) {
+  const rows = await dbSession.db
     .select({
       workOrderId: workOrders.id,
       unitId: workOrders.unitId,

@@ -23,9 +23,9 @@ import { parseTaskCheck, type TaskCheck } from './checks';
  *   that already started.
  */
 
-import { and, asc, desc, eq, inArray, lt, lte, or, isNull, sql } from "drizzle-orm";
-import { getDb } from "@/db";
-import { agentTasks, agentTaskSteps } from "@/db/schema";
+import { and, asc, desc, eq, gt, inArray, lt, lte, or, isNull, sql } from "drizzle-orm";
+import type { DbSession } from "@/db/postgres/session";
+import { agentTasks, agentTaskSteps } from "@/db/postgres/schema";
 import { latestApprovalSettledPredicate } from "./task-sql.ts";
 import { canTransition, LEASE_MS, TERMINAL_STATES, type TaskState } from "./task-state.ts";
 import { DEFAULT_MAX_STEPS, DEFAULT_MAX_TOKENS } from "./task-state.ts";
@@ -44,7 +44,7 @@ export {
 
 export interface NewTask {
   id?: string;
-  executionScope?: { source: "inbound"; conversationId: string };
+  executionScope?: { source: "inbound"; conversationId: string; messageId?: string; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } };
   organizationId: string;
   userId: string;
   agentId: string;
@@ -78,6 +78,7 @@ export interface TaskRecord {
   delegationDepth: number;
   cancelRequested: boolean;
   leaseOwner: string | null;
+  leaseGeneration: number;
   leaseExpiresAt: Date | null;
   lastHeartbeatAt: Date | null;
   resultJson: string | null;
@@ -87,7 +88,7 @@ export interface TaskRecord {
   finishedAt: Date | null;
 }
 
-export async function createTask(input: NewTask): Promise<TaskRecord> {
+export async function createTask(dbSession: DbSession, input: NewTask): Promise<TaskRecord> {
   const check = parseTaskCheck(input.check);
   const now = new Date();
   const row = {
@@ -111,6 +112,7 @@ export async function createTask(input: NewTask): Promise<TaskRecord> {
     delegationDepth: input.delegationDepth ?? 0,
     cancelRequested: false,
     leaseOwner: null,
+    leaseGeneration: 0,
     leaseExpiresAt: null,
     lastHeartbeatAt: null,
     resultJson: null,
@@ -119,15 +121,15 @@ export async function createTask(input: NewTask): Promise<TaskRecord> {
     updatedAt: now,
     finishedAt: null,
   };
-  await getDb().insert(agentTasks).values(row).onConflictDoNothing();
-  const stored=await getTask(input.organizationId,row.id);
+  await dbSession.db.insert(agentTasks).values(row).onConflictDoNothing();
+  const stored=await getTask(dbSession, input.organizationId,row.id);
   if(!stored||stored.userId!==input.userId||stored.goal!==row.goal||stored.agentId!==row.agentId||stored.checkJson!==row.checkJson||stored.parentTaskId!==row.parentTaskId)throw Error("Task id already belongs to a different request.");
   return stored;
 }
 
 /** Reads a task, scoped to its organization — an id alone is never enough to reach one. */
-export async function getTask(organizationId: string, taskId: string): Promise<TaskRecord | null> {
-  const [row] = await getDb()
+export async function getTask(dbSession: DbSession, organizationId: string, taskId: string): Promise<TaskRecord | null> {
+  const [row] = await dbSession.db
     .select()
     .from(agentTasks)
     .where(and(eq(agentTasks.id, taskId), eq(agentTasks.organizationId, organizationId)))
@@ -135,8 +137,8 @@ export async function getTask(organizationId: string, taskId: string): Promise<T
   return (row as TaskRecord | undefined) ?? null;
 }
 
-export async function listTasks(organizationId: string, limit = 25): Promise<TaskRecord[]> {
-  const rows = await getDb()
+export async function listTasks(dbSession: DbSession, organizationId: string, limit = 25): Promise<TaskRecord[]> {
+  const rows = await dbSession.db
     .select()
     .from(agentTasks)
     .where(eq(agentTasks.organizationId, organizationId))
@@ -150,37 +152,41 @@ export async function listTasks(organizationId: string, limit = 25): Promise<Tas
  *
  * The `where` clause is the entire lock: it matches only a task that is still
  * in the expected state **and** whose lease is absent or expired. Two workers
- * racing both issue this update; SQLite applies them in some order, and the
+ * racing both issue this update; PostgreSQL locks the candidate row, and the
  * second one matches zero rows because the first already moved the state and
  * stamped its own lease. The loser gets `false` and moves on. There is no
  * read-then-write window for them to race inside.
  */
-export async function claimTask(taskId: string, workerId: string, from: TaskState): Promise<boolean> {
+export async function claimTask(dbSession: DbSession, taskId: string, workerId: string, from: TaskState): Promise<boolean> {
   const now = new Date();
-  const result = await getDb()
-    .update(agentTasks)
-    .set({ status: "RUNNING", leaseOwner: workerId, leaseExpiresAt: new Date(now.getTime() + LEASE_MS), lastHeartbeatAt: now, updatedAt: now })
-    .where(
-      and(
-        eq(agentTasks.id, taskId),
-        eq(agentTasks.status, from),
-        or(isNull(agentTasks.leaseExpiresAt), lt(agentTasks.leaseExpiresAt, now)),
-        or(isNull(agentTasks.nextAttemptAt), lte(agentTasks.nextAttemptAt, now)),
-      ),
-    );
-    // D1 reports affected rows on `meta.changes`; drizzle surfaces it as
-    // `rowsAffected` on some drivers and `meta` on others, so both are read
-    // and a missing count is treated as "did not claim" rather than assumed.
+  const expiresAt = new Date(now.getTime() + LEASE_MS);
+  const result = await dbSession.db.execute(sql`
+    with candidate as (
+      select id
+      from ${agentTasks}
+      where ${agentTasks.id} = ${taskId}
+        and ${agentTasks.status} = ${from}
+        and (${agentTasks.leaseExpiresAt} is null or ${agentTasks.leaseExpiresAt} < ${now})
+        and (${agentTasks.nextAttemptAt} is null or ${agentTasks.nextAttemptAt} <= ${now})
+      for update skip locked
+    )
+    update ${agentTasks} as task
+    set status = 'RUNNING', lease_owner = ${workerId},
+        lease_generation = task.lease_generation + 1,
+        lease_expires_at = ${expiresAt}, last_heartbeat_at = ${now}, updated_at = ${now}
+    from candidate
+    where task.id = candidate.id
+  `);
   return affectedRows(result) === 1;
 }
 
 /** Extends the current holder's lease mid-run. Fails if the lease was lost, which is the signal to stop working on the task. */
-export async function heartbeat(taskId: string, workerId: string): Promise<boolean> {
+export async function heartbeat(dbSession: DbSession, taskId: string, workerId: string, leaseGeneration: number): Promise<boolean> {
   const now = new Date();
-  const result = await getDb()
+  const result = await dbSession.db
     .update(agentTasks)
     .set({ leaseExpiresAt: new Date(now.getTime() + LEASE_MS), lastHeartbeatAt: now, updatedAt: now })
-    .where(and(eq(agentTasks.id, taskId), eq(agentTasks.leaseOwner, workerId)));
+    .where(and(eq(agentTasks.id, taskId), eq(agentTasks.leaseOwner, workerId), eq(agentTasks.leaseGeneration, leaseGeneration), eq(agentTasks.status, "RUNNING"), gt(agentTasks.leaseExpiresAt, now)));
   return affectedRows(result) === 1;
 }
 
@@ -201,13 +207,13 @@ export interface TaskUpdate {
  * transition table. A worker whose lease expired mid-step cannot write its
  * result over whatever the new owner has since done.
  */
-export async function updateTask(task: TaskRecord, workerId: string, update: TaskUpdate): Promise<boolean> {
+export async function updateTask(dbSession: DbSession, task: TaskRecord, workerId: string, update: TaskUpdate): Promise<boolean> {
   if (update.status && !canTransition(task.status, update.status)) {
     throw new IllegalTransitionError(task.status, update.status);
   }
   const now = new Date();
   const terminal = update.status ? TERMINAL_STATES.has(update.status) : false;
-  const result = await getDb()
+  const result = await dbSession.db
     .update(agentTasks)
     .set({
       ...(update.status ? { status: update.status } : {}),
@@ -222,7 +228,7 @@ export async function updateTask(task: TaskRecord, workerId: string, update: Tas
       ...(terminal ? { finishedAt: now } : {}),
       updatedAt: now,
     })
-    .where(and(eq(agentTasks.id, task.id), eq(agentTasks.leaseOwner, workerId)));
+    .where(and(eq(agentTasks.id, task.id), eq(agentTasks.leaseOwner, workerId), eq(agentTasks.leaseGeneration, task.leaseGeneration), eq(agentTasks.status, task.status), gt(agentTasks.leaseExpiresAt, now), ...(update.status === "CANCELLED" ? [] : [eq(agentTasks.cancelRequested, false)])));
   return affectedRows(result) === 1;
 }
 
@@ -234,9 +240,9 @@ export class IllegalTransitionError extends Error {
 }
 
 /** Park a retryable provider failure for a later worker with bounded backoff. */
-export async function scheduleTaskRetry(task: TaskRecord, workerId: string, message: string): Promise<boolean> {
+export async function scheduleTaskRetry(dbSession: DbSession, task: TaskRecord, workerId: string, message: string): Promise<boolean> {
   const attempt = task.executionAttempts + 1;
-  return updateTask(task, workerId, {
+  return updateTask(dbSession, task, workerId, {
     status: "QUEUED",
     executionAttempts: attempt,
     nextAttemptAt: new Date(Date.now() + taskRetryDelayMs(attempt) + retryJitterMs(task.id)),
@@ -252,14 +258,14 @@ export async function scheduleTaskRetry(task: TaskRecord, workerId: string, mess
  * task nobody is working on is cancelled outright, since there is no worker to
  * observe the flag.
  */
-export async function requestCancel(organizationId: string, taskId: string): Promise<TaskState | null> {
-  const task = await getTask(organizationId, taskId);
+export async function requestCancel(dbSession: DbSession, organizationId: string, taskId: string): Promise<TaskState | null> {
+  const task = await getTask(dbSession, organizationId, taskId);
   if (!task) return null;
   if (TERMINAL_STATES.has(task.status)) return task.status;
 
   const now = new Date();
   const unattended = task.status === "QUEUED" || task.status === "WAITING_FOR_APPROVAL" || !task.leaseExpiresAt || task.leaseExpiresAt < now;
-  await getDb()
+  await dbSession.db
     .update(agentTasks)
     .set({
       cancelRequested: true,
@@ -272,7 +278,7 @@ export async function requestCancel(organizationId: string, taskId: string): Pro
   // budget its cancelled parent granted has no reason left to run, and a
   // parent that stops without stopping its children is how a "cancelled"
   // workflow keeps spending money.
-  await cascadeCancel(organizationId, taskId, now);
+  await cascadeCancel(dbSession, organizationId, taskId, now);
   return unattended ? "CANCELLED" : task.status;
 }
 
@@ -283,8 +289,8 @@ export async function requestCancel(organizationId: string, taskId: string): Pro
  * generations, so a cycle introduced by a future bug costs a bounded number of
  * queries instead of hanging the request.
  */
-async function cascadeCancel(organizationId: string, rootId: string, now: Date): Promise<void> {
-  const db = getDb();
+async function cascadeCancel(dbSession: DbSession, organizationId: string, rootId: string, now: Date): Promise<void> {
+  const db = dbSession.db;
   let frontier = [rootId];
   for (let generation = 0; generation < 3 && frontier.length > 0; generation++) {
     const children = await db
@@ -307,9 +313,9 @@ async function cascadeCancel(organizationId: string, rootId: string, now: Date):
 }
 
 /** Tasks that are runnable now: queued, or abandoned by a worker whose lease expired. */
-export async function claimableTasks(limit = 5): Promise<TaskRecord[]> {
+export async function claimableTasks(dbSession: DbSession, limit = 5): Promise<TaskRecord[]> {
   const now = new Date();
-  const rows = await getDb()
+  const rows = await dbSession.db
     .select()
     .from(agentTasks)
     .where(
@@ -325,9 +331,9 @@ export async function claimableTasks(limit = 5): Promise<TaskRecord[]> {
 }
 
 /** Approval-parked tasks whose latest request was decided or has expired. */
-export async function resumableApprovalTasks(limit = 10): Promise<TaskRecord[]> {
+export async function resumableApprovalTasks(dbSession: DbSession, limit = 10): Promise<TaskRecord[]> {
   const now = new Date();
-  const rows = await getDb().select().from(agentTasks)
+  const rows = await dbSession.db.select().from(agentTasks)
     .where(and(
       eq(agentTasks.status, "WAITING_FOR_APPROVAL"),
       latestApprovalSettledPredicate(now),
@@ -370,41 +376,37 @@ export interface StepInput {
  * holder writes a task's steps. If two writers ever did race, the unique index
  * makes the loser fail visibly rather than silently reorder the trace.
  */
-export async function appendStep(step: StepInput): Promise<boolean> {
-  try {
-    const [head] = await getDb()
-      .select({ sequence: agentTaskSteps.sequence })
-      .from(agentTaskSteps)
-      .where(eq(agentTaskSteps.taskId, step.taskId))
-      .orderBy(sql`${agentTaskSteps.sequence} desc`)
-      .limit(1);
+export async function appendStep(dbSession: DbSession, step: StepInput): Promise<boolean> {
+  await dbSession.db.execute(sql`select id from ${agentTasks} where ${agentTasks.id} = ${step.taskId} for no key update`);
+  const [head] = await dbSession.db
+    .select({ sequence: agentTaskSteps.sequence })
+    .from(agentTaskSteps)
+    .where(eq(agentTaskSteps.taskId, step.taskId))
+    .orderBy(sql`${agentTaskSteps.sequence} desc`)
+    .limit(1);
 
-    await getDb().insert(agentTaskSteps).values({
-      id: crypto.randomUUID(),
-      taskId: step.taskId,
-      organizationId: step.organizationId,
-      sequence: (head?.sequence ?? 0) + 1,
-      stepIndex: step.stepIndex,
-      kind: step.kind,
-      modelProvider: step.modelProvider ?? null,
-      modelName: step.modelName ?? null,
-      toolName: step.toolName ?? null,
-      policyEffect: step.policyEffect ?? null,
-      denyCode: step.denyCode ?? null,
-      riskLevel: step.riskLevel ?? null,
-      argsDigest: step.argsDigest ?? null,
-      resultDigest: step.resultDigest ?? null,
-      attempt: step.attempt ?? 1,
-      durationMs: step.durationMs ?? null,
-      idempotencyKey: step.idempotencyKey ?? null,
-      error: step.error ?? null,
-      createdAt: new Date(),
-    });
-    return true;
-  } catch (err) {
-    console.error("agent_step_append_rejected", { taskId: step.taskId, stepIndex: step.stepIndex, err });
-    return false;
-  }
+  const inserted = await dbSession.db.insert(agentTaskSteps).values({
+    id: crypto.randomUUID(),
+    taskId: step.taskId,
+    organizationId: step.organizationId,
+    sequence: (head?.sequence ?? 0) + 1,
+    stepIndex: step.stepIndex,
+    kind: step.kind,
+    modelProvider: step.modelProvider ?? null,
+    modelName: step.modelName ?? null,
+    toolName: step.toolName ?? null,
+    policyEffect: step.policyEffect ?? null,
+    denyCode: step.denyCode ?? null,
+    riskLevel: step.riskLevel ?? null,
+    argsDigest: step.argsDigest ?? null,
+    resultDigest: step.resultDigest ?? null,
+    attempt: step.attempt ?? 1,
+    durationMs: step.durationMs ?? null,
+    idempotencyKey: step.idempotencyKey ?? null,
+    error: step.error ?? null,
+    createdAt: new Date(),
+  }).onConflictDoNothing().returning({ id: agentTaskSteps.id });
+  return inserted.length === 1;
 }
 
 /**
@@ -426,7 +428,7 @@ export async function appendStep(step: StepInput): Promise<boolean> {
  * cannot tell whether money moved, not moving it again is the only safe
  * answer, and a person can re-propose the action.
  */
-export async function reserveMutation(input: {
+export async function reserveMutation(dbSession: DbSession, input: {
   taskId: string;
   organizationId: string;
   stepIndex: number;
@@ -435,7 +437,7 @@ export async function reserveMutation(input: {
   argsDigest?: string;
   riskLevel?: string;
 }): Promise<boolean> {
-  return appendStep({
+  return appendStep(dbSession, {
     taskId: input.taskId,
     organizationId: input.organizationId,
     stepIndex: input.stepIndex,
@@ -448,8 +450,8 @@ export async function reserveMutation(input: {
   });
 }
 
-export async function listSteps(taskId: string, organizationId: string) {
-  return getDb()
+export async function listSteps(dbSession: DbSession, taskId: string, organizationId: string) {
+  return dbSession.db
     .select()
     .from(agentTaskSteps)
     .where(and(eq(agentTaskSteps.taskId, taskId), eq(agentTaskSteps.organizationId, organizationId)))
@@ -457,12 +459,12 @@ export async function listSteps(taskId: string, organizationId: string) {
 }
 
 /**
- * D1 and libsql report the affected-row count differently, and a driver that
- * reports neither must not be read as a successful claim — an unknown count
- * returns -1 so every caller's `=== 1` check fails closed.
+ * Drivers report affected rows differently. An unknown count must not be read
+ * as a successful claim, so every caller's `=== 1` check fails closed.
  */
 function affectedRows(result: unknown): number {
-  const value = result as { rowsAffected?: number; meta?: { changes?: number }; changes?: number } | undefined;
+  const value = result as { rowCount?: number | null; rowsAffected?: number; meta?: { changes?: number }; changes?: number } | undefined;
+  if (typeof value?.rowCount === "number") return value.rowCount;
   if (typeof value?.rowsAffected === "number") return value.rowsAffected;
   if (typeof value?.meta?.changes === "number") return value.meta.changes;
   if (typeof value?.changes === "number") return value.changes;

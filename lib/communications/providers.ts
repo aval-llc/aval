@@ -1,12 +1,14 @@
 import { basicAuth, providerJson, record, requiredString, safeSegment } from "@/lib/integrations/http";
 import { isPhone, xml } from "./config";
 export const SEND_PROVIDERS = ["slack", "google_chat", "microsoft_teams", "whatsapp", "telegram", "gmail", "outlook", "twilio"] as const;
-export type OutboundMessage = { provider: string; to: string; body: string; subject?: string };
+export type OutboundMessage = { provider: string; to: string; body: string; subject?: string; threadId?: string; inReplyTo?: string };
 export function validateOutbound(input: OutboundMessage) {
   if (!(SEND_PROVIDERS as readonly string[]).includes(input.provider)) throw new Error("This provider does not have a supported message adapter.");
   if (typeof input.to !== 'string' || !input.to.trim() || input.to.length > 500 || /[\r\n]/.test(input.to) || typeof input.body !== 'string' || !input.body.trim() || input.body.length > 4000 || (input.subject !== undefined && (typeof input.subject !== 'string' || input.subject.length > 200 || /[\r\n]/.test(input.subject)))) throw new Error("Enter a destination and a message of at most 4,000 characters.");
   if (["twilio", "whatsapp"].includes(input.provider) && !isPhone(input.to)) throw new Error("The recipient must be an international phone number.");
   if (["gmail", "outlook"].includes(input.provider) && !/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(input.to)) throw new Error("Enter one valid recipient email address.");
+  if (input.inReplyTo !== undefined && !/^<[^<>\s\r\n]+>$/.test(input.inReplyTo)) throw new Error("Invalid reply message identifier");
+  if (input.threadId !== undefined && !/^[A-Za-z0-9_-]{1,200}$/.test(input.threadId)) throw new Error("Invalid provider thread identifier");
   if (input.provider === "google_chat" && !/^spaces\/[A-Za-z0-9_-]+$/.test(input.to)) throw new Error("Choose a Google Chat space resource, such as spaces/AAAA.");
 }
 const encoded = (value: string) => btoa(String.fromCharCode(...new TextEncoder().encode(value)));
@@ -25,10 +27,11 @@ export async function dispatchMessage(input: OutboundMessage, credentials: Recor
     const result = await post(`https://graph.facebook.com/${version}/${safeSegment(credentials.phoneNumberId)}/messages`, { messaging_product: 'whatsapp', to: input.to, type: 'text', text: { body: input.body } });
     id = requiredString(record((result.messages as unknown[])?.[0]).id);
   } else if (input.provider === 'gmail') {
-    const mime = `To: ${input.to}\r\nSubject: =?UTF-8?B?${encoded(input.subject ?? 'Message from Aval')}?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${encoded(input.body)}`;
-    id = requiredString((await post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: encoded(mime).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'') })).id);
+    const replyHeaders = input.inReplyTo ? `In-Reply-To: ${input.inReplyTo}\r\nReferences: ${input.inReplyTo}\r\n` : '';
+    const mime = `To: ${input.to}\r\nSubject: =?UTF-8?B?${encoded(input.subject ?? 'Message from Aval')}?=\r\n${replyHeaders}MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${encoded(input.body)}`;
+    id = requiredString((await post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { ...(input.threadId ? { threadId: input.threadId } : {}), raw: encoded(mime).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'') })).id);
   } else if (input.provider === 'outlook') {
-    const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ message: { subject: input.subject ?? 'Message from Aval', body: { contentType: 'Text', content: input.body }, toRecipients: [{ emailAddress: { address: input.to } }] }, saveToSentItems: true }) });
+    const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ message: { subject: input.subject ?? 'Message from Aval', body: { contentType: 'Text', content: input.body }, toRecipients: [{ emailAddress: { address: input.to } }] }, saveToSentItems: true }) });
     await response.body?.cancel();
     if (response.status !== 202) throw new Error(`Microsoft did not accept the message (${response.status}).`);
   } else if (input.provider === 'twilio') {

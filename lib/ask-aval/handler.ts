@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * POST /api/assistant/ask
  *
@@ -14,7 +15,7 @@
  */
 
 import type { AskProgress } from "./progress";
-import type { AskAvalEnv, Message } from "./anthropic";
+import type { AskAvalEnv, Message } from "./model-types";
 import type { AskAvalSession } from "./usage";
 import { runAskAvalLoop, json } from "./loop";
 import { getPreferenceContext } from "./preferences";
@@ -47,7 +48,7 @@ Hard rules:
 Finish by calling render_answer exactly once. Write no prose outside it.
 Tone: plain and specific. No greeting, no sign-off, no exclamation marks, no em dashes (use a period, comma, or colon instead).`;
 
-export async function handleAskAval(
+export async function handleAskAval(dbSession: DbSession,
   rawQuestion: string,
   env: AskAvalEnv,
   session: AskAvalSession,
@@ -74,10 +75,10 @@ export async function handleAskAval(
   const effectivePersonaId = personaId ?? route?.personaId;
 
   const [persona, preferenceContext, usagePatternContext, userContext] = await Promise.all([
-    resolvePersona(effectivePersonaId, session.orgId),
-    getPreferenceContext(session.orgId),
-    getUsagePatternContext(session.orgId),
-    onboardingContext(session.userId, session.orgId),
+    resolvePersona(dbSession, effectivePersonaId, session.orgId),
+    getPreferenceContext(dbSession, session.orgId),
+    getUsagePatternContext(dbSession, session.orgId),
+    onboardingContext(dbSession, session.userId, session.orgId),
   ]);
 
   // preferenceContext is appended for every persona, specialized or not — a
@@ -89,7 +90,7 @@ export async function handleAskAval(
   // model is offered; the envelope is the ceiling neither it nor the model can
   // raise. `isGuest` matters because every signed-out visitor shares one
   // workspace, so a write by any of them is a write on behalf of all of them.
-  const response = await runAskAvalLoop(
+  const response = await runAskAvalLoop(dbSession,
     env,
     session,
     SYSTEM + persona.systemPromptAddition + preferenceContext + usagePatternContext + userContext,

@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * Named agent personas layered on top of the existing Ask Aval tool loop
  * (loop.ts) — a config table, not a new agent framework. A GitHub sourcing
@@ -17,7 +18,7 @@
  * Ask Aval code into the client bundle for a handful of string literals.
  */
 
-import type { ToolSchema } from "./anthropic";
+import type { ToolSchema } from "./model-types";
 
 import { PERSONAS, type PersonaId, type AgentPersona } from "./persona-catalog.ts";
 export { PERSONAS, type PersonaId, type AgentPersona } from "./persona-catalog.ts";
@@ -34,18 +35,18 @@ export function getPersona(id: string | undefined): AgentPersona {
  * org-scoped row in this app. Falls back to `general` if neither matches,
  * same as getPersona().
  */
-export async function resolvePersona(id: string | undefined, organizationId: string): Promise<AgentPersona> {
+export async function resolvePersona(dbSession: DbSession, id: string | undefined, organizationId: string): Promise<AgentPersona> {
   if (!id) return PERSONAS.general;
   const builtIn = PERSONAS[id as PersonaId];
   if (builtIn) return builtIn;
   const { getCustomPersonaAsAgentPersona } = await import("./custom-personas");
-  const custom = await getCustomPersonaAsAgentPersona(organizationId, id);
+  const custom = await getCustomPersonaAsAgentPersona(dbSession, organizationId, id);
   return custom ?? PERSONAS.general;
 }
 
 /** Filters `baseTools` (TOOLS or DRAFT_TOOLS) to a persona's subset, always keeping `record_preference` (standing corrections apply regardless of persona) and `finalToolName` (the model must always be able to conclude). */
 export function personaTools(baseTools: ToolSchema[], persona: AgentPersona, finalToolName: string): ToolSchema[] {
   if (!persona.toolNames) return baseTools;
-  const allowed = new Set([...persona.toolNames, "plan_goal", "get_goal_plan", "read_memory", "write_memory", "read_task_history", "read_conversation", "record_preference", "get_communication_channels", "list_conversations", "request_execution_plan", "send_external_message", "place_call", "get_marketing_channels", "publish_listing", finalToolName]);
+  const allowed = new Set([...persona.toolNames, "plan_goal", "get_goal_plan", "read_memory", "write_memory", "read_task_history", "read_conversation", "read_maintenance_context", "create_maintenance_work_order", "record_preference", "get_communication_channels", "list_conversations", "request_execution_plan", "send_external_message", "place_call", "get_marketing_channels", "publish_listing", finalToolName]);
   return baseTools.filter((tool) => allowed.has(tool.name));
 }

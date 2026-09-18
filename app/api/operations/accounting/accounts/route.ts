@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET  /api/operations/accounting/accounts — the chart of accounts.
  * POST /api/operations/accounting/accounts — add an account, or seed a default chart.
@@ -14,26 +16,26 @@ import { operationsErrorResponse } from "@/lib/operations/errors";
 import { GL_ACCOUNT_TYPES } from "@/lib/operations/types";
 import { optionalBoolean, readJsonBody, requireEnum, requireString } from "@/lib/operations/validation";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  return Response.json({ accounts: await listGlAccounts(identity.organizationId) });
+  return Response.json({ accounts: await listGlAccounts(dbSession, identity.organizationId) });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
     if (body.seedDefaults === true) {
       // No-ops when a chart already exists, so calling this twice cannot
       // duplicate a workspace's accounts or overwrite a synced chart.
-      return Response.json({ accounts: await seedDefaultChartOfAccounts(identity.organizationId) }, { status: 201 });
+      return Response.json({ accounts: await seedDefaultChartOfAccounts(dbSession, identity.organizationId) }, { status: 201 });
     }
 
-    const account = await createGlAccount(identity.organizationId, {
+    const account = await createGlAccount(dbSession, identity.organizationId, {
       code: requireString(body, "code", 20),
       name: requireString(body, "name", 120),
       accountType: requireEnum(body, "accountType", GL_ACCOUNT_TYPES),
@@ -44,3 +46,6 @@ export async function POST(request: Request) {
     return operationsErrorResponse(error);
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

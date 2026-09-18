@@ -35,7 +35,7 @@ creation with `hdiutil: create failed - Device not configured`. The packaged
 `dist/mac-arm64/Aval.app` and ZIP can still be produced when DMG creation fails.
 Production signing requirements remain enabled for `package:mac` and GitHub.
 
-Desktop loads the hosted website. The release workflow now waits for the
+Desktop loads `https://app.aval.llc` by default. The release workflow waits for the
 Cloudflare production workflow for the same commit to succeed before publishing
 `desktop-latest`, so the released desktop wrapper and its hosted UI agree.
 

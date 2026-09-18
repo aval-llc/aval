@@ -1,4 +1,5 @@
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { check, foreignKey, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const userOnboarding = sqliteTable("user_onboarding", {
   userId: text("user_id").notNull(),
@@ -35,13 +36,39 @@ export const users = sqliteTable(
   (table) => [uniqueIndex("users_email_uq").on(table.email)],
 );
 
+// Stable application identities. Supabase, ChatGPT, and future enterprise SSO
+// subjects link here; identities are never merged by email alone.
+export const principals = sqliteTable("principals", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull().default("human"),
+  displayName: text("display_name").notNull(),
+  primaryEmail: text("primary_email"),
+  status: text("status").notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [check("principals_kind_ck", sql`${table.kind} in ('human','service')`)]);
+
+export const identityLinks = sqliteTable("identity_links", {
+  id: text("id").primaryKey(),
+  principalId: text("principal_id").notNull().references(() => principals.id),
+  provider: text("provider").notNull(),
+  subject: text("subject").notNull(),
+  emailAtLink: text("email_at_link"),
+  emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
+}, (table) => [
+  uniqueIndex("identity_links_provider_subject_uq").on(table.provider, table.subject),
+  index("identity_links_principal_idx").on(table.principalId),
+]);
+
 export const organizations = sqliteTable("organizations", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   ownerUserId: text("owner_user_id").notNull(),
   // Which connected model-provider ProviderId (integration_connections.provider,
-  // category "Model") powers agents/Ask Aval for this org. Null means Aval's
-  // own bundled Anthropic key (env.ANTHROPIC_API_KEY) — see lib/ask-aval/model-router.ts.
+  // category "Model") powers agents/Ask Aval for this org. Null means model
+  // features are paused until a provider is connected and selected.
   activeModelProvider: text("active_model_provider"),
   // Which persona (a built-in PersonaId or a custom_personas row's id) Ask
   // Aval opens with by default for this org — set from Settings → Aval
@@ -61,6 +88,19 @@ export const organizations = sqliteTable("organizations", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 }, (table) => [uniqueIndex("organizations_seat_slug_uq").on(table.seatSlug)]);
+
+export const ssoConnections = sqliteTable("sso_connections", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  supabaseProviderId: text("supabase_provider_id"),
+  permittedDomainsJson: text("permitted_domains_json").notNull().default("[]"),
+  enforcement: text("enforcement").notNull().default("disabled"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("sso_connections_org_uq").on(table.organizationId),
+  check("sso_connections_enforcement_ck", sql`${table.enforcement} in ('disabled','optional','required')`),
+]);
 
 /**
  * Who belongs to a workspace, and what they may do in it.
@@ -599,6 +639,45 @@ export const documents = sqliteTable(
   (table) => [index("documents_org_idx").on(table.organizationId)],
 );
 
+export const ownershipEntities = sqliteTable("ownership_entities", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  name: text("name").notNull(),
+  legalName: text("legal_name"),
+  externalId: text("external_id"),
+  status: text("status").notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("ownership_entities_org_id_uq").on(table.organizationId, table.id),
+  uniqueIndex("ownership_entities_org_external_uq").on(table.organizationId, table.externalId),
+]);
+
+export const portfolios = sqliteTable("portfolios", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  name: text("name").notNull(),
+  status: text("status").notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("portfolios_org_id_uq").on(table.organizationId, table.id),
+  uniqueIndex("portfolios_org_name_uq").on(table.organizationId, table.name),
+]);
+
+export const regions = sqliteTable("regions", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  name: text("name").notNull(),
+  code: text("code"),
+  status: text("status").notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("regions_org_id_uq").on(table.organizationId, table.id),
+  uniqueIndex("regions_org_code_uq").on(table.organizationId, table.code),
+]);
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * OPERATIONS
  *
@@ -640,6 +719,9 @@ export const properties = sqliteTable(
   {
     id: text("id").primaryKey(),
     organizationId: text("organization_id").notNull().references(() => organizations.id),
+    ownershipEntityId: text("ownership_entity_id").references(() => ownershipEntities.id),
+    portfolioId: text("portfolio_id").references(() => portfolios.id),
+    regionId: text("region_id").references(() => regions.id),
     name: text("name").notNull(),
     addressLine1: text("address_line1"),
     city: text("city"),
@@ -666,10 +748,63 @@ export const properties = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
+    uniqueIndex("properties_org_id_uq").on(table.organizationId, table.id),
     uniqueIndex("properties_org_source_external_uq").on(table.organizationId, table.sourceProvider, table.externalId),
     index("properties_org_status_idx").on(table.organizationId, table.status),
+    foreignKey({ columns: [table.organizationId, table.ownershipEntityId], foreignColumns: [ownershipEntities.organizationId, ownershipEntities.id], name: "properties_org_owner_fk" }),
+    foreignKey({ columns: [table.organizationId, table.portfolioId], foreignColumns: [portfolios.organizationId, portfolios.id], name: "properties_org_portfolio_fk" }),
+    foreignKey({ columns: [table.organizationId, table.regionId], foreignColumns: [regions.organizationId, regions.id], name: "properties_org_region_fk" }),
   ],
 );
+
+export const accessGrants = sqliteTable("access_grants", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  principalId: text("principal_id").notNull().references(() => principals.id),
+  role: text("role").notNull(),
+  organizationScope: integer("organization_scope", { mode: "boolean" }).notNull().default(false),
+  ownershipEntityId: text("ownership_entity_id").references(() => ownershipEntities.id),
+  portfolioId: text("portfolio_id").references(() => portfolios.id),
+  regionId: text("region_id").references(() => regions.id),
+  propertyId: text("property_id").references(() => properties.id),
+  capabilitiesJson: text("capabilities_json").notNull().default("[]"),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  createdByPrincipalId: text("created_by_principal_id").references(() => principals.id),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("access_grants_org_id_uq").on(table.organizationId, table.id),
+  index("access_grants_principal_org_idx").on(table.principalId, table.organizationId),
+  index("access_grants_property_idx").on(table.organizationId, table.propertyId),
+  check("access_grants_role_ck", sql`${table.role} in ('org_admin','regional_manager','property_manager','approver','operator','viewer','owner_viewer')`),
+  check("access_grants_one_scope_ck", sql`
+    (case when ${table.organizationScope} then 1 else 0 end) +
+    (case when ${table.ownershipEntityId} is not null then 1 else 0 end) +
+    (case when ${table.portfolioId} is not null then 1 else 0 end) +
+    (case when ${table.regionId} is not null then 1 else 0 end) +
+    (case when ${table.propertyId} is not null then 1 else 0 end) = 1
+  `),
+  foreignKey({ columns: [table.organizationId, table.ownershipEntityId], foreignColumns: [ownershipEntities.organizationId, ownershipEntities.id], name: "access_grants_org_owner_fk" }),
+  foreignKey({ columns: [table.organizationId, table.portfolioId], foreignColumns: [portfolios.organizationId, portfolios.id], name: "access_grants_org_portfolio_fk" }),
+  foreignKey({ columns: [table.organizationId, table.regionId], foreignColumns: [regions.organizationId, regions.id], name: "access_grants_org_region_fk" }),
+  foreignKey({ columns: [table.organizationId, table.propertyId], foreignColumns: [properties.organizationId, properties.id], name: "access_grants_org_property_fk" }),
+]);
+
+export const approvalAuthorities = sqliteTable("approval_authorities", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  accessGrantId: text("access_grant_id").notNull().references(() => accessGrants.id),
+  action: text("action").notNull(),
+  currency: text("currency").notNull().default("USD"),
+  maximumAmountCents: integer("maximum_amount_cents").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("approval_authorities_grant_action_currency_uq").on(table.accessGrantId, table.action, table.currency),
+  check("approval_authorities_amount_ck", sql`${table.maximumAmountCents} >= 0`),
+  foreignKey({ columns: [table.organizationId, table.accessGrantId], foreignColumns: [accessGrants.organizationId, accessGrants.id], name: "approval_authorities_org_grant_fk" }),
+]);
 
 export const units = sqliteTable(
   "units",

@@ -1,5 +1,7 @@
 # Aval resumption — September 7–8, 2026
 
+> **Historical document (September 2026).** These checkpoints preserve earlier local, Sites, and Worker validation evidence. Use the root `README.md`, `docs/migration/README.md`, and `docs/audit/` for the current system and deployment status.
+
 ## Current delivery
 
 September 9 completion-review resumption: **all three modes now pass end-to-end completion**. The fresh live `gpt-6-astra` run read evidence, executed exactly two ordered synthetic sends with two/one/zero approvals, and passed independent review in Supervised/Assisted/Autonomous. Review latencies were 18.408/18.704/19.040 seconds; no timeouts, invalid proposals or usage-limit failures occurred. See `docs/AGENT_LLM_COMPARISON.md` and `docs/audit/agent-llm-comparison-completion-review-verification.json`. Earlier failed and supervised-only evidence is preserved.

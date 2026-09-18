@@ -1,17 +1,18 @@
+import { withApiSession } from "@/lib/api/with-session";
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections, integrationSyncState, organizations } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections, integrationSyncState, organizations } from "@/db/postgres/schema";
 import { getProvider } from "@/lib/integrations/catalog";
 import { getApiIdentity } from "@/lib/integrations/session";
 
 /**
  * POST /api/integrations/reset
  * Disconnects a provider: clears its stored credentials and, if it was the
- * org's active model provider, reverts to Aval's own default. Mirrors
+ * org's active model provider, pauses model-backed features. Mirrors
  * mentari2.0's per-provider "Reset" action.
  */
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   if (identity.role !== "owner") return Response.json({ error: "Only the workspace owner can disconnect providers" }, { status: 403 });
   const origin = request.headers.get("origin");
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
   const provider = getProvider(body && typeof body === "object" && "provider" in body && typeof body.provider === "string" ? body.provider : "");
   if (!provider) return Response.json({ error: "Unknown provider" }, { status: 400 });
 
-  const db = getDb();
+  const db = dbSession.db;
   const now = new Date();
   const [connection] = await db.select({ id: integrationConnections.id }).from(integrationConnections).where(and(eq(integrationConnections.organizationId, identity.organizationId), eq(integrationConnections.provider, provider.id))).limit(1);
   if (connection) {
@@ -37,3 +38,5 @@ export async function POST(request: Request) {
 
   return Response.json({ provider: provider.id, status: "disconnected" });
 }
+
+export const POST = withApiSession(POSTWithSession);

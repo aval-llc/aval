@@ -1,36 +1,39 @@
-import { env } from "cloudflare:workers";
+import { inArray } from "drizzle-orm";
+import type { DbSession } from "@/db/postgres/session";
+import { userAppearance } from "@/db/postgres/schema";
 import { DEFAULT_APPEARANCE, parseAppearance, type AppearancePreferences, type AvatarSelection } from "./appearance";
 
-function database() {
-  const db = (env as unknown as { DB?: D1Database }).DB;
-  if (!db) throw new Error("Appearance storage is unavailable");
-  return db;
-}
-
-export async function readAppearance(userId: string): Promise<AppearancePreferences> {
-  const row = await database().prepare("SELECT preferences FROM user_appearance WHERE user_id = ?").bind(userId).first<{ preferences: string }>();
+export async function readAppearance(dbSession: DbSession, userId: string): Promise<AppearancePreferences> {
+  const [row] = await dbSession.db.select({ preferences: userAppearance.preferences })
+    .from(userAppearance).where(inArray(userAppearance.userId, [userId])).limit(1);
   if (!row) return DEFAULT_APPEARANCE;
   try { return parseAppearance(JSON.parse(row.preferences)) ?? DEFAULT_APPEARANCE; }
   catch { return DEFAULT_APPEARANCE; }
 }
 
-export async function writeAppearance(userId: string, preferences: AppearancePreferences) {
-  await database().prepare(`INSERT INTO user_appearance (user_id, preferences, updated_at) VALUES (?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET preferences = excluded.preferences, updated_at = excluded.updated_at`)
-    .bind(userId, JSON.stringify(preferences), Date.now()).run();
+export async function writeAppearance(dbSession: DbSession, userId: string, preferences: AppearancePreferences) {
+  await dbSession.db.insert(userAppearance).values({
+    userId,
+    preferences: JSON.stringify(preferences),
+    updatedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: userAppearance.userId,
+    set: { preferences: JSON.stringify(preferences), updatedAt: new Date() },
+  });
 }
 
-/** Call only with the authenticated workspace's roster; never expose agents or motion preferences. */
-export async function memberProfileAvatars(userIds: string[]): Promise<Map<string, AvatarSelection>> {
+/** Call only with the authenticated workspace's roster; RLS verifies the roster again. */
+export async function memberProfileAvatars(dbSession: DbSession, userIds: string[]): Promise<Map<string, AvatarSelection>> {
   const result = new Map<string, AvatarSelection>();
   for (let offset = 0; offset < userIds.length; offset += 50) {
     const ids = userIds.slice(offset, offset + 50);
-    const rows = await database().prepare(`SELECT user_id, preferences FROM user_appearance WHERE user_id IN (${ids.map(() => "?").join(",")})`)
-      .bind(...ids).all<{ user_id: string; preferences: string }>();
-    for (const row of rows.results) {
+    if (ids.length === 0) continue;
+    const rows = await dbSession.db.select({ userId: userAppearance.userId, preferences: userAppearance.preferences })
+      .from(userAppearance).where(inArray(userAppearance.userId, ids));
+    for (const row of rows) {
       try {
         const profile = parseAppearance(JSON.parse(row.preferences))?.profile;
-        if (profile) result.set(row.user_id, profile);
+        if (profile) result.set(row.userId, profile);
       } catch { /* A malformed preference never prevents loading the team. */ }
     }
   }

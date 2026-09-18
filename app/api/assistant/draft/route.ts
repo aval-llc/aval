@@ -1,19 +1,21 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { env } from "cloudflare:workers";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { handleAskAvalDraft, type DraftFormat } from "@/lib/ask-aval/draft";
-import type { AskAvalEnv } from "@/lib/ask-aval/anthropic";
+import type { AskAvalEnv } from "@/lib/ask-aval/model-types";
 import {
   reserveDraft,
   finishDraft,
   validDraftId,
 } from "@/lib/ask-aval/draft-store";
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity)
     return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   const body = (await request.json().catch(() => ({}))) as {
     id?: string;
@@ -43,7 +45,7 @@ export async function POST(request: Request) {
   const id = body.id ?? crypto.randomUUID();
   if (!validDraftId(id))
     return Response.json({ error: "Invalid draft ID" }, { status: 400 });
-  const token = await reserveDraft(identity, id, {
+  const token = await reserveDraft(dbSession, identity, id, {
     title,
     instructions,
     format,
@@ -52,7 +54,7 @@ export async function POST(request: Request) {
   });
   if (!token)
     return Response.json({ error: "This draft was removed." }, { status: 409 });
-  const response = await handleAskAvalDraft(
+  const response = await handleAskAvalDraft(dbSession,
     { title, instructions, format },
     env as unknown as AskAvalEnv,
     { orgId: identity.organizationId, userId: identity.userId },
@@ -62,7 +64,9 @@ export async function POST(request: Request) {
     isGuestIdentity(identity),
   );
 
-  await finishDraft(identity, id, token, response);
+  await finishDraft(dbSession, identity, id, token, response);
 
   return response;
 }
+
+export const POST = withApiSession(POSTWithSession);

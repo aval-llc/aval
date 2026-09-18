@@ -1,23 +1,4 @@
-/**
- * Loader hooks that make the Cloudflare-bound agent runtime importable by node.
- *
- * `db/index.ts` resolves the D1 binding from `cloudflare:workers` at module
- * scope, so every module that touches storage — tasks, approvals, the executor,
- * the runtime loop, the scheduled worker — is unloadable in a plain node test.
- * That is why the durable runtime had no executable coverage, and why two
- * statements that cannot run in production shipped anyway: a raw `sql` template
- * is not checked by the compiler, so only running it finds the defect.
- *
- * These hooks substitute three things and nothing else:
- *
- *   - `cloudflare:workers` -> an env object the harness controls
- *   - `@/db`               -> a drizzle instance over in-memory SQLite
- *   - the model router      -> a stub the test scripts
- *
- * Everything else is the real module, resolved through the same `@/` alias vite
- * uses and transpiled with esbuild (node's strip-only TypeScript mode rejects
- * parameter properties, which this repo uses).
- */
+/** Node transpilation and Worker/model seams. Database access uses real DbSession. */
 
 import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -27,9 +8,15 @@ import { transformSync } from "esbuild";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const VIRTUAL = {
-  "cloudflare:workers": "export const env = globalThis.__CF_ENV__ ?? {};",
-  "@/db": "export function getDb() { return globalThis.__DB__; }",
-  "@/lib/ask-aval/model-router": "export async function callModel(env, orgId, params) { return (params.tool_choice?.name === 'semantic_verdict' ? globalThis.__SEMANTIC_MODEL__ : globalThis.__MODEL__)(env, orgId, params); }",
+  "cloudflare:workers": "export const env = globalThis.__CF_ENV__ ??= {};",
+  "vinext/shims/request-context": "export const getRequestExecutionContext = () => globalThis.__REQUEST_CONTEXT__;",
+  "next/headers": "export async function headers() { throw new Error('Page request headers are not installed in the route test harness'); }",
+  "@/lib/ask-aval/model-router": `export async function callModel(session, env, orgId, params) {
+    const fixture = params.tool_choice?.name === 'semantic_verdict' ? globalThis.__SEMANTIC_MODEL__ : globalThis.__MODEL__;
+    if (fixture) return session.outsideTransaction(() => fixture(env, orgId, params));
+    const real = await import(${JSON.stringify(pathToFileURL(`${ROOT}/lib/ask-aval/model-router.ts`).href)});
+    return real.callModel(session, env, orgId, params);
+  }`,
 };
 const virtualUrl = (s) => `debugstub:${encodeURIComponent(s)}`;
 
@@ -45,10 +32,15 @@ registerHooks({
     }
     // vite resolves extensionless relative imports; node does not.
     if (specifier.startsWith(".") && context.parentURL?.startsWith("file:")) {
-      const base = new URL(specifier, context.parentURL);
-      if (!existsSync(base.pathname) || statSync(base.pathname).isDirectory()) {
+      const baseUrl = new URL(specifier, context.parentURL);
+      // URL.pathname is not a native Windows path and may still contain URL
+      // escapes (for example `%20`). Convert it before consulting the file
+      // system so the harness works from checkouts whose path contains spaces.
+      const basePath = fileURLToPath(baseUrl);
+      if (!existsSync(basePath) || statSync(basePath).isDirectory()) {
         for (const ext of [".ts", ".tsx", "/index.ts", ".js"]) {
-          if (existsSync(base.pathname + ext)) return { url: base.href + ext, shortCircuit: true };
+          const candidate = basePath + ext;
+          if (existsSync(candidate)) return { url: pathToFileURL(candidate).href, shortCircuit: true };
         }
       }
     }

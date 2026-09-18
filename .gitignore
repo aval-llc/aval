@@ -41,6 +41,7 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+/wrangler.deploy.generated.jsonc
 /.superdesign/tmp/
 
 # Claude Code local worktrees (registered git worktrees, never part of a commit)

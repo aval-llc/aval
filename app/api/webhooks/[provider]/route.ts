@@ -1,18 +1,41 @@
+import { env } from "cloudflare:workers";
+import { and, eq, sql } from "drizzle-orm";
+import { getRequestExecutionContext } from "vinext/shims/request-context";
+import { conversations, integrationEvents, messages } from "@/db/postgres/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { withSystemSession, withWorkerOrganizationSession } from "@/lib/api/with-session";
+import { draftAutoReply } from "@/lib/ask-aval/auto-reply";
+import type { AskAvalEnv } from "@/lib/ask-aval/model-types";
 import { queueInboundTask } from "@/lib/communications/intake";
 import { verifyTwilio } from "@/lib/communications/signature";
-import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { conversations, integrationConnections, integrationEvents, messages } from "@/db/schema";
-import { decryptSecret } from "@/lib/integrations/crypto";
+import { decryptSecret, encryptSecret } from "@/lib/integrations/crypto";
+import { parseInboundMessage, splitWhatsappPayload, type InboundMessage } from "@/lib/integrations/inbound";
+import type { AvalRuntimeBindings } from "@/lib/runtime/bindings";
 import { constantTimeEqual } from "@/lib/security/constant-time";
-import { parseInboundMessage } from "@/lib/integrations/inbound";
-import { draftAutoReply } from "@/lib/ask-aval/auto-reply";
-import type { AskAvalEnv } from "@/lib/ask-aval/anthropic";
-import { getRequestExecutionContext } from "vinext/shims/request-context";
 
 const encoder = new TextEncoder();
-const bindings = () => env as unknown as Record<string, string | undefined>;
+const supportedProviders = new Set(["slack", "whatsapp", "telegram", "apple_messages", "twilio"]);
+
+type WebhookConnection = {
+  organization_id: string;
+  connection_id: string;
+  encrypted_credentials: string | null;
+  external_account_id: string | null;
+};
+
+class AmbiguousDestination extends Error {}
+
+async function quarantine(bindings: AvalRuntimeBindings, provider: string, raw: string, reason: string, verified: boolean) {
+  const key = bindings.INTEGRATION_TOKEN_ENCRYPTION_KEY;
+  if (typeof key !== "string") throw new Error("Quarantine encryption unavailable");
+  const digest = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(`${provider}:${raw}`))));
+  const ciphertext = await encryptSecret(raw, key);
+  await withSystemSession("worker", session => session.db.execute(sql`select aval_private.quarantine_webhook(${digest},${provider},${ciphertext},${reason},${verified})`), bindings);
+}
+
+function textBindings(bindings: AvalRuntimeBindings): Record<string, string | undefined> {
+  return bindings as unknown as Record<string, string | undefined>;
+}
 
 function hex(bytes: Uint8Array) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -23,18 +46,44 @@ async function hmac(secret: string, value: string, algorithm: "SHA-256" | "SHA-1
   return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(value)));
 }
 
-async function connectionCredential(request: Request, provider: string, key: string) {
-  const connectionId = new URL(request.url).searchParams.get("connection");
-  const encryptionKey = bindings().INTEGRATION_TOKEN_ENCRYPTION_KEY;
-  if (!connectionId || !encryptionKey) return null;
-  const [connection] = await getDb().select({ encrypted: integrationConnections.accessTokenCiphertext }).from(integrationConnections).where(and(eq(integrationConnections.id, connectionId), eq(integrationConnections.provider, provider), eq(integrationConnections.status, "connected"))).limit(1);
-  if (!connection?.encrypted) return null;
-  const credentials = JSON.parse(await decryptSecret(connection.encrypted, encryptionKey)) as Record<string, string>;
-  return credentials[key] ?? null;
+function validLookup(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 256 && !value.includes("\0");
 }
 
-async function verify(provider: string, request: Request, raw: string) {
-  const config = bindings();
+async function lookupConnection(
+  bindings: AvalRuntimeBindings,
+  provider: string,
+  connectionId?: string,
+  externalAccountKey?: string,
+): Promise<WebhookConnection | null> {
+  if (!validLookup(connectionId) && !validLookup(externalAccountKey)) return null;
+  return withSystemSession("worker", async (session) => {
+    const result = await session.db.execute<WebhookConnection>(sql`
+      select * from aval_private.webhook_connection(
+        ${provider}, ${validLookup(connectionId) ? connectionId : null}, ${validLookup(externalAccountKey) ? externalAccountKey : null}
+      )
+    `);
+    if (result.rows.length > 1) throw new AmbiguousDestination("Ambiguous webhook destination; event requires operator review");
+    return result.rows[0] ?? null;
+  }, bindings);
+}
+
+async function connectionCredentials(connection: WebhookConnection, bindings: AvalRuntimeBindings): Promise<Record<string, string>> {
+  const encryptionKey = bindings.INTEGRATION_TOKEN_ENCRYPTION_KEY;
+  if (!connection.encrypted_credentials || typeof encryptionKey !== "string") return {};
+  const plaintext = await decryptSecret(connection.encrypted_credentials, encryptionKey);
+  const parsed = JSON.parse(plaintext) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+async function verifySignature(
+  provider: string,
+  request: Request,
+  raw: string,
+  config: Record<string, string | undefined>,
+  credentials: Record<string, string>,
+): Promise<boolean> {
   if (provider === "slack") {
     const timestamp = request.headers.get("x-slack-request-timestamp") ?? "";
     const signature = request.headers.get("x-slack-signature") ?? "";
@@ -47,57 +96,54 @@ async function verify(provider: string, request: Request, raw: string) {
     return constantTimeEqual(signature, `sha256=${hex(await hmac(config.META_WHATSAPP_APP_SECRET, raw))}`);
   }
   if (provider === "telegram") {
-    const secret = await connectionCredential(request, provider, "webhookSecret") ?? config.TELEGRAM_WEBHOOK_SECRET;
-    return Boolean(secret) && constantTimeEqual(request.headers.get("x-telegram-bot-api-secret-token") ?? "", secret ?? "");
+    return Boolean(credentials.webhookSecret)
+      && constantTimeEqual(request.headers.get("x-telegram-bot-api-secret-token") ?? "", credentials.webhookSecret);
   }
   if (provider === "apple_messages") {
-    const secret = await connectionCredential(request, provider, "webhookSecret") ?? config.APPLE_MSP_WEBHOOK_SECRET;
     const signature = request.headers.get("x-aval-webhook-secret") ?? request.headers.get("x-portero-webhook-secret") ?? "";
-    return Boolean(secret) && constantTimeEqual(signature, secret ?? "");
+    return Boolean(credentials.webhookSecret) && constantTimeEqual(signature, credentials.webhookSecret);
   }
   if (provider === "twilio") {
-    const secret = await connectionCredential(request, provider, "authToken") ?? config.TWILIO_AUTH_TOKEN;
-    const signature = request.headers.get("x-twilio-signature") ?? "";
-    if (!secret || !signature) return false;
-    return verifyTwilio(request, raw, secret);
+    return Boolean(credentials.authToken) && verifyTwilio(request, raw, credentials.authToken);
   }
   return false;
 }
 
-/**
- * Resolves which organization an inbound message belongs to. Telegram and
- * Apple Messages webhook URLs are already scoped to one connection (set at
- * verify time, see app/api/integrations/verify/route.ts); Slack, WhatsApp,
- * and Twilio share one webhook URL across every org, so those are matched
- * by the account-identifying field each connection stored at connect/verify
- * time (team id, phone_number_id, AccountSid).
- */
-async function resolveOrganizationId(provider: string, connectionId: string | undefined, externalAccountKey: string | undefined): Promise<string | null> {
-  const db = getDb();
-  if (connectionId) {
-    const [connection] = await db.select({ organizationId: integrationConnections.organizationId }).from(integrationConnections).where(and(eq(integrationConnections.id, connectionId), eq(integrationConnections.provider, provider), eq(integrationConnections.status, "connected"))).limit(1);
-    return connection?.organizationId ?? null;
-  }
-  if (externalAccountKey) {
-    const [connection] = await db.select({ organizationId: integrationConnections.organizationId }).from(integrationConnections).where(and(eq(integrationConnections.provider, provider), eq(integrationConnections.externalAccountId, externalAccountKey), eq(integrationConnections.status, "connected"))).limit(1);
-    return connection?.organizationId ?? null;
-  }
-  return null;
+function whatsappAccountKey(payload: Record<string, unknown>): string | undefined {
+  const entry = Array.isArray(payload.entry) ? payload.entry[0] : undefined;
+  const changes = entry && typeof entry === "object" && Array.isArray((entry as Record<string, unknown>).changes)
+    ? (entry as Record<string, unknown>).changes as unknown[]
+    : [];
+  const change = changes[0];
+  const value = change && typeof change === "object" ? (change as Record<string, unknown>).value : undefined;
+  const metadata = value && typeof value === "object" ? (value as Record<string, unknown>).metadata : undefined;
+  const key = metadata && typeof metadata === "object" ? (metadata as Record<string, unknown>).phone_number_id : undefined;
+  return typeof key === "string" ? key : undefined;
 }
 
-/**
- * Persists the inbound message (conversations/messages, previously defined
- * but never written to), then drafts a reply the moment it lands rather
- * than waiting for a human to open the thread. Scheduled via waitUntil so
- * the webhook provider gets its ack immediately; the LLM call happens
- * after the response is already on the wire. On plain Node (local dev),
- * getRequestExecutionContext() is null, so this falls back to a detached,
- * best-effort promise instead.
- */
-async function ingestInboundMessage(provider: string, organizationId: string, parsed: { externalThreadId: string; externalMessageId: string; contactDisplayName: string; body: string }, env: AskAvalEnv) {
-  const db = getDb();
+function externalAccountKey(provider: string, payload: Record<string, unknown>, parsed: InboundMessage | null): string | undefined {
+  if (parsed?.externalAccountKey) return parsed.externalAccountKey;
+  if (provider === "slack" && typeof payload.team_id === "string") return payload.team_id;
+  if (provider === "twilio" && typeof payload.AccountSid === "string") return payload.AccountSid;
+  if (provider === "whatsapp") return whatsappAccountKey(payload);
+  return undefined;
+}
+
+function providerResponse(provider: string): Response {
+  return provider === "twilio"
+    ? new Response("<Response/>", { headers: { "content-type": "text/xml" } })
+    : Response.json({ received: true }, { status: 202 });
+}
+
+async function ingestInboundMessage(
+  dbSession: DbSession,
+  provider: string,
+  organizationId: string,
+  parsed: InboundMessage,
+  bindings: AvalRuntimeBindings,
+) {
   const now = new Date();
-  await db.insert(conversations).values({
+  await dbSession.db.insert(conversations).values({
     id: crypto.randomUUID(),
     organizationId,
     channel: provider,
@@ -110,12 +156,12 @@ async function ingestInboundMessage(provider: string, organizationId: string, pa
     target: [conversations.organizationId, conversations.channel, conversations.externalThreadId],
     set: { contactDisplayName: parsed.contactDisplayName, lastMessageAt: now, updatedAt: now },
   });
-  const [conversation] = await db.select({ id: conversations.id, locale: conversations.locale }).from(conversations)
+  const [conversation] = await dbSession.db.select({ id: conversations.id, locale: conversations.locale }).from(conversations)
     .where(and(eq(conversations.organizationId, organizationId), eq(conversations.channel, provider), eq(conversations.externalThreadId, parsed.externalThreadId)))
     .limit(1);
-  if (!conversation) return;
+  if (!conversation) throw new Error("Inbound conversation was not stored");
 
-  const inserted = await db.insert(messages).values({
+  const inserted = await dbSession.db.insert(messages).values({
     id: crypto.randomUUID(),
     conversationId: conversation.id,
     externalMessageId: parsed.externalMessageId,
@@ -123,31 +169,42 @@ async function ingestInboundMessage(provider: string, organizationId: string, pa
     body: parsed.body,
     createdAt: now,
   }).onConflictDoNothing().returning({ id: messages.id });
-  // A retried webhook delivery for the same message id lands here as a
-  // no-op insert — skip re-drafting (and re-spending a model call) for a
-  // message that already has one.
-  await queueInboundTask(organizationId, conversation.id, parsed.externalMessageId, parsed.body);
   if (inserted.length === 0) return;
 
-  const draftWork = (async () => {
-    const result = await draftAutoReply(env, { orgId: organizationId, userId: "webhook" }, parsed.contactDisplayName, parsed.body, conversation.locale);
-    await db.update(conversations).set({
-      draftReply: result.ok ? (result.reply ?? null) : null,
-      draftReplyStatus: result.ok ? "ready" : "failed",
-      draftReplyAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(conversations.id, conversation.id));
-  })().catch((error) => console.error("auto_reply_draft_failed", provider, error instanceof Error ? error.message : error));
-
-  const ctx = getRequestExecutionContext();
-  if (ctx) ctx.waitUntil(draftWork);
+  await queueInboundTask(dbSession, organizationId, conversation.id, parsed.externalMessageId, parsed.body);
+  const draftWork = dbSession.afterCommit(() => withWorkerOrganizationSession(organizationId, async (workerSession) => {
+    try {
+      const result = await draftAutoReply(
+        workerSession,
+        bindings as AskAvalEnv,
+        { orgId: organizationId, userId: "principal_aval_worker" },
+        parsed.contactDisplayName,
+        parsed.body,
+        conversation.locale,
+      );
+      await workerSession.db.update(conversations).set({
+        draftReply: result.ok ? (result.reply ?? null) : null,
+        draftReplyStatus: result.ok ? "ready" : "failed",
+        draftReplyAt: new Date(),
+        updatedAt: new Date(),
+      }).where(and(eq(conversations.id, conversation.id), eq(conversations.organizationId, organizationId)));
+    } catch (error) {
+      await workerSession.db.update(conversations).set({ draftReplyStatus: "failed", draftReplyAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(conversations.id, conversation.id), eq(conversations.organizationId, organizationId)));
+      console.error("auto_reply_draft_failed", provider, error instanceof Error ? error.message : error);
+    }
+  }, bindings));
+  const guardedDraft = draftWork.catch((error) => console.error("auto_reply_session_failed", provider, error));
+  const context = getRequestExecutionContext();
+  if (context) context.waitUntil(guardedDraft);
 }
 
 export async function GET(request: Request, context: { params: Promise<{ provider: string }> }) {
   const { provider } = await context.params;
   const url = new URL(request.url);
-  const verifyToken = bindings().META_WHATSAPP_VERIFY_TOKEN;
-  if (provider === "whatsapp" && verifyToken && url.searchParams.get("hub.mode") === "subscribe" && constantTimeEqual(url.searchParams.get("hub.verify_token") ?? "", verifyToken)) {
+  const config = textBindings(env as unknown as AvalRuntimeBindings);
+  if (provider === "whatsapp" && config.META_WHATSAPP_VERIFY_TOKEN && url.searchParams.get("hub.mode") === "subscribe"
+    && constantTimeEqual(url.searchParams.get("hub.verify_token") ?? "", config.META_WHATSAPP_VERIFY_TOKEN)) {
     return new Response(url.searchParams.get("hub.challenge") ?? "", { status: 200 });
   }
   return new Response("Not found", { status: 404 });
@@ -155,39 +212,100 @@ export async function GET(request: Request, context: { params: Promise<{ provide
 
 export async function POST(request: Request, context: { params: Promise<{ provider: string }> }) {
   const { provider } = await context.params;
+  if (!supportedProviders.has(provider)) return new Response("Not found", { status: 404 });
   const raw = await request.text();
-  if (!(await verify(provider, request, raw))) return Response.json({ error: "Invalid webhook signature" }, { status: 401 });
-  const payload = request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")
-    ? Object.fromEntries(new URLSearchParams(raw))
-    : JSON.parse(raw || "{}") as Record<string, unknown>;
-  if (provider === "slack" && payload.type === "url_verification") return Response.json({ challenge: payload.challenge });
-  const externalEventId = String(payload.event_id ?? payload.update_id ?? request.headers.get("x-request-id") ?? crypto.randomUUID());
-  const eventType = String(payload.type ?? (payload.event as Record<string, unknown> | undefined)?.type ?? "message");
+  if (raw.length > 1_000_000) return Response.json({ error: "Payload too large" }, { status: 413 });
+  let payload: Record<string, unknown>;
   try {
-    await getDb().insert(integrationEvents).values({ id: crypto.randomUUID(), provider, externalEventId, eventType, payloadJson: JSON.stringify(payload), status: "received", receivedAt: new Date() }).onConflictDoNothing();
+    payload = request.headers.get("content-type")?.includes("application/x-www-form-urlencoded")
+      ? Object.fromEntries(new URLSearchParams(raw))
+      : JSON.parse(raw || "{}") as Record<string, unknown>;
+  } catch {
+    return Response.json({ error: "Malformed payload" }, { status: 400 });
+  }
+
+  const bindings = env as unknown as AvalRuntimeBindings;
+  const config = textBindings(bindings);
+  const connectionId = ["telegram", "apple_messages"].includes(provider) ? new URL(request.url).searchParams.get("connection") : null;
+  if (provider === "whatsapp") {
+    if (!(await verifySignature(provider, request, raw, config, {}))) return Response.json({ error: "Invalid webhook signature" }, { status: 401 });
+    try {
+      for (const item of splitWhatsappPayload(payload)) {
+        const message = parseInboundMessage(provider, item, null);
+        if (!message) continue;
+        const destination = await lookupConnection(bindings, provider, undefined, message.externalAccountKey);
+        if (!destination) {
+          await quarantine(bindings, provider, raw, "unavailable_destination", true);
+          return Response.json({ error: "Webhook destination unavailable; delivery retained for retry" }, { status: 503 });
+        }
+        await withWorkerOrganizationSession(destination.organization_id, async (session) => {
+          const [event] = await session.db.insert(integrationEvents).values({
+            id: crypto.randomUUID(), organizationId: destination.organization_id, connectionId: destination.connection_id,
+            provider, externalEventId: message.externalMessageId, eventType: "message", payloadJson: JSON.stringify(item), status: "received", receivedAt: new Date(),
+          }).onConflictDoNothing().returning({ id: integrationEvents.id });
+          if (!event) return;
+          await ingestInboundMessage(session, provider, destination.organization_id, message, bindings);
+          await session.db.update(integrationEvents).set({ status: "processed", processedAt: new Date() }).where(eq(integrationEvents.id, event.id));
+        }, bindings);
+      }
+    } catch (error) {
+      if (error instanceof AmbiguousDestination) await quarantine(bindings, provider, raw, "ambiguous_destination", true);
+      console.error("webhook_batch_failed", provider);
+      return Response.json({ error: "Event storage or destination unavailable" }, { status: 503 });
+    }
+    return providerResponse(provider);
+  }
+  const parsed = parseInboundMessage(provider, payload, connectionId);
+  const accountKey = externalAccountKey(provider, payload, parsed);
+  let connection: WebhookConnection | null;
+  try { connection = await lookupConnection(bindings, provider, connectionId ?? undefined, accountKey); }
+  catch (error) {
+    if (error instanceof AmbiguousDestination) await quarantine(bindings, provider, raw, "ambiguous_destination", false);
+    return Response.json({ error: "Webhook destination requires review" }, { status: 503 });
+  }
+  let credentials: Record<string, string> = {};
+  if (connection && ["telegram", "apple_messages", "twilio"].includes(provider)) {
+    try { credentials = await connectionCredentials(connection, bindings); } catch { return Response.json({ error: "Invalid connection" }, { status: 503 }); }
+  }
+  if (!(await verifySignature(provider, request, raw, config, credentials))) {
+    return Response.json({ error: "Invalid webhook signature" }, { status: 401 });
+  }
+  if (provider === "slack" && payload.type === "url_verification") return Response.json({ challenge: payload.challenge });
+
+  if (!connection) {
+    await quarantine(bindings, provider, raw, "unavailable_destination", true);
+    return Response.json({ error: "Webhook destination unavailable" }, { status: 503 });
+  }
+  if (provider === "twilio" && credentials.accountSid !== payload.AccountSid) {
+    return Response.json({ error: "Invalid account" }, { status: 401 });
+  }
+
+  const externalEventId = String(
+    payload.event_id ?? payload.update_id ?? payload.MessageSid ?? payload.CallSid
+      ?? parsed?.externalMessageId ?? request.headers.get("x-request-id") ?? crypto.randomUUID(),
+  ).slice(0, 512);
+  const eventType = String(payload.type ?? (payload.event as Record<string, unknown> | undefined)?.type ?? "message").slice(0, 256);
+  try {
+    await withWorkerOrganizationSession(connection.organization_id, async (dbSession) => {
+      const [event] = await dbSession.db.insert(integrationEvents).values({
+        id: crypto.randomUUID(),
+        organizationId: connection.organization_id,
+        connectionId: connection.connection_id,
+        provider,
+        externalEventId,
+        eventType,
+        payloadJson: JSON.stringify(payload),
+        status: "received",
+        receivedAt: new Date(),
+      }).onConflictDoNothing().returning({ id: integrationEvents.id });
+      if (!event) return;
+      if (parsed) await ingestInboundMessage(dbSession, provider, connection.organization_id, parsed, bindings);
+      await dbSession.db.update(integrationEvents).set({ status: "processed", processedAt: new Date() })
+        .where(eq(integrationEvents.id, event.id));
+    }, bindings);
   } catch (error) {
-    console.error("Webhook persistence failed", provider, error instanceof Error ? error.message : error);
+    console.error("webhook_processing_failed", provider, error);
     return Response.json({ error: "Event storage unavailable" }, { status: 503 });
   }
-
-  // Best-effort: a real inbound message that can't be attributed to a
-  // known organization, or that fails to draft, should never turn a
-  // successfully-received webhook into an error response to the provider.
-  try {
-    const connectionIdFromQuery = new URL(request.url).searchParams.get("connection");
-    const parsed = parseInboundMessage(provider, payload, connectionIdFromQuery);
-    if (parsed && provider === "twilio" && connectionIdFromQuery) {
-      const expected = await connectionCredential(request, provider, "accountSid");
-      if (expected !== payload.AccountSid) return Response.json({ error: "Invalid account" }, { status: 401 });
-      parsed.connectionId = connectionIdFromQuery;
-    }
-    if (parsed) {
-      const organizationId = await resolveOrganizationId(provider, parsed.connectionId, parsed.externalAccountKey);
-      if (organizationId) await ingestInboundMessage(provider, organizationId, parsed, env as unknown as AskAvalEnv);
-    }
-  } catch (error) {
-    console.error("Inbound message ingestion failed", provider, error instanceof Error ? error.message : error);
-  }
-
-  return provider === "twilio" ? new Response("<Response/>", { headers: { "content-type": "text/xml" } }) : Response.json({ received: true }, { status: 202 });
+  return providerResponse(provider);
 }

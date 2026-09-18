@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET  /api/operations/vendors — vendors in this workspace.
  * POST /api/operations/vendors — add one.
@@ -13,22 +15,22 @@ import { operationsErrorResponse } from "@/lib/operations/errors";
 import { createVendor, listVendors } from "@/lib/operations/maintenance";
 import { optionalBoolean, optionalDate, optionalString, readJsonBody, requireString } from "@/lib/operations/validation";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const activeOnly = new URL(request.url).searchParams.get("active") === "true";
-  return Response.json({ vendors: await listVendors(identity.organizationId, activeOnly) });
+  return Response.json({ vendors: await listVendors(dbSession, identity.organizationId, activeOnly) });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
-    const vendor = await createVendor(identity.organizationId, {
+    const vendor = await createVendor(dbSession, identity.organizationId, {
       name: requireString(body, "name", 120),
       trade: optionalString(body, "trade", 60),
       email: optionalString(body, "email", 200),
@@ -41,3 +43,6 @@ export async function POST(request: Request) {
     return operationsErrorResponse(error);
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

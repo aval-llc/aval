@@ -13,7 +13,7 @@
  * reusing that file.
  */
 
-import { AnthropicError, type ContentBlock, type Message, type MessagesResponse, type ToolResultBlock, type ToolSchema, type ToolUseBlock } from "./anthropic";
+import { ModelProviderError, type ContentBlock, type Message, type MessagesResponse, type ToolResultBlock, type ToolSchema, type ToolUseBlock } from "./model-types";
 import { CHATGPT_CODEX_BASE_URL, CHATGPT_CODEX_HEADERS } from "@/lib/integrations/subscription-oauth";
 import { isHostedEdgeChallenge } from "@/lib/integrations/provider-errors";
 
@@ -75,7 +75,7 @@ type ResponsesOutputItem =
  * chose to say nothing.
  */
 async function readCompletedResponse(response: Response): Promise<unknown> {
-  if (!response.body) throw new AnthropicError("ChatGPT returned an empty stream", 502, true);
+  if (!response.body) throw new ModelProviderError("ChatGPT returned an empty stream", 502, true);
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -105,13 +105,13 @@ async function readCompletedResponse(response: Response): Promise<unknown> {
       }
 
       if (parsed.type === "response.failed" || parsed.error) {
-        throw new AnthropicError(parsed.error?.message ?? "ChatGPT could not complete the response", 502, true);
+        throw new ModelProviderError(parsed.error?.message ?? "ChatGPT could not complete the response", 502, true);
       }
       if (parsed.type === "response.completed" && parsed.response) completed = parsed.response;
     }
   }
 
-  if (!completed) throw new AnthropicError("ChatGPT's response ended before completing", 502, true);
+  if (!completed) throw new ModelProviderError("ChatGPT's response ended before completing", 502, true);
   return completed;
 }
 
@@ -187,8 +187,8 @@ export async function callChatgptOAuth(
       // Retrying cannot help, and calling it a request failure hides a
       // structural limit the user needs to know about to pick another path.
       if (isHostedEdgeChallenge(response.status, raw)) {
-        throw new AnthropicError(
-          "OpenAI's edge is blocking Aval's ChatGPT requests from its hosted Cloudflare Worker. Reconnecting can't fix this deployment constraint. Switch to an OpenAI API key or Aval Intelligence in Settings → Intelligence.",
+        throw new ModelProviderError(
+          "OpenAI's edge is blocking Aval's ChatGPT requests from its hosted Cloudflare Worker. Reconnecting can't fix this deployment constraint. Switch to an OpenAI API key or another connected provider in Settings → Intelligence.",
           403,
           false,
         );
@@ -198,7 +198,7 @@ export async function callChatgptOAuth(
       try {
         detail = (JSON.parse(raw) as { error?: { message?: string } }).error?.message ?? "";
       } catch { /* not JSON */ }
-      throw new AnthropicError(
+      throw new ModelProviderError(
         detail ? `ChatGPT request failed: ${detail}` : `ChatGPT subscription request failed (${response.status})`,
         response.status,
         response.status === 429 || response.status >= 500,
@@ -243,9 +243,9 @@ export async function callChatgptOAuth(
       usage: { input_tokens: payload.usage?.input_tokens ?? 0, output_tokens: payload.usage?.output_tokens ?? 0 },
     };
   } catch (err) {
-    if (err instanceof AnthropicError) throw err;
-    if (err instanceof Error && err.name === "AbortError") throw new AnthropicError("Model call timed out", 504, true);
-    throw new AnthropicError("ChatGPT subscription request failed", 502, true);
+    if (err instanceof ModelProviderError) throw err;
+    if (err instanceof Error && err.name === "AbortError") throw new ModelProviderError("Model call timed out", 504, true);
+    throw new ModelProviderError("ChatGPT subscription request failed", 502, true);
   } finally {
     clearTimeout(timeout);
   }

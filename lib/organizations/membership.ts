@@ -11,10 +11,35 @@
  * read.
  */
 
-import { and, desc, eq, isNull } from "drizzle-orm";
-import { getDb } from "@/db";
-import { organizationInvitations, organizationMembers, organizations, users } from "@/db/schema";
-import { IMPLICIT_OWNER_ROLE, isWorkspaceRole, type WorkspaceRole } from "./roles.ts";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import type { DbSession } from "@/db/postgres/session";
+import { accessGrants, organizationInvitations, organizationMembers, organizations, users } from "@/db/postgres/schema";
+import { digestPayload } from "@/lib/audit/chain";
+import { isWorkspaceRole, type WorkspaceRole } from "./roles.ts";
+
+type EnterpriseRole = "org_admin" | "regional_manager" | "property_manager" | "approver" | "operator" | "viewer" | "owner_viewer";
+
+const enterpriseRoleForWorkspaceRole: Record<WorkspaceRole, EnterpriseRole> = {
+  owner: "org_admin",
+  approver: "approver",
+  member: "operator",
+};
+
+function workspaceRoleForGrants(roles: readonly string[]): WorkspaceRole | null {
+  if (roles.includes("org_admin")) return "owner";
+  if (roles.includes("approver")) return "approver";
+  return roles.some((role) => ["regional_manager", "property_manager", "operator", "viewer", "owner_viewer"].includes(role)) ? "member" : null;
+}
+
+function activeGrantCondition(userId: string, organizationId?: string) {
+  const now = new Date();
+  return and(
+    eq(accessGrants.principalId, userId),
+    organizationId ? eq(accessGrants.organizationId, organizationId) : undefined,
+    isNull(accessGrants.revokedAt),
+    or(isNull(accessGrants.expiresAt), gt(accessGrants.expiresAt, now)),
+  );
+}
 
 export interface Membership {
   organizationId: string;
@@ -29,34 +54,20 @@ export interface Membership {
  * workspace is returned, so a stale or tampered claim degrades to the user's
  * own data rather than failing the request or reaching someone else's.
  */
-export async function resolveMembership(userId: string, personalOrganizationId: string, requested?: string | null): Promise<Membership> {
+export async function resolveMembership(dbSession: DbSession, userId: string, personalOrganizationId: string, requested?: string | null): Promise<Membership> {
   const target = requested && requested !== personalOrganizationId ? requested : personalOrganizationId;
-  const role = await roleFor(userId, target);
+  const role = await roleFor(dbSession, userId, target);
   if (role) return { organizationId: target, role };
-  // The personal workspace may not exist as a row yet (ensureOrganization
-  // creates it on first use), so its owner role is asserted rather than read.
-  return { organizationId: personalOrganizationId, role: IMPLICIT_OWNER_ROLE };
+  const personalRole = await roleFor(dbSession, userId, personalOrganizationId);
+  if (personalRole) return { organizationId: personalOrganizationId, role: personalRole };
+  throw new Error("No active workspace access grant");
 }
 
 /** The user's role in this workspace, or null if they hold none. */
-export async function roleFor(userId: string, organizationId: string): Promise<WorkspaceRole | null> {
-  const db = getDb();
-  const [membership] = await db
-    .select({ role: organizationMembers.role })
-    .from(organizationMembers)
-    .where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, userId)))
-    .limit(1);
-  if (membership && isWorkspaceRole(membership.role)) return membership.role;
-
-  // Ownership recorded on the organization is authoritative even with no
-  // membership row: every workspace predates this table, and a missing row
-  // must not lock an owner out of their own data.
-  const [organization] = await db
-    .select({ ownerUserId: organizations.ownerUserId })
-    .from(organizations)
-    .where(eq(organizations.id, organizationId))
-    .limit(1);
-  return organization?.ownerUserId === userId ? IMPLICIT_OWNER_ROLE : null;
+export async function roleFor(dbSession: DbSession, userId: string, organizationId: string): Promise<WorkspaceRole | null> {
+  const grants = await dbSession.db.select({ role: accessGrants.role }).from(accessGrants)
+    .where(activeGrantCondition(userId, organizationId));
+  return workspaceRoleForGrants(grants.map((grant) => grant.role));
 }
 
 export interface MemberRecord {
@@ -69,15 +80,8 @@ export interface MemberRecord {
 }
 
 /** Everyone who can act in this workspace, owner first. */
-export async function listMembers(organizationId: string): Promise<MemberRecord[]> {
-  const db = getDb();
-  const [organization] = await db
-    .select({ ownerUserId: organizations.ownerUserId })
-    .from(organizations)
-    .where(eq(organizations.id, organizationId))
-    .limit(1);
-  const ownerUserId = organization?.ownerUserId ?? null;
-
+export async function listMembers(dbSession: DbSession, organizationId: string): Promise<MemberRecord[]> {
+  const db = dbSession.db;
   const rows = await db
     .select({
       userId: organizationMembers.userId,
@@ -90,40 +94,42 @@ export async function listMembers(organizationId: string): Promise<MemberRecord[
     .innerJoin(users, eq(users.id, organizationMembers.userId))
     .where(eq(organizationMembers.organizationId, organizationId));
 
-  const members: MemberRecord[] = rows.map((row) => ({
-    userId: row.userId,
-    email: row.email,
-    displayName: row.displayName,
-    role: isWorkspaceRole(row.role) ? row.role : "member",
-    joinedAt: row.joinedAt,
-    isOwner: row.userId === ownerUserId,
-  }));
+  const grants = await db.select({ principalId: accessGrants.principalId, role: accessGrants.role })
+    .from(accessGrants)
+    .where(and(
+      eq(accessGrants.organizationId, organizationId),
+      isNull(accessGrants.revokedAt),
+      or(isNull(accessGrants.expiresAt), gt(accessGrants.expiresAt, new Date())),
+    ));
+  const grantsByPrincipal = new Map<string, string[]>();
+  for (const grant of grants) grantsByPrincipal.set(grant.principalId, [...(grantsByPrincipal.get(grant.principalId) ?? []), grant.role]);
 
-  // An owner with no membership row still belongs in the list, or the
-  // workspace would appear to have nobody who can administer it.
-  if (ownerUserId && !members.some((member) => member.userId === ownerUserId)) {
-    const [owner] = await db.select({ email: users.email, displayName: users.displayName }).from(users).where(eq(users.id, ownerUserId)).limit(1);
-    if (owner) {
-      members.unshift({ userId: ownerUserId, email: owner.email, displayName: owner.displayName, role: "owner", joinedAt: null, isOwner: true });
-    }
-  }
+  const members: MemberRecord[] = rows.flatMap((row) => {
+    const role = workspaceRoleForGrants(grantsByPrincipal.get(row.userId) ?? []);
+    return role ? [{ userId: row.userId, email: row.email, displayName: row.displayName, role, joinedAt: row.joinedAt, isOwner: role === "owner" }] : [];
+  });
   return members.sort((a, b) => Number(b.isOwner) - Number(a.isOwner) || a.email.localeCompare(b.email));
 }
 
 /** How many people in this workspace may decide an approval. */
-export async function approverCount(organizationId: string): Promise<number> {
-  const members = await listMembers(organizationId);
-  return members.filter((member) => member.role === "owner" || member.role === "approver").length;
+export async function approverCount(dbSession: DbSession, organizationId: string): Promise<number> {
+  const rows = await dbSession.db.select({ principalId: accessGrants.principalId }).from(accessGrants).where(and(
+    eq(accessGrants.organizationId, organizationId),
+    inArray(accessGrants.role, ["org_admin", "approver"]),
+    isNull(accessGrants.revokedAt),
+    or(isNull(accessGrants.expiresAt), gt(accessGrants.expiresAt, new Date())),
+  ));
+  return new Set(rows.map((row) => row.principalId)).size;
 }
 
-export async function upsertMembership(input: {
+export async function upsertMembership(dbSession: DbSession, input: {
   organizationId: string;
   userId: string;
   role: WorkspaceRole;
   invitedByUserId?: string | null;
 }): Promise<void> {
   const now = new Date();
-  await getDb()
+  await dbSession.db
     .insert(organizationMembers)
     .values({
       id: crypto.randomUUID(),
@@ -138,41 +144,74 @@ export async function upsertMembership(input: {
       target: [organizationMembers.organizationId, organizationMembers.userId],
       set: { role: input.role, updatedAt: now },
     });
+  const grantId = `grant_${input.organizationId}_${input.userId}`;
+  await dbSession.db.insert(accessGrants).values({
+    id: grantId,
+    organizationId: input.organizationId,
+    principalId: input.userId,
+    role: enterpriseRoleForWorkspaceRole[input.role],
+    organizationScope: true,
+    ownershipEntityId: null,
+    portfolioId: null,
+    regionId: null,
+    propertyId: null,
+    capabilitiesJson: "[]",
+    expiresAt: null,
+    revokedAt: null,
+    createdByPrincipalId: input.invitedByUserId ?? dbSession.identity.principalId,
+    createdAt: now,
+    updatedAt: now,
+  }).onConflictDoUpdate({
+    target: [accessGrants.organizationId, accessGrants.id],
+    set: {
+      role: enterpriseRoleForWorkspaceRole[input.role],
+      organizationScope: true,
+      ownershipEntityId: null,
+      portfolioId: null,
+      regionId: null,
+      propertyId: null,
+      expiresAt: null,
+      revokedAt: null,
+      updatedAt: now,
+    },
+  });
 }
 
-export async function removeMembership(organizationId: string, userId: string): Promise<boolean> {
-  const result = await getDb()
+export async function removeMembership(dbSession: DbSession, organizationId: string, userId: string): Promise<boolean> {
+  const now = new Date();
+  await dbSession.db.update(accessGrants).set({ revokedAt: now, updatedAt: now }).where(and(
+    eq(accessGrants.organizationId, organizationId),
+    eq(accessGrants.principalId, userId),
+    isNull(accessGrants.revokedAt),
+  ));
+  const removed = await dbSession.db
     .delete(organizationMembers)
-    .where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, userId)));
-  const value = result as { rowsAffected?: number; meta?: { changes?: number } };
-  return (value?.rowsAffected ?? value?.meta?.changes ?? 0) > 0;
+    .where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, userId)))
+    .returning({ id: organizationMembers.id });
+  return removed.length > 0;
 }
 
 /** Every workspace this user can act in, so the switcher shows real options. */
-export async function listWorkspacesForUser(userId: string, personalOrganizationId: string): Promise<Array<{ organizationId: string; name: string; role: WorkspaceRole; isPersonal: boolean }>> {
-  const db = getDb();
+export async function listWorkspacesForUser(dbSession: DbSession, userId: string, personalOrganizationId: string): Promise<Array<{ organizationId: string; name: string; role: WorkspaceRole; isPersonal: boolean }>> {
+  const db = dbSession.db;
   const rows = await db
-    .select({ organizationId: organizationMembers.organizationId, role: organizationMembers.role, name: organizations.name })
-    .from(organizationMembers)
-    .innerJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
-    .where(eq(organizationMembers.userId, userId));
+    .select({ organizationId: accessGrants.organizationId, role: accessGrants.role, name: organizations.name })
+    .from(accessGrants)
+    .innerJoin(organizations, eq(organizations.id, accessGrants.organizationId))
+    .where(activeGrantCondition(userId));
 
-  const workspaces = rows.map((row) => ({
-    organizationId: row.organizationId,
-    name: row.name,
-    role: isWorkspaceRole(row.role) ? row.role : ("member" as WorkspaceRole),
-    isPersonal: row.organizationId === personalOrganizationId,
-  }));
-
-  if (!workspaces.some((workspace) => workspace.isPersonal)) {
-    const [personal] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, personalOrganizationId)).limit(1);
-    workspaces.unshift({
-      organizationId: personalOrganizationId,
-      name: personal?.name ?? "My workspace",
-      role: IMPLICIT_OWNER_ROLE,
-      isPersonal: true,
-    });
+  const grouped = new Map<string, { name: string; roles: string[] }>();
+  for (const row of rows) {
+    const existing = grouped.get(row.organizationId) ?? { name: row.name, roles: [] };
+    existing.roles.push(row.role);
+    grouped.set(row.organizationId, existing);
   }
+  const workspaces = Array.from(grouped, ([organizationId, value]) => ({
+    organizationId,
+    name: value.name,
+    role: workspaceRoleForGrants(value.roles) ?? "member",
+    isPersonal: organizationId === personalOrganizationId,
+  }));
   return workspaces.sort((a, b) => Number(b.isPersonal) - Number(a.isPersonal) || a.name.localeCompare(b.name));
 }
 
@@ -189,7 +228,7 @@ export interface IssuedInvitation {
   expiresAt: Date;
 }
 
-export async function issueInvitation(input: {
+export async function issueInvitation(dbSession: DbSession, input: {
   organizationId: string;
   role: WorkspaceRole;
   createdByUserId: string;
@@ -198,7 +237,7 @@ export async function issueInvitation(input: {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + INVITATION_TTL_MS);
   const id = crypto.randomUUID();
-  await getDb().insert(organizationInvitations).values({
+  await dbSession.db.insert(organizationInvitations).values({
     id,
     organizationId: input.organizationId,
     codeHash: await hashCode(code),
@@ -215,45 +254,20 @@ export async function issueInvitation(input: {
 
 export type AcceptRefusal = "not_found" | "expired" | "already_accepted" | "revoked" | "already_member";
 
-export async function acceptInvitation(code: string, userId: string): Promise<
+export async function acceptInvitation(dbSession: DbSession, code: string, userId: string): Promise<
   | { ok: true; organizationId: string; role: WorkspaceRole }
   | { ok: false; reason: AcceptRefusal }
 > {
-  const db = getDb();
-  const [invitation] = await db
-    .select()
-    .from(organizationInvitations)
-    .where(eq(organizationInvitations.codeHash, await hashCode(code)))
-    .limit(1);
-  // A wrong code and an unknown code are the same answer on purpose: telling
-  // the difference would turn this into an oracle for guessing valid codes.
-  if (!invitation) return { ok: false, reason: "not_found" };
-  if (invitation.revokedAt) return { ok: false, reason: "revoked" };
-  if (invitation.acceptedByUserId) return { ok: false, reason: "already_accepted" };
-  if (invitation.expiresAt.getTime() < Date.now()) return { ok: false, reason: "expired" };
-
-  const existing = await roleFor(userId, invitation.organizationId);
-  if (existing) return { ok: false, reason: "already_member" };
-
-  const role = isWorkspaceRole(invitation.role) ? invitation.role : "member";
-  const now = new Date();
-  // Claim the invitation before granting access, and only if it is still
-  // unclaimed. Two people redeeming one shared code race here; the second
-  // update matches no row and gets nothing.
-  const claimed = await db
-    .update(organizationInvitations)
-    .set({ acceptedByUserId: userId, acceptedAt: now })
-    .where(and(eq(organizationInvitations.id, invitation.id), isNull(organizationInvitations.acceptedByUserId)));
-  const value = claimed as { rowsAffected?: number; meta?: { changes?: number } };
-  if ((value?.rowsAffected ?? value?.meta?.changes ?? 0) !== 1) return { ok: false, reason: "already_accepted" };
-
-  await upsertMembership({
-    organizationId: invitation.organizationId,
-    userId,
-    role,
-    invitedByUserId: invitation.createdByUserId,
-  });
-  return { ok: true, organizationId: invitation.organizationId, role };
+  if (userId !== dbSession.identity.principalId) throw new Error("Invitation subject does not match the authenticated principal");
+  const result = await dbSession.db.execute<{ outcome: string; organization_id: string | null; granted_role: string | null }>(sql`
+    select * from aval_private.redeem_invitation(${await hashCode(code)}, ${await digestPayload(userId)})
+  `);
+  const row = result.rows[0];
+  if (row?.outcome === "accepted" && row.organization_id && isWorkspaceRole(row.granted_role)) {
+    return { ok: true, organizationId: row.organization_id, role: row.granted_role };
+  }
+  const reason = row?.outcome;
+  return { ok: false, reason: (["not_found", "expired", "already_accepted", "revoked", "already_member"] as const).includes(reason as AcceptRefusal) ? reason as AcceptRefusal : "not_found" };
 }
 
 export interface PendingInvitation {
@@ -264,8 +278,8 @@ export interface PendingInvitation {
 }
 
 /** Outstanding invitations, so an owner can see and revoke what is live. Codes are never returned. */
-export async function listPendingInvitations(organizationId: string): Promise<PendingInvitation[]> {
-  const rows = await getDb()
+export async function listPendingInvitations(dbSession: DbSession, organizationId: string): Promise<PendingInvitation[]> {
+  const rows = await dbSession.db
     .select({ id: organizationInvitations.id, role: organizationInvitations.role, createdAt: organizationInvitations.createdAt, expiresAt: organizationInvitations.expiresAt })
     .from(organizationInvitations)
     .where(and(
@@ -279,17 +293,17 @@ export async function listPendingInvitations(organizationId: string): Promise<Pe
     .map((row) => ({ id: row.id, role: isWorkspaceRole(row.role) ? row.role : "member", createdAt: row.createdAt, expiresAt: row.expiresAt }));
 }
 
-export async function revokeInvitation(organizationId: string, invitationId: string): Promise<boolean> {
-  const result = await getDb()
+export async function revokeInvitation(dbSession: DbSession, organizationId: string, invitationId: string): Promise<boolean> {
+  const result = await dbSession.db
     .update(organizationInvitations)
     .set({ revokedAt: new Date() })
     .where(and(
       eq(organizationInvitations.id, invitationId),
       eq(organizationInvitations.organizationId, organizationId),
       isNull(organizationInvitations.acceptedByUserId),
-    ));
-  const value = result as { rowsAffected?: number; meta?: { changes?: number } };
-  return (value?.rowsAffected ?? value?.meta?.changes ?? 0) > 0;
+    ))
+    .returning({ id: organizationInvitations.id });
+  return result.length > 0;
 }
 
 /**

@@ -12,8 +12,8 @@
  */
 
 import { and, eq, gte, lt } from "drizzle-orm";
-import { getDb } from "@/db";
-import { rateLimitHits } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { rateLimitHits } from "@/db/postgres/schema";
 
 export interface RateLimitRule {
   limit: number;
@@ -29,20 +29,34 @@ export interface RateLimitRule {
  * Scoped to just this key (not a full-table sweep) so it stays cheap on
  * every request rather than adding an unrelated table scan.
  */
-export async function isRateLimited(scopeKey: string, rule: RateLimitRule): Promise<boolean> {
-  const db = getDb();
+export async function isRateLimited(dbSession: DbSession, scopeKey: string, rule: RateLimitRule): Promise<boolean> {
+  const db = dbSession.db;
+  const organizationId = dbSession.identity.organizationId;
   const windowStart = new Date(Date.now() - rule.windowMs);
-  await db.delete(rateLimitHits).where(and(eq(rateLimitHits.scopeKey, scopeKey), lt(rateLimitHits.createdAt, windowStart))).catch(() => {});
+  await db.delete(rateLimitHits).where(and(
+    eq(rateLimitHits.organizationId, organizationId),
+    eq(rateLimitHits.scopeKey, scopeKey),
+    lt(rateLimitHits.createdAt, windowStart),
+  )).catch(() => {});
   const hits = await db
     .select({ id: rateLimitHits.id })
     .from(rateLimitHits)
-    .where(and(eq(rateLimitHits.scopeKey, scopeKey), gte(rateLimitHits.createdAt, windowStart)));
+    .where(and(
+      eq(rateLimitHits.organizationId, organizationId),
+      eq(rateLimitHits.scopeKey, scopeKey),
+      gte(rateLimitHits.createdAt, windowStart),
+    ));
   return hits.length >= rule.limit;
 }
 
-export async function recordAttempt(scopeKey: string): Promise<void> {
+export async function recordAttempt(dbSession: DbSession, scopeKey: string): Promise<void> {
   try {
-    await getDb().insert(rateLimitHits).values({ id: crypto.randomUUID(), scopeKey, createdAt: new Date() });
+    await dbSession.db.insert(rateLimitHits).values({
+      id: crypto.randomUUID(),
+      organizationId: dbSession.identity.organizationId,
+      scopeKey,
+      createdAt: new Date(),
+    });
   } catch (err) {
     // Fails open on a storage hiccup — a missed rate-limit row degrades
     // throttling for one request, not availability for a real user.

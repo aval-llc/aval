@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { createMeter, listMeters } from "@/lib/infrastructure/meters";
@@ -7,21 +9,21 @@ const UTILITY_TYPES: UtilityType[] = ["electricity", "water", "gas"];
 const UNITS_OF_MEASURE: UnitOfMeasure[] = ["kWh", "gal", "ccf", "therm", "m3"];
 const MAX_LABEL_CHARS = 200;
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const utilityTypeParam = new URL(request.url).searchParams.get("utilityType");
   const utilityType = UTILITY_TYPES.includes(utilityTypeParam as UtilityType) ? (utilityTypeParam as UtilityType) : undefined;
 
-  const meters = await listMeters(identity.organizationId, utilityType);
+  const meters = await listMeters(dbSession, identity.organizationId, utilityType);
   return Response.json({ meters });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   const body = (await request.json().catch(() => ({}))) as {
     utilityType?: string;
@@ -41,7 +43,7 @@ export async function POST(request: Request) {
     return Response.json({ error: `unitOfMeasure must be one of: ${UNITS_OF_MEASURE.join(", ")}` }, { status: 400 });
   }
 
-  const meter = await createMeter(identity.organizationId, {
+  const meter = await createMeter(dbSession, identity.organizationId, {
     utilityType: body.utilityType as UtilityType,
     propertyLabel,
     unitLabel: body.unitLabel?.trim().slice(0, MAX_LABEL_CHARS) || undefined,
@@ -51,3 +53,6 @@ export async function POST(request: Request) {
   });
   return Response.json({ meter }, { status: 201 });
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

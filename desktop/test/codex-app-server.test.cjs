@@ -84,7 +84,7 @@ test("Codex executable resolution checks explicit paths without a shell", () => 
   assert.deepEqual(checked, ["/opt/aval/codex"]);
 });
 
-test("service isolates Codex, opens only the validated login URL, and returns structured answers", async (t) => {
+test("service isolates Codex, opens only the validated login URL, and returns structured answers", { timeout: 2000 }, async (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "aval-service-test-"));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
   let spawnOptions;
@@ -120,7 +120,10 @@ test("service isolates Codex, opens only the validated login URL, and returns st
       if (message.method === "turn/start") result = { turn: { id: "turn-1" } };
       child.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
       if (message.method === "turn/start") {
-        queueMicrotask(() => {
+        // Real notifications arrive after the turn/start response has set the
+        // active turn ID. A microtask here incorrectly hid completion matching bugs.
+        setImmediate(() => {
+          child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "previous-turn", status: "failed", items: [], error: { message: "Stale turn must be ignored" } } } })}\n`);
           child.stdout.write(`${JSON.stringify({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", delta: '{"headline":"Verified","narrative":"The supplied facts support this.","metrics":[],"confidence":"high"}' } })}\n`);
           child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", items: [], error: null } } })}\n`);
         });
@@ -235,7 +238,9 @@ test("an existing Codex login is adopted into the isolated home", async (t) => {
 
   const imported = path.join(temporary, "codex-home", "auth.json");
   assert.equal(fs.readFileSync(imported, "utf8"), '{"tokens":{"refresh_token":"shared"}}');
-  assert.equal(fs.statSync(imported).mode & 0o777, 0o600);
+  // Windows does not expose POSIX permission bits; Unix packaging must retain
+  // owner-only access for the copied credential.
+  if (process.platform !== "win32") assert.equal(fs.statSync(imported).mode & 0o777, 0o600);
   assert.ok(service.diagnostics.some((entry) => entry.kind === "shared_login_imported"));
   // Credentials must never reach the renderer-visible state.
   assert.equal(JSON.stringify(service.getState()).includes("shared"), false);

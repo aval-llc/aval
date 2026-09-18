@@ -12,7 +12,7 @@
  * native Messages API via the official SDK (anthropic.ts).
  */
 
-import { AnthropicError, type ContentBlock, type Message, type MessagesResponse, type ToolResultBlock, type ToolSchema, type ToolUseBlock } from "./anthropic";
+import { ModelProviderError, type ContentBlock, type Message, type MessagesResponse, type ToolResultBlock, type ToolSchema, type ToolUseBlock } from "./model-types";
 
 const TIMEOUT_MS = 25_000;
 
@@ -97,7 +97,7 @@ export async function callOpenAiCompatible(
       const body = await response.json().catch(() => null) as { error?: { message?: string } | string } | null;
       const detail = typeof body?.error === "string" ? body.error : body?.error?.message;
       console.error("model_provider_error", config.providerLabel, response.status, detail?.slice(0, 500));
-      throw new AnthropicError(`${config.providerLabel} request failed (${response.status})`, response.status, response.status === 429 || response.status >= 500);
+      throw new ModelProviderError(`${config.providerLabel} request failed (${response.status})`, response.status, response.status === 429 || response.status >= 500);
     }
 
     const payload = await response.json() as {
@@ -106,7 +106,7 @@ export async function callOpenAiCompatible(
       usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
     const choice = payload.choices[0];
-    if (!choice) throw new AnthropicError(`${config.providerLabel} returned no choices`, 502, true);
+    if (!choice) throw new ModelProviderError(`${config.providerLabel} returned no choices`, 502, true);
 
     const content: ContentBlock[] = [];
     if (choice.message.content) content.push({ type: "text", text: choice.message.content });
@@ -123,9 +123,9 @@ export async function callOpenAiCompatible(
       usage: { input_tokens: payload.usage?.prompt_tokens ?? 0, output_tokens: payload.usage?.completion_tokens ?? 0 },
     };
   } catch (err) {
-    if (err instanceof AnthropicError) throw err;
-    if (err instanceof Error && err.name === "AbortError") throw new AnthropicError("Model call timed out", 504, true);
-    throw new AnthropicError(`${config.providerLabel} request failed`, 502, true);
+    if (err instanceof ModelProviderError) throw err;
+    if (err instanceof Error && err.name === "AbortError") throw new ModelProviderError("Model call timed out", 504, true);
+    throw new ModelProviderError(`${config.providerLabel} request failed`, 502, true);
   } finally {
     clearTimeout(timeout);
   }

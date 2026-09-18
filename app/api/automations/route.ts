@@ -1,13 +1,14 @@
+import { withApiSession } from "@/lib/api/with-session";
 import { env } from "cloudflare:workers";
 import { and, desc, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { automationRuns, automationSteps } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { automationRuns, automationSteps } from "@/db/postgres/schema";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { buildOperationsOverview } from "@/lib/operations/summary";
 import type { OperationsInsight } from "@/lib/operations/insights";
 import { handleAskAvalDraft } from "@/lib/ask-aval/draft";
-import type { AskAvalEnv } from "@/lib/ask-aval/anthropic";
+import type { AskAvalEnv } from "@/lib/ask-aval/model-types";
 
 /** Automation proposals are derived only from the caller's current operations records. */
 function automationForInsight(insight: OperationsInsight) {
@@ -26,8 +27,8 @@ function withChannel(channel: string) {
   return JSON.stringify({ channel });
 }
 
-async function loadRunWithSteps(organizationId: string, insightId: string) {
-  const db = getDb();
+async function loadRunWithSteps(dbSession: DbSession, organizationId: string, insightId: string) {
+  const db = dbSession.db;
   const [run] = await db
     .select()
     .from(automationRuns)
@@ -50,12 +51,12 @@ async function loadRunWithSteps(organizationId: string, insightId: string) {
   };
 }
 
-async function loadTriggers(organizationId: string) {
+async function loadTriggers(dbSession: DbSession, organizationId: string) {
   const triggers = [];
-  const { insights } = await buildOperationsOverview(organizationId);
+  const { insights } = await buildOperationsOverview(dbSession, organizationId);
   for (const insight of insights) {
     const config = automationForInsight(insight);
-    const { run, steps } = await loadRunWithSteps(organizationId, insight.id);
+    const { run, steps } = await loadRunWithSteps(dbSession, organizationId, insight.id);
     triggers.push({
       insightId: insight.id,
       title: insight.title,
@@ -67,23 +68,23 @@ async function loadTriggers(organizationId: string) {
   return triggers;
 }
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity)
     return Response.json({ error: "Authentication required" }, { status: 401 });
-  const triggers = await loadTriggers(identity.organizationId);
+  const triggers = await loadTriggers(dbSession, identity.organizationId);
   return Response.json(
     { triggers },
     { headers: { "cache-control": "no-store" } },
   );
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity)
     return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
-  const db = getDb();
+  await ensureOrganization(dbSession, identity);
+  const db = dbSession.db;
   const body = (await request.json().catch(() => ({}))) as {
     action?: string;
     runId?: string;
@@ -129,12 +130,12 @@ export async function POST(request: Request) {
       .set({ status: "resolved", updatedAt: now })
       .where(eq(automationRuns.id, run.id));
     return Response.json({
-      triggers: await loadTriggers(identity.organizationId),
+      triggers: await loadTriggers(dbSession, identity.organizationId),
     });
   }
 
   if (body.action === "start" && body.insightId) {
-    const { insights } = await buildOperationsOverview(identity.organizationId);
+    const { insights } = await buildOperationsOverview(dbSession, identity.organizationId);
     const insight = insights.find(
       (candidate) => candidate.id === body.insightId,
     );
@@ -184,7 +185,7 @@ export async function POST(request: Request) {
     );
     await addStep("acknowledged", "Aval", config.acknowledgedSummary, "aval");
 
-    const draftResponse = await handleAskAvalDraft(
+    const draftResponse = await handleAskAvalDraft(dbSession,
       {
         title: config.draftTitle,
         instructions: config.draftInstructions,
@@ -217,7 +218,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           error: "The proposal could not be prepared.",
-          triggers: await loadTriggers(identity.organizationId),
+          triggers: await loadTriggers(dbSession, identity.organizationId),
         },
         { status: 503 },
       );
@@ -235,7 +236,7 @@ export async function POST(request: Request) {
       .where(eq(automationRuns.id, runId));
 
     return Response.json({
-      triggers: await loadTriggers(identity.organizationId),
+      triggers: await loadTriggers(dbSession, identity.organizationId),
     });
   }
 
@@ -244,3 +245,6 @@ export async function POST(request: Request) {
     { status: 400 },
   );
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

@@ -1,21 +1,23 @@
 import { and, asc, desc, eq, isNull, lte, or } from "drizzle-orm";
-import { getDb } from "@/db";
-import { glAccounts, glTransactions, integrationConnections, integrationSyncState, syncRuns } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { glAccounts, glTransactions, integrationConnections, integrationSyncState, syncRuns } from "@/db/postgres/schema";
 import { applyImport } from "@/lib/operations/import-apply";
 import type { GlAccountType } from "@/lib/operations/types";
 import { fetchQuickbooksPage, quickbooksClient, syncCursor } from "./quickbooks";
 import { normalizeQuickbooks } from "./quickbooks-rules";
 import { ProviderHttpError } from "./http";
 import type { IntegrationEnv } from "./oauth";
+import { buildiumCursor, fetchBuildiumPage } from "./buildium";
+import { decryptSecret } from "./crypto";
 
-export const AUTOMATIC_IMPORT_PROVIDERS: ReadonlySet<string> = new Set(["quickbooks"]);
+export const AUTOMATIC_IMPORT_PROVIDERS: ReadonlySet<string> = new Set(["quickbooks", "buildium"]);
 const INTERVAL_MS = 15 * 60_000;
 const LEASE_MS = 5 * 60_000;
 const freeLease = (now: Date) => or(isNull(integrationSyncState.leaseExpiresAt), lte(integrationSyncState.leaseExpiresAt, now));
 
-export async function scheduleImport(organizationId: string, provider: string, enabled = true) {
+export async function scheduleImport(dbSession: DbSession, organizationId: string, provider: string, enabled = true) {
   if (!AUTOMATIC_IMPORT_PROVIDERS.has(provider)) throw new Error("Automatic import is not available for this provider yet.");
-  const db = getDb();
+  const db = dbSession.db;
   const [connection] = await db.select().from(integrationConnections).where(and(eq(integrationConnections.organizationId, organizationId), eq(integrationConnections.provider, provider))).limit(1);
   if (!connection || connection.status !== "connected" || !connection.externalAccountId) throw new Error("Connect and verify the provider before enabling imports.");
   const now = new Date();
@@ -26,8 +28,8 @@ export async function scheduleImport(organizationId: string, provider: string, e
   return { connectionId: connection.id, enabled, status: enabled ? "queued" : "paused" };
 }
 
-export async function importStatus(organizationId: string, provider: string) {
-  const db = getDb();
+export async function importStatus(dbSession: DbSession, organizationId: string, provider: string) {
+  const db = dbSession.db;
   const [connection] = await db.select().from(integrationConnections).where(and(eq(integrationConnections.organizationId, organizationId), eq(integrationConnections.provider, provider))).limit(1);
   if (!connection) return { enabled: false, lastRun: null, lastSyncAt: null };
   const [state] = await db.select().from(integrationSyncState).where(and(eq(integrationSyncState.connectionId, connection.id), eq(integrationSyncState.organizationId, organizationId))).limit(1);
@@ -36,8 +38,8 @@ export async function importStatus(organizationId: string, provider: string) {
 }
 
 /** One bounded page per connection; overlapping crons cannot rotate its tokens twice. */
-export async function runImportWorker(config: IntegrationEnv, limit = 2) {
-  const db = getDb(), now = new Date();
+export async function runImportWorker(dbSession: DbSession, config: IntegrationEnv, limit = 2) {
+  const db = dbSession.db, now = new Date();
   const due = await db.select().from(integrationSyncState).where(and(eq(integrationSyncState.enabled, true), lte(integrationSyncState.nextRunAt, now), freeLease(now))).orderBy(asc(integrationSyncState.nextRunAt)).limit(Math.max(1, Math.min(limit, 5)));
   let processed = 0;
   for (const candidate of due) {
@@ -50,11 +52,29 @@ export async function runImportWorker(config: IntegrationEnv, limit = 2) {
     const runId = crypto.randomUUID();
     try {
       await db.update(syncRuns).set({ status: "interrupted", error: "Worker lease expired; the saved page will be retried.", completedAt: now }).where(and(eq(syncRuns.connectionId, state.connectionId), eq(syncRuns.status, "running")));
-      await db.insert(syncRuns).values({ id: runId, organizationId: state.organizationId, connectionId: state.connectionId, provider: "quickbooks", status: "running", cursorJson: state.cursorJson, countsJson: "{}", startedAt: now });
       const [connection] = await db.select().from(integrationConnections).where(and(eq(integrationConnections.id, state.connectionId), eq(integrationConnections.organizationId, state.organizationId))).limit(1);
-      if (!connection || connection.provider !== "quickbooks" || connection.status !== "connected" || connection.externalAccountId !== state.externalAccountId) throw new Error("The connected account changed or needs authorization. Review it before resuming.");
+      if (!connection || !AUTOMATIC_IMPORT_PROVIDERS.has(connection.provider) || connection.status !== "connected" || connection.externalAccountId !== state.externalAccountId) throw new Error("The connected account changed or needs authorization. Review it before resuming.");
+      await db.insert(syncRuns).values({ id: runId, organizationId: state.organizationId, connectionId: state.connectionId, provider: connection.provider, status: "running", cursorJson: state.cursorJson, countsJson: "{}", startedAt: now });
+      if (connection.provider === "buildium") {
+        if (!connection.accessTokenCiphertext || !config.INTEGRATION_TOKEN_ENCRYPTION_KEY) throw new Error("Buildium credentials unavailable");
+        const credentials = JSON.parse(await decryptSecret(connection.accessTokenCiphertext, config.INTEGRATION_TOKEN_ENCRYPTION_KEY)) as Record<string, string>;
+        const page = await dbSession.outsideTransaction(() => fetchBuildiumPage(credentials, buildiumCursor(state.cursorJson)));
+        await dbSession.atomic(async () => {
+          const [current] = await db.select().from(integrationSyncState).where(and(scope, eq(integrationSyncState.enabled, true))).limit(1);
+          const [currentConnection] = await db.select().from(integrationConnections).where(and(eq(integrationConnections.id, connection.id), eq(integrationConnections.status, "connected"), eq(integrationConnections.accessTokenCiphertext, connection.accessTokenCiphertext!))).limit(1);
+          if (!current || !currentConnection || !current.leaseExpiresAt || current.leaseExpiresAt <= new Date()) throw new Error("Buildium connection or worker lease changed");
+          const result = await applyImport(dbSession, state.organizationId, page.batch, { sourceProvider: "buildium", sourceConnectionId: connection.id, externalId: null });
+          if (result.conflictsDetected || result.failed.length || result.skipped.length) throw new Error("Buildium import requires reconciliation; checkpoint retained");
+          const completedAt = new Date();
+          const saved = await db.update(integrationSyncState).set({ cursorJson: JSON.stringify(page.next), attempts: 0, nextRunAt: new Date(completedAt.getTime() + (page.complete ? INTERVAL_MS : 0)), leaseToken: null, leaseExpiresAt: null, updatedAt: completedAt }).where(scope).returning();
+          if (!saved.length) throw new Error("Buildium worker ownership changed");
+          if (page.complete) await db.update(integrationConnections).set({ lastSyncAt: completedAt }).where(eq(integrationConnections.id, connection.id));
+          await db.update(syncRuns).set({ status: page.complete ? "completed" : "page_completed", cursorJson: JSON.stringify(page.next), countsJson: JSON.stringify({ ...result, complete: page.complete, readOnly: true }), completedAt }).where(eq(syncRuns.id, runId));
+        });
+        continue;
+      }
       const cursor = syncCursor(state.cursorJson, now);
-      const client = await quickbooksClient(connection, config);
+      const client = await quickbooksClient(dbSession, connection, config);
       const page = await fetchQuickbooksPage(client, cursor);
       const storedAccounts = await db.select().from(glAccounts).where(and(eq(glAccounts.organizationId, state.organizationId), eq(glAccounts.sourceProvider, "quickbooks")));
       const types = new Map(storedAccounts.filter(a => a.externalId).map(a => [a.externalId!, a.accountType as GlAccountType]));
@@ -83,7 +103,7 @@ export async function runImportWorker(config: IntegrationEnv, limit = 2) {
       const [current] = await db.select().from(integrationSyncState).where(and(scope, eq(integrationSyncState.enabled, true))).limit(1);
       const [currentConnection] = await db.select().from(integrationConnections).where(and(eq(integrationConnections.id, connection.id), eq(integrationConnections.status, "connected"), eq(integrationConnections.accessTokenCiphertext, client.currentCiphertext()))).limit(1);
       if (!current || !currentConnection || !current.leaseExpiresAt || current.leaseExpiresAt <= new Date()) throw new Error("Import paused or connection changed before application.");
-      const result = await applyImport(state.organizationId, normalized.batch, { sourceProvider: "quickbooks", sourceConnectionId: connection.id, externalId: null });
+      const result = await applyImport(dbSession, state.organizationId, normalized.batch, { sourceProvider: "quickbooks", sourceConnectionId: connection.id, externalId: null });
       await db.update(syncRuns).set({ countsJson: JSON.stringify({ ...result, scope: "chart_of_accounts_and_journal_adjustments_only", complete: page.complete }) }).where(eq(syncRuns.id, runId));
       if (result.failed.length || result.skipped.length || result.conflictsDetected) throw new Error("Import partially applied. Review the reported rows; this page's checkpoint has not advanced.");
       const completedAt = new Date();

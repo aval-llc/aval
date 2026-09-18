@@ -98,16 +98,16 @@ test("the shared demo workspace is read-only to agents", async () => {
 
 test("a transient provider error retries and a permanent one is terminal", async () => {
   const { tasks, runtime } = await setup();
-  const { AnthropicError } = await import("../../lib/ask-aval/anthropic.ts");
+  const { ModelProviderError } = await import("../../lib/ask-aval/model-types.ts");
 
-  globalThis.__MODEL__ = async () => { throw new AnthropicError("overloaded", 529, true); };
+  globalThis.__MODEL__ = async () => { throw new ModelProviderError("overloaded", 529, true); };
   const transient = await newTask(tasks, "Retryable");
   assert.equal((await runtime.advanceTask(ENV, "org_1", transient.id, runtime.newWorkerId())).status, "QUEUED");
   const requeued = await tasks.getTask("org_1", transient.id);
   assert.equal(requeued.executionAttempts, 1);
   assert.ok(requeued.nextAttemptAt, "a retry is scheduled behind a backoff, not spun immediately");
 
-  globalThis.__MODEL__ = async () => { throw new AnthropicError("bad request", 400, false); };
+  globalThis.__MODEL__ = async () => { throw new ModelProviderError("bad request", 400, false); };
   const permanent = await newTask(tasks, "Fatal");
   assert.equal((await runtime.advanceTask(ENV, "org_1", permanent.id, runtime.newWorkerId())).status, "FAILED");
 });

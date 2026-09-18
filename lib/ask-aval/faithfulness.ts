@@ -97,7 +97,11 @@ export function extractClaimedNumbers(answer: unknown): number[] {
     if (typeof value === "number") {
       if (Number.isFinite(value)) claimed.push(round2(value));
     } else if (typeof value === "string") {
-      const matches = value.match(/-?\d[\d,]*\.?\d*/g) ?? [];
+      // A hyphen between two numeric components is a separator, not a minus
+      // sign: `09:00-12:00`, `2026-09-10`, and `10-14 days` must yield
+      // positive components. A minus sign after whitespace or punctuation still
+      // represents a real negative value such as `NOI change: -125.50`.
+      const matches = value.match(/(?<![\d:])-?\d[\d,]*\.?\d*/g) ?? [];
       for (const match of matches) {
         const n = Number(match.replace(/,/g, ""));
         if (Number.isFinite(n)) claimed.push(round2(n));

@@ -1,18 +1,19 @@
+import { withApiSession } from "@/lib/api/with-session";
 import { desc, eq, and, ne } from "drizzle-orm";
-import { getDb } from "@/db";
-import { draftDocuments } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { draftDocuments } from "@/db/postgres/schema";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { removeDrafts, validDraftId } from "@/lib/ask-aval/draft-store";
 
 /** Every persisted Ask Aval Tasks draft for this org, newest first — hydrates the client on load so a refresh doesn't lose them. */
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity)
     return Response.json({ error: "Authentication required" }, { status: 401 });
 
-  const db = getDb();
+  const db = dbSession.db;
   const rows = await db
     .select()
     .from(draftDocuments)
@@ -49,8 +50,8 @@ export async function GET(request: Request) {
   );
 }
 
-export async function PATCH(request: Request) {
-  const identity = await getApiIdentity(request);
+async function PATCHWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity)
     return Response.json({ error: "Authentication required" }, { status: 401 });
 
@@ -64,7 +65,7 @@ export async function PATCH(request: Request) {
       { status: 400 },
     );
 
-  const db = getDb();
+  const db = dbSession.db;
   await db
     .update(draftDocuments)
     .set({ sentTo: body.sentTo, updatedAt: new Date() })
@@ -80,8 +81,8 @@ export async function PATCH(request: Request) {
 }
 
 /** Delete exactly the selected drafts, including a Clear snapshot. */
-export async function DELETE(request: Request) {
-  const identity = await getApiIdentity(request);
+async function DELETEWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity || isGuestIdentity(identity))
     return Response.json(
       { error: "Sign in to manage drafts" },
@@ -102,10 +103,14 @@ export async function DELETE(request: Request) {
       { status: 400 },
     );
   }
-  await ensureOrganization(identity);
-  await removeDrafts(identity, [...new Set<string>(body.ids)]);
+  await ensureOrganization(dbSession, identity);
+  await removeDrafts(dbSession, identity, [...new Set<string>(body.ids)]);
   return Response.json(
     { ok: true },
     { headers: { "cache-control": "no-store" } },
   );
 }
+
+export const GET = withApiSession(GETWithSession);
+export const PATCH = withApiSession(PATCHWithSession);
+export const DELETE = withApiSession(DELETEWithSession);

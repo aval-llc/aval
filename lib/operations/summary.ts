@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * The one call that produces everything the Operations module shows, and the
  * insight run over it.
@@ -84,17 +85,17 @@ export interface HeadlineMetrics {
  * showing — an insight that disagreed with the tile above it would be worse
  * than no insight at all.
  */
-export async function buildOperationsOverview(
+export async function buildOperationsOverview(dbSession: DbSession,
   organizationId: string,
   period: OperationsPeriod = currentMonthPeriod(),
   asOf = new Date(),
 ): Promise<OperationsOverview> {
   const [portfolio, leasing, maintenance, accounting, conflicts] = await Promise.all([
-    summarizePortfolio(organizationId, asOf),
-    summarizeLeasing(organizationId, period.start, period.end, asOf),
-    summarizeMaintenanceOperations(organizationId, period.start, period.end, asOf),
-    summarizeAccounting(organizationId, period.start, period.end, asOf),
-    listOpenConflicts(organizationId),
+    summarizePortfolio(dbSession, organizationId, asOf),
+    summarizeLeasing(dbSession, organizationId, period.start, period.end, asOf),
+    summarizeMaintenanceOperations(dbSession, organizationId, period.start, period.end, asOf),
+    summarizeAccounting(dbSession, organizationId, period.start, period.end, asOf),
+    listOpenConflicts(dbSession, organizationId),
   ]);
 
   const insights = deriveInsights({ portfolio, leasing, maintenance, accounting, conflicts });

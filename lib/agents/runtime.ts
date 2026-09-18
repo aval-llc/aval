@@ -1,9 +1,10 @@
-import { getDb } from '@/db';
-import { agentChecks, agentModelContexts } from '@/db/schema';
+import type { DbSession } from "@/db/postgres/session";
+import { agentChecks, agentModelContexts } from "@/db/postgres/schema";
 import { semanticPacket } from './semantic-evidence';
 import { SEMANTIC_REVIEW_SYSTEM, SEMANTIC_REVIEW_TOOL, parseSemanticVerdict, type ReviewPacket } from './semantic-review';
 import { assembleContext, byteCount, MAX_CONTEXT_BYTES } from './context';
 import { planReadiness, goalPlan, validateGoalPlanProposal } from './goal-plan';
+import { checkDocumentAnswerNumbers } from './document-evidence';
 import { getTool } from './registry';
 import { checkTask, failedCheckCount, MAX_CHECK_REPAIRS, parseTaskCheck } from './checks';
 /**
@@ -32,14 +33,14 @@ import { checkTask, failedCheckCount, MAX_CHECK_REPAIRS, parseTaskCheck } from '
  * that argues for wider access changes nothing.
  */
 
-import type { AskAvalEnv, ContentBlock, Message, ToolSchema, ToolUseBlock } from "@/lib/ask-aval/anthropic";
-import { AnthropicError } from "@/lib/ask-aval/anthropic";
+import type { AskAvalEnv, ContentBlock, Message, ToolSchema, ToolUseBlock } from "@/lib/ask-aval/model-types";
+import { ModelProviderError } from "@/lib/ask-aval/model-types";
 import { callModel } from "@/lib/ask-aval/model-router";
 import { TOOLS, TOOL_SCHEMAS } from "@/lib/ask-aval/tools";
 import { pmsToolAvailability } from "@/lib/pms/assembly.ts";
 import { isPmsWriteTool } from "@/lib/pms/tool-map.ts";
 import { personaTools, resolvePersona } from "@/lib/ask-aval/personas";
-import { checkFaithfulness, withDerivedNumbers, round2 } from "@/lib/ask-aval/faithfulness";
+import { withDerivedNumbers, round2 } from "@/lib/ask-aval/faithfulness";
 import { stripDashes } from "@/lib/ask-aval/style";
 import { checkUsageBlocked, recordUsage } from "@/lib/ask-aval/usage";
 import { appendAuditEvents } from "@/lib/audit/log";
@@ -115,28 +116,28 @@ const DEFAULT_INVOCATION_BUDGET_MS = 45_000;
  * normal outcomes of a durable run, and a caller that must catch exceptions to
  * tell them apart will eventually conflate one with a real failure.
  */
-export async function advanceTask(
+export async function advanceTask(dbSession: DbSession,
   env: AskAvalEnv,
   organizationId: string,
   taskId: string,
   workerId: string,
-  options: AdvanceOptions = {},
+  options: AdvanceOptions = {}
 ): Promise<AdvanceOutcome> {
   const deadline = Date.now() + (options.invocationBudgetMs ?? DEFAULT_INVOCATION_BUDGET_MS);
 
-  let task = await getTask(organizationId, taskId);
+  let task = await getTask(dbSession, organizationId, taskId);
   if (!task) return { taskId, status: "FAILED", stepsRun: 0, error: "No such task in this workspace." };
   if (task.status === "COMPLETED" || task.status === "FAILED" || task.status === "CANCELLED") {
     return { taskId, status: task.status, stepsRun: 0 };
   }
 
-  const readiness = await planReadiness(task);
+  const readiness = await planReadiness(dbSession, task);
   if(readiness.wait)return {taskId,status:task.status,stepsRun:0};
 
   // A parked task only resumes once its approval has actually been decided.
   let decidedApproval: ApprovalRecord | null = null;
   if (task.status === "WAITING_FOR_APPROVAL") {
-    const resumed = await resumeFromApproval(organizationId, task, workerId);
+    const resumed = await resumeFromApproval(dbSession, organizationId, task, workerId);
     if (!resumed) return { taskId, status: "WAITING_FOR_APPROVAL", stepsRun: 0 };
     task = resumed.task;
     decidedApproval = resumed.approval;
@@ -147,15 +148,15 @@ export async function advanceTask(
   // and the run would return before settling the decision it woke up for.
   if (!decidedApproval) {
     const claimFrom: TaskState = task.status === "RUNNING" || task.status === "WAITING_FOR_TOOL" ? task.status : "QUEUED";
-    if (!(await claimTask(taskId, workerId, claimFrom))) {
+    if (!(await claimTask(dbSession, taskId, workerId, claimFrom))) {
       // Another worker owns it, or the state moved under us. Both mean: not ours.
-      const current = await getTask(organizationId, taskId);
+      const current = await getTask(dbSession, organizationId, taskId);
       return { taskId, status: current?.status ?? "QUEUED", stepsRun: 0 };
     }
-    task = (await getTask(organizationId, taskId))!;
+    task = (await getTask(dbSession, organizationId, taskId))!;
   }
 
-  const persona = await resolvePersona(task.agentId, organizationId);
+  const persona = await resolvePersona(dbSession, task.agentId, organizationId);
   const subject = { organizationId, userId: task.userId, isGuest: organizationId === "org_public_demo" };
   // Two independent narrowings, intersected: the persona's declared subset
   // (framing) and the permission envelope (authority). The envelope is the
@@ -175,23 +176,34 @@ export async function advanceTask(
   let tools: ToolSchema[] = personaTools(TOOLS, persona, "render_answer")
     .filter((tool) => tool.name === "render_answer" || permitted.has(tool.name))
     .filter((tool) => !isPmsWriteTool(tool.name) || pmsAvailability.toolNames.has(tool.name));
+  const evidenceCapabilities = tools.flatMap(tool => {
+    const descriptor = getTool(tool.name);
+    return descriptor && !descriptor.mutates && !descriptor.unimplemented && descriptor.requiredPermission !== 'tasks.manage'
+      ? [{ name: tool.name, purpose: descriptor.summary }] : [];
+  });
 
   const contract=JSON.parse(task.checkJson??'{}');
   const support=['render_answer','read_memory','write_memory','read_task_history'];
   const selected=contract.kind==='plan'?['plan_goal','get_goal_plan']
     :contract.kind==='evidence'?[...(contract.tools??[]),...(contract.tools?.includes('read_document')?['list_documents']:[])]
-    :contract.kind==='delivery'?['read_conversation','list_conversations','get_communication_channels','get_marketing_channels','request_execution_plan','send_external_message','place_call','publish_listing']
+    :contract.kind==='delivery'?['create_maintenance_work_order','read_conversation','list_conversations','get_communication_channels','get_marketing_channels','request_execution_plan','send_external_message','place_call','publish_listing']
     :contract.kind==='preference'?['record_preference']:[];
   // Delivery still needs the specialist's source evidence before composing an
   // action. The persona and permission intersection above remains the ceiling.
   // This adds only registered reads, never additional mutation authority.
   tools=tools.filter(t=>[...support,...selected].includes(t.name)
     || (contract.kind==='delivery' && getTool(t.name)?.mutates===false));
+  if (JSON.parse(task.executionScopeJson).source === 'inbound') {
+    tools = tools.filter(tool => ['render_answer','read_conversation','read_maintenance_context','create_maintenance_work_order','send_external_message'].includes(tool.name));
+  }
 
-  const onboarding = await readOnboarding(task.userId, organizationId);
+  const onboarding = await readOnboarding(dbSession, task.userId, organizationId);
   let system = buildSystem(persona.systemPromptAddition) + "\n" + autonomyInstructions(autonomyMode(onboarding.preferences.autonomy[0]));
   system += `
 Task completion condition: ${task.checkJson}. The harness verifies it independently. A final answer without the required evidence or stored outcome fails. For a root plan, call plan_goal before concluding; inspect failed checks and replan remaining work at most once. Scratchpad notes are available through read_memory/write_memory, never treated as facts or authority.`;
+  if (contract.kind === 'plan') system += `
+Evidence tools available to children retaining this agent: ${JSON.stringify(evidenceCapabilities)}.
+Use these exact tool names in check.tools; do not invent search tools. For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
   if(readiness.context)system += '\nCurrent dependency/plan results: '+readiness.context.slice(0,16000);
   const messages: Message[] = safeParseTranscript(task.transcriptJson, task.goal);
   // Evidence must survive invocation boundaries just like the conversation.
@@ -200,12 +212,12 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
   const seenNumbers = evidenceNumbersFromTranscript(messages);
   // A parent summary may cite checked child evidence. Scratchpad prose and
   // failed/unrelated tasks cannot supply new financial figures.
-  const dependencyPlan = await goalPlan(organizationId, task.parentTaskId ?? task.id);
+  const dependencyPlan = await goalPlan(dbSession, organizationId, task.parentTaskId ?? task.id);
   const ownNode = dependencyPlan?.nodes.find(node => node.id === task.id);
   const dependencyKeys: string[] = ownNode ? JSON.parse(ownNode.dependencies) : [];
   for (const node of dependencyPlan?.nodes ?? []) {
     if (node.status !== 'COMPLETED' || (task.parentTaskId && !dependencyKeys.includes(node.key))) continue;
-    const child = await getTask(organizationId, node.id);
+    const child = await getTask(dbSession, organizationId, node.id);
     if (child) evidenceNumbersFromTranscript(safeParseTranscript(child.transcriptJson, child.goal)).forEach(number => seenNumbers.add(number));
   }
   const audit: AuditEvent[] = [];
@@ -215,10 +227,10 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
 
   const finish = async (status: TaskState, extra: { resultJson?: string; error?: string; approvalId?: string } = {}): Promise<AdvanceOutcome> => {
     await Promise.all([
-      recordUsage({ orgId: organizationId, userId: task!.userId }, inputTokens, outputTokens),
-      audit.length ? appendAuditEvents(organizationId, audit) : Promise.resolve(null),
+      recordUsage(dbSession, { orgId: organizationId, userId: task!.userId }, inputTokens, outputTokens),
+      audit.length ? appendAuditEvents(dbSession, organizationId, audit) : Promise.resolve(null),
     ]);
-    const saved = await updateTask(task!, workerId, {
+    const saved = await updateTask(dbSession, task!, workerId, {
       status,
       transcriptJson: JSON.stringify(messages),
       stepCount: task!.stepCount + stepsRun,
@@ -229,7 +241,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
       releaseLease: true,
     });
     if (!saved) {
-      const current=await getTask(organizationId,taskId);
+      const current=await getTask(dbSession, organizationId,taskId);
       return {taskId,status:current?.status??'FAILED',stepsRun,error:'The terminal result was not saved because the task lease changed.'};
     }
     return { taskId, status, stepsRun, approvalId: extra.approvalId, error: extra.error };
@@ -237,7 +249,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
 
   /** Persist one complete reason/action/observation step before reasoning again. */
   const checkpoint = async (): Promise<AdvanceOutcome | null> => {
-    const saved = await updateTask(task, workerId, {
+    const saved = await updateTask(dbSession, task, workerId, {
       transcriptJson: JSON.stringify(messages),
       stepCount: task.stepCount + stepsRun,
       tokensUsed: task.tokensUsed + inputTokens + outputTokens,
@@ -245,7 +257,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
       nextAttemptAt: null,
     });
     if (saved) return null;
-    const current = await getTask(organizationId, taskId);
+    const current = await getTask(dbSession, organizationId, taskId);
     return {
       taskId,
       status: current?.status ?? "RUNNING",
@@ -256,56 +268,57 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
 
   const review = async (phase: ReviewPacket['phase'], proposal: unknown, stepIndex: number) => {
     if (phase === 'plan') {
-      try { await validateGoalPlanProposal(task!, (proposal as { tasks?: unknown })?.tasks); }
+      try { await validateGoalPlanProposal(dbSession, task!, (proposal as { tasks?: unknown })?.tasks); }
       catch (error) { return { phase, reviewer: 'structural-preflight', exitCode: 1, problems: [error instanceof Error ? error.message : 'Invalid goal plan.'] }; }
     }
-    const packet = await semanticPacket(task!, messages, phase, proposal);
+    const packet = await semanticPacket(dbSession, task!, messages, phase, proposal);
     const params = { system: SEMANTIC_REVIEW_SYSTEM, messages: [{ role: 'user' as const, content: JSON.stringify(packet) }], tools: [SEMANTIC_REVIEW_TOOL], tool_choice: { type: 'tool' as const, name: 'semantic_verdict' }, max_tokens: 1800 };
     const proposalDigest = await digestPayload(proposal);
     const scope = { phase, proposalDigest, reviewer: 'independent-session-v1' };
-    const fresh = await getTask(organizationId, taskId);
+    const fresh = await getTask(dbSession, organizationId, taskId);
     const timeout = Math.min(25_000, deadline - Date.now(), (fresh?.deadlineAt?.getTime() ?? 0) - Date.now());
     const remaining = (fresh?.maxTokens ?? 0) - task!.tokensUsed - inputTokens - outputTokens;
-    if (!fresh || fresh.cancelRequested || fresh.leaseOwner !== workerId || timeout <= 0 ||
+    if (!fresh || fresh.cancelRequested || fresh.leaseOwner !== workerId || fresh.leaseGeneration !== task!.leaseGeneration || (fresh.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || timeout <= 0 ||
         byteCount(params) + params.max_tokens > Math.min(MAX_CONTEXT_BYTES, remaining) ||
-        await checkUsageBlocked(env, { orgId: organizationId, userId: task!.userId })) {
+        await checkUsageBlocked(dbSession, env, { orgId: organizationId, userId: task!.userId })) {
       return { ...scope, exitCode: 1, problems: ['Semantic review could not run within the available lease, time, context, or token budget.'] };
     }
     const frame = async (value: unknown) => {
       const contextJson = JSON.stringify(value);
-      await getDb().insert(agentModelContexts).values({ id: crypto.randomUUID(), organizationId, taskId, stepIndex, contextJson, digest: await digestPayload(contextJson), createdAt: new Date() });
+      await dbSession.db.insert(agentModelContexts).values({ id: crypto.randomUUID(), organizationId, taskId, stepIndex, contextJson, digest: await digestPayload(contextJson), createdAt: new Date() });
     };
     await frame({ kind: 'semantic_request', ...scope, ...params });
     try {
-      const response = await callModel(env, organizationId, { ...params, timeout_ms: timeout });
+      const response = await callModel(dbSession, env, organizationId, { ...params, timeout_ms: timeout });
       inputTokens += response.usage.input_tokens;
       outputTokens += response.usage.output_tokens;
       await frame({ kind: 'semantic_response', ...scope, response });
-      await persistStep({ taskId, organizationId, stepIndex, kind: 'model_call', toolName: 'semantic_verdict', modelProvider: response.routing?.providerId, modelName: response.routing?.model, resultDigest: await digestPayload(response.content) });
+      await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'model_call', toolName: 'semantic_verdict', modelProvider: response.routing?.providerId, modelName: response.routing?.model, resultDigest: await digestPayload(response.content) });
       audit.push({ kind: 'model_call', label: 'semantic_verdict', payloadDigest: await digestPayload(response.content), count: stepIndex });
-      const current = await getTask(organizationId, taskId);
-      if (!current || current.cancelRequested || current.leaseOwner !== workerId || Date.now() >= Math.min(deadline, current.deadlineAt?.getTime() ?? 0) || task!.tokensUsed + inputTokens + outputTokens > current.maxTokens)
+      const current = await getTask(dbSession, organizationId, taskId);
+      if (!current || current.cancelRequested || current.leaseOwner !== workerId || current.leaseGeneration !== task!.leaseGeneration || (current.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || Date.now() >= Math.min(deadline, current.deadlineAt?.getTime() ?? 0) || task!.tokensUsed + inputTokens + outputTokens > current.maxTokens)
         return { ...scope, exitCode: 1, problems: ['The task stopped or exhausted its budget during semantic review.'] };
       return { ...scope, ...parseSemanticVerdict(response, packet) };
     } catch (err) {
       await frame({ kind: 'semantic_error', ...scope, timeoutMs: timeout,
-        error: err instanceof AnthropicError ? err.message : 'Semantic review transport failed.' });
-      return { ...scope, exitCode: 1, problems: [err instanceof AnthropicError ? `Semantic review unavailable: ${err.message}` : 'Semantic review failed; completion was withheld.'] };
+        error: err instanceof ModelProviderError ? err.message : 'Semantic review transport failed.' });
+      return { ...scope, exitCode: 1, problems: [err instanceof ModelProviderError ? `Semantic review unavailable: ${err.message}` : 'Semantic review failed; completion was withheld.'] };
     }
   };
 
   const completeAnswer = async (final: ToolUseBlock, stepIndex: number): Promise<AdvanceOutcome | null> => {
     const answer = stripDashes(final.input);
-    const gate = checkFaithfulness(answer, withDerivedNumbers(seenNumbers));
+    const packet = await semanticPacket(dbSession, task, messages, 'answer', answer);
+    const gate = checkDocumentAnswerNumbers(answer, withDerivedNumbers(seenNumbers), packet.sources);
     if (!gate.ok) {
       audit.push({ kind: 'verdict', label: 'fail', payloadDigest: await digestPayload(gate.unsupported), count: gate.unsupported.length });
       return finish('FAILED', { error: "The conclusion referenced figures that aren't in the underlying data, so it was withheld." });
     }
-    const verification = await checkTask(task, messages, stepIndex, () => review('answer', answer, stepIndex));
-    await persistStep({ taskId, organizationId, stepIndex, kind: 'verification_check', policyEffect: verification.exitCode ? 'deny' : 'allow', resultDigest: await digestPayload(verification), error: verification.exitCode ? verification.problems.join(' ') : undefined });
+    const verification = await checkTask(dbSession, task, messages, stepIndex, () => review('answer', answer, stepIndex));
+    await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'verification_check', policyEffect: verification.exitCode ? 'deny' : 'allow', resultDigest: await digestPayload(verification), error: verification.exitCode ? verification.problems.join(' ') : undefined });
     messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: final.id, ...(verification.exitCode ? { is_error: true } : {}), content: JSON.stringify(verification) }] });
     if (verification.exitCode !== 0) {
-      if (await failedCheckCount(organizationId, taskId) > MAX_CHECK_REPAIRS) return finish('FAILED', { error: 'Completion checks failed after bounded repair: ' + verification.problems.join(' ') });
+      if (await failedCheckCount(dbSession, organizationId, taskId) > MAX_CHECK_REPAIRS) return finish('FAILED', { error: 'Completion checks failed after bounded repair: ' + verification.problems.join(' ') });
       return checkpoint();
     }
     audit.push({ kind: 'verdict', label: 'pass', payloadDigest: await digestPayload([]), count: 0 });
@@ -320,7 +333,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
     // else. Until this happens the transcript ends on an unanswered tool_use,
     // which no provider will accept as a valid conversation.
     if (decidedApproval) {
-      await settleDecidedApproval({
+      await settleDecidedApproval(dbSession, {
         organizationId, taskId, task, subject, messages, seenNumbers, audit, approval: decidedApproval,
       });
       // The approved side effect and its observation must become durable
@@ -332,7 +345,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
     }
 
     while (true) {
-      const fresh = await getTask(organizationId, taskId);
+      const fresh = await getTask(dbSession, organizationId, taskId);
       if (!fresh) return { taskId, status: "FAILED", stepsRun, error: "Task disappeared mid-run." };
 
       task.maxSteps = fresh.maxSteps;
@@ -358,7 +371,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
       // step nine, and a long run is exactly where an unchecked cap costs the
       // most. Skipped for a workspace on its own credential, same as the chat
       // loop — see lib/ask-aval/usage.ts on why.
-      const blocked = await checkUsageBlocked(env, { orgId: organizationId, userId: task.userId });
+      const blocked = await checkUsageBlocked(dbSession, env, { orgId: organizationId, userId: task.userId });
       if (blocked) {
         return finish("FAILED", {
           error: blocked === "token_balance"
@@ -369,7 +382,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
       if (Date.now() > deadline || (options.maxStepsThisInvocation !== undefined && stepsRun >= options.maxStepsThisInvocation)) {
         // Yield without a terminal state: the task stays claimable and the
         // next invocation picks it up from the persisted transcript.
-        await updateTask(task, workerId, {
+        await updateTask(dbSession, task, workerId, {
           status: "QUEUED",
           transcriptJson: JSON.stringify(messages),
           stepCount: task.stepCount + stepsRun,
@@ -379,12 +392,12 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
           releaseLease: true,
         });
         await Promise.all([
-          recordUsage({ orgId: organizationId, userId: task.userId }, inputTokens, outputTokens),
-          audit.length ? appendAuditEvents(organizationId, audit) : Promise.resolve(null),
+          recordUsage(dbSession, { orgId: organizationId, userId: task.userId }, inputTokens, outputTokens),
+          audit.length ? appendAuditEvents(dbSession, organizationId, audit) : Promise.resolve(null),
         ]);
         return { taskId, status: "QUEUED", stepsRun };
       }
-      if (!(await heartbeat(taskId, workerId))) {
+      if (!(await heartbeat(dbSession, taskId, workerId, task.leaseGeneration))) {
         return { taskId, status: fresh.status, stepsRun, error: "Lease lost to another worker." };
       }
 
@@ -404,11 +417,11 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
       const contextBudget=Math.min(MAX_CONTEXT_BYTES-overhead,remainingTokens-overhead-256);
       if(contextBudget<1500)return finish('FAILED',{error:'Insufficient token budget for the next context and response.'});
       const assembled=assembleContext(messages,contextBudget);
-      if(assembled.evicted)await persistStep({taskId,organizationId,stepIndex,kind:'context_evicted',error:`${assembled.evicted} older messages retained in full transcript and omitted from this model request.`});
+      if(assembled.evicted)await persistStep(dbSession, {taskId,organizationId,stepIndex,kind:'context_evicted',error:`${assembled.evicted} older messages retained in full transcript and omitted from this model request.`});
       const outputBudget=Math.min(2048,remainingTokens-overhead-byteCount(assembled.messages));
       const contextJson=JSON.stringify({system,messages:assembled.messages,tools,outputBudget,evicted:assembled.evicted});
-      await getDb().insert(agentModelContexts).values({id:crypto.randomUUID(),organizationId,taskId,stepIndex,contextJson,digest:await digestPayload(contextJson),createdAt:new Date()});
-      const res = await callModel(env, organizationId, {
+      await dbSession.db.insert(agentModelContexts).values({id:crypto.randomUUID(),organizationId,taskId,stepIndex,contextJson,digest:await digestPayload(contextJson),createdAt:new Date()});
+      const res = await callModel(dbSession, env, organizationId, {
         system,
         messages:assembled.messages,
         tools,
@@ -421,11 +434,20 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
       inputTokens += res.usage.input_tokens;
       outputTokens += res.usage.output_tokens;
       stepsRun++;
+      // Inference committed the claim and released the transaction. Re-check
+      // ownership before saving a response or executing anything it proposed.
+      const afterModel = await getTask(dbSession, organizationId, taskId);
+      if (!afterModel || afterModel.leaseOwner !== workerId ||
+          afterModel.leaseGeneration !== task.leaseGeneration ||
+          (afterModel.leaseExpiresAt?.getTime() ?? 0) <= Date.now()) {
+        return { taskId, status: afterModel?.status ?? "FAILED", stepsRun, error: "Lease lost during inference." };
+      }
+      if (afterModel.cancelRequested) return finish("CANCELLED");
       const responseJson=JSON.stringify({kind:"model_response",response:res});
-      await getDb().insert(agentModelContexts).values({id:crypto.randomUUID(),organizationId,taskId,stepIndex,contextJson:responseJson,digest:await digestPayload(responseJson),createdAt:new Date()});
+      await dbSession.db.insert(agentModelContexts).values({id:crypto.randomUUID(),organizationId,taskId,stepIndex,contextJson:responseJson,digest:await digestPayload(responseJson),createdAt:new Date()});
       if(Date.now()>=(fresh.deadlineAt?.getTime()??Infinity))return finish("FAILED",{error:"The task reached its total wall-clock limit before its proposed actions could run."});
 
-      await persistStep({
+      await persistStep(dbSession, {
         taskId, organizationId, stepIndex, kind: "model_call",
         modelProvider: res.routing?.providerId,
         modelName: res.routing?.model,
@@ -463,11 +485,11 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
       for (const use of toolUses) {
         if (use.name === 'plan_goal') {
           const verification = await review('plan', use.input, stepIndex);
-          await getDb().insert(agentChecks).values({ id: crypto.randomUUID(), organizationId, taskId, stepIndex, exitCode: verification.exitCode, outputJson: JSON.stringify(verification), createdAt: new Date() });
-          await persistStep({ taskId, organizationId, stepIndex, kind: 'verification_check', toolName: 'plan_goal', policyEffect: verification.exitCode ? 'deny' : 'allow', resultDigest: await digestPayload(verification), error: verification.exitCode ? verification.problems.join(' ') : undefined });
+          await dbSession.db.insert(agentChecks).values({ id: crypto.randomUUID(), organizationId, taskId, stepIndex, exitCode: verification.exitCode, outputJson: JSON.stringify(verification), createdAt: new Date() });
+          await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'verification_check', toolName: 'plan_goal', policyEffect: verification.exitCode ? 'deny' : 'allow', resultDigest: await digestPayload(verification), error: verification.exitCode ? verification.problems.join(' ') : undefined });
           if (verification.exitCode) {
             results.push({ type: 'tool_result', tool_use_id: use.id, content: JSON.stringify(verification), is_error: true });
-            if (await failedCheckCount(organizationId, taskId) > MAX_CHECK_REPAIRS) {
+            if (await failedCheckCount(dbSession, organizationId, taskId) > MAX_CHECK_REPAIRS) {
               messages.push({ role: 'user', content: results });
               return finish('FAILED', { error: 'Plan checks failed after bounded repair: ' + verification.problems.join(' ') });
             }
@@ -477,7 +499,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
           // before reserving budgets for child tasks; a lost lease stops here.
           const lost = await checkpoint(); if (lost) return lost;
         }
-        const outcome = await executeTool({
+        const outcome = await executeTool(dbSession, {
           toolName: use.name,
           args: use.input,
           subject,
@@ -489,7 +511,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
 
         if (result.status === "ok") {
           result.numbers.forEach((n) => seenNumbers.add(round2(n)));
-          await persistStep({
+          await persistStep(dbSession, {
             taskId, organizationId, stepIndex, kind: "tool_call", toolName: use.name,
             policyEffect: "allow", riskLevel: result.tool.riskLevel,
             argsDigest: await digestPayload(redactArguments(use.input)),
@@ -501,20 +523,21 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
         }
 
         if (result.status === "needs_approval") {
-          const approval = await requestApproval({
+          const approval = await requestApproval(dbSession, {
             taskId, organizationId, stepIndex,
+            propertyId: typeof use.input.property_id === "string" ? use.input.property_id : undefined,
             tool: result.tool,
             // Bind the human decision to this exact model proposal. Tool name
             // alone is insufficient because one assistant message may contain
             // two calls to the same financial tool with different arguments.
-            evidence: { toolUseId: use.id, goal: task.goal, agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(use.input, task.userId, organizationId) : {}), reason: result.reason },
+            evidence: { toolUseId: use.id, goal: task.goal, agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
             amountCents: typeof use.input.amount_cents === "number" ? use.input.amount_cents : undefined,
             currency: typeof use.input.currency === "string" ? use.input.currency : undefined,
             tier: result.tier,
             requiredApprovals: result.requiredApprovals,
             policyVersion: result.policyVersion,
           });
-          await persistStep({
+          await persistStep(dbSession, {
             taskId, organizationId, stepIndex, kind: "approval_requested", toolName: use.name,
             policyEffect: "require_approval", riskLevel: result.tool.riskLevel,
             argsDigest: await digestPayload(redactArguments(use.input)),
@@ -535,7 +558,7 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
           : result.status === "duplicate" ? "This operation already ran. It was not repeated."
           : `Tool failed after ${result.attempts} attempt(s): ${result.reason}. Do not guess the value.`;
 
-        await persistStep({
+        await persistStep(dbSession, {
           taskId, organizationId, stepIndex,
           kind: result.status === "denied" ? "policy_deny" : "error",
           toolName: use.name,
@@ -553,15 +576,15 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
       if(toolUses.some(u=>u.name==='plan_goal')&&results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name==='plan_goal'&&u.id===r.tool_use_id)))return finish('WAITING_FOR_TOOL');
     }
   } catch (err) {
-    const message = err instanceof AnthropicError ? err.message : "The agent runtime failed.";
+    const message = err instanceof ModelProviderError ? err.message : "The agent runtime failed.";
     console.error("agent_runtime_error", { taskId, err });
     audit.push({ kind: "task_failed", label: task.agentId, payloadDigest: await digestPayload(message), count: stepsRun });
-    if (err instanceof AnthropicError && shouldRetryTask(err.retryable, task.executionAttempts)) {
+    if (err instanceof ModelProviderError && shouldRetryTask(err.retryable, task.executionAttempts)) {
       await Promise.all([
-        recordUsage({ orgId: organizationId, userId: task.userId }, inputTokens, outputTokens),
-        appendAuditEvents(organizationId, audit),
+        recordUsage(dbSession, { orgId: organizationId, userId: task.userId }, inputTokens, outputTokens),
+        appendAuditEvents(dbSession, organizationId, audit),
       ]);
-      const scheduled = await scheduleTaskRetry(task, workerId, message);
+      const scheduled = await scheduleTaskRetry(dbSession, task, workerId, message);
       return { taskId, status: scheduled ? "QUEUED" : "RUNNING", stepsRun, error: scheduled ? undefined : "Lease lost while scheduling retry." };
     }
     return finish("FAILED", { error: message });
@@ -575,19 +598,19 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
  * in the transcript, so the agent can conclude with what it has rather than
  * dying because a person said no to one action.
  */
-async function resumeFromApproval(
+async function resumeFromApproval(dbSession: DbSession,
   organizationId: string,
   task: TaskRecord,
   workerId: string,
 ): Promise<{ task: TaskRecord; approval: ApprovalRecord } | null> {
-  const approval = await latestApprovalForTask(organizationId, task.id);
+  const approval = await latestApprovalForTask(dbSession, organizationId, task.id);
   // Still pending: there is nothing to resume, and claiming the task would
   // only take a lease on work that cannot proceed.
   if (!approval || approval.status === "pending") return null;
 
-  const claimed = await claimTask(task.id, workerId, "WAITING_FOR_APPROVAL");
+  const claimed = await claimTask(dbSession, task.id, workerId, "WAITING_FOR_APPROVAL");
   if (!claimed) return null;
-  const fresh = await getTask(organizationId, task.id);
+  const fresh = await getTask(dbSession, organizationId, task.id);
   return fresh ? { task: fresh, approval } : null;
 }
 
@@ -605,7 +628,7 @@ async function resumeFromApproval(
  * a read is idempotent by construction, and a mutating one recomputes the same
  * key and is suppressed as a duplicate rather than executed twice.
  */
-async function settleDecidedApproval(input: {
+async function settleDecidedApproval(dbSession: DbSession, input: {
   organizationId: string;
   taskId: string;
   task: TaskRecord;
@@ -630,7 +653,7 @@ async function settleDecidedApproval(input: {
       const refusal = approval.status === "rejected"
         ? `A person rejected this action${approval.decisionNote ? `: ${approval.decisionNote}` : ""}. It was not executed. Continue the goal without it and say plainly that it was refused.`
         : "The approval request expired before anyone decided it. It was not executed.";
-      await persistStep({
+      await persistStep(dbSession, {
         taskId, organizationId, stepIndex: approval.stepIndex, kind: "approval_decided",
         toolName: use.name, policyEffect: "require_approval", riskLevel: approval.riskLevel, error: refusal,
       });
@@ -643,12 +666,12 @@ async function settleDecidedApproval(input: {
     // policy engine re-runs: an approval from an hour ago is not evidence the
     // permission still stands now.
     const outcome = isGatedCall
-      ? await executeApprovedTool({
+      ? await executeApprovedTool(dbSession, {
           toolName: use.name, args: use.input, subject,
           context: { personaId: task.agentId, delegationDepth: task.delegationDepth },
           task: { id: taskId, stepIndex: approval.stepIndex, approvalId: approval.id, policyVersion: approval.policyVersion },
         })
-      : await executeTool({
+      : await executeTool(dbSession, {
           toolName: use.name, args: use.input, subject,
           context: { personaId: task.agentId, delegationDepth: task.delegationDepth },
           task: { id: taskId, stepIndex: approval.stepIndex },
@@ -658,7 +681,7 @@ async function settleDecidedApproval(input: {
 
     if (result.status === "ok") {
       result.numbers.forEach((n) => seenNumbers.add(round2(n)));
-      await persistStep({
+      await persistStep(dbSession, {
         taskId, organizationId, stepIndex: approval.stepIndex,
         kind: isGatedCall ? "approval_decided" : "tool_call", toolName: use.name,
         policyEffect: "allow", riskLevel: result.tool.riskLevel,
@@ -678,7 +701,7 @@ async function settleDecidedApproval(input: {
       : result.status === "duplicate" ? "This operation already ran. It was not repeated."
       : result.status === "needs_approval" ? "This action still requires approval and was not executed."
       : `Tool failed after ${result.attempts} attempt(s): ${result.reason}. Do not guess the value.`;
-    await persistStep({
+    await persistStep(dbSession, {
       taskId, organizationId, stepIndex: approval.stepIndex,
       kind: result.status === "denied" ? "policy_deny" : "error", toolName: use.name,
       denyCode: result.status === "denied" ? result.code : undefined, error: message,
@@ -728,8 +751,8 @@ function safeParseTranscript(json: string, goal: string): Message[] {
 }
 
 /** Trace loss is execution loss: stop rather than continue with a false audit. */
-async function persistStep(step: Parameters<typeof appendStep>[0]): Promise<void> {
-  if (!(await appendStep(step))) {
+async function persistStep(dbSession: DbSession, step: Parameters<typeof appendStep>[1]): Promise<void> {
+  if (!(await appendStep(dbSession, step))) {
     throw new Error(`Could not persist agent step ${step.stepIndex} (${step.kind}).`);
   }
 }

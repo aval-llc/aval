@@ -1,11 +1,12 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * Shared tool-calling loop behind every Ask Aval endpoint (question answers
  * and document drafts alike). Bounded, faithfulness-gated, and metered —
  * callers only supply a system prompt and the opening message.
  */
 
-import { AnthropicError, type AskAvalEnv, type Message, type ContentBlock, type ToolUseBlock, type ToolSchema } from "./anthropic";
-import { callModel } from "./model-router";
+import { ModelProviderError, type AskAvalEnv, type Message, type ContentBlock, type ToolUseBlock, type ToolSchema } from "./model-types";
+import { callModel, ModelConfigurationError } from "./model-router";
 import { TOOLS } from "./tools";
 import { checkUsageBlocked, recordUsage, type AskAvalSession } from "./usage";
 import { executeTool } from "@/lib/agents/executor";
@@ -32,7 +33,7 @@ export interface LoopPolicyContext {
   isGuest: boolean;
 }
 
-export async function runAskAvalLoop(
+export async function runAskAvalLoop(dbSession: DbSession,
   env: AskAvalEnv,
   session: AskAvalSession,
   system: string,
@@ -44,7 +45,7 @@ export async function runAskAvalLoop(
   policy: LoopPolicyContext = { isGuest: false },
   onProgress?: (progress: AskProgress) => void,
 ): Promise<Response> {
-  const blockReason = await checkUsageBlocked(env, session);
+  const blockReason = await checkUsageBlocked(dbSession, env, session);
   if (blockReason === "token_balance") return json({ error: "Aval has run out of tokens for this billing period. Purchase more to continue.", code: "token_balance" }, 402);
   if (blockReason === "daily_cap") return json({ error: "Aval has reached its usage cap for today. Try again tomorrow.", code: "daily_cap" }, 429);
 
@@ -60,7 +61,7 @@ export async function runAskAvalLoop(
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       onProgress?.({ phase: "thinking", tool: toolsUsed.at(-1) });
-      const res = await callModel(env, session.orgId, {
+      const res = await callModel(dbSession, env, session.orgId, {
         system,
         messages,
         tools,
@@ -86,7 +87,7 @@ export async function runAskAvalLoop(
           // the record has to show the gate refusing, not only the times it
           // approved. Only the count is stored, never the rejected figures.
           auditEvents.push({ kind: "verdict", label: "fail", payloadDigest: await digestPayload(gate.unsupported), count: gate.unsupported.length });
-          await Promise.all([recordUsage(session, inputTokens, outputTokens), appendAuditEvents(session.orgId, auditEvents)]);
+          await Promise.all([recordUsage(dbSession, session, inputTokens, outputTokens), appendAuditEvents(dbSession, session.orgId, auditEvents)]);
           return json({ error: "The answer referenced figures that aren't in the underlying data, so it was withheld." }, 502);
         }
         // A pass has no unsupported figures by definition, so the digest
@@ -94,7 +95,7 @@ export async function runAskAvalLoop(
         // carry on the success branch.
         auditEvents.push({ kind: "verdict", label: "pass", payloadDigest: await digestPayload([]), count: 0 });
         auditEvents.push({ kind: "answer", label: "", payloadDigest: await digestPayload(answer), count: toolsUsed.length });
-        await Promise.all([recordUsage(session, inputTokens, outputTokens), appendAuditEvents(session.orgId, auditEvents)]);
+        await Promise.all([recordUsage(dbSession, session, inputTokens, outputTokens), appendAuditEvents(dbSession, session.orgId, auditEvents)]);
         return json({ ...answer, tools_used: toolsUsed });
       }
 
@@ -117,7 +118,7 @@ export async function runAskAvalLoop(
         // a tool_use block naming an ungranted tool is denied here, whatever
         // produced it and whatever a document it just read asked for.
         onProgress?.({ phase: "tool", tool: use.name });
-        const outcome = await executeTool({
+        const outcome = await executeTool(dbSession, {
           toolName: use.name,
           args: use.input,
           subject: { organizationId: session.orgId, userId: session.userId, isGuest: policy.isGuest },
@@ -146,11 +147,14 @@ export async function runAskAvalLoop(
       messages.push({ role: "user", content: results });
     }
 
-    await recordUsage(session, inputTokens, outputTokens);
+    await recordUsage(dbSession, session, inputTokens, outputTokens);
     return json({ error: "Could not resolve the question within the tool budget." }, 504);
   } catch (err) {
-    await recordUsage(session, inputTokens, outputTokens);
-    if (err instanceof AnthropicError) {
+    await recordUsage(dbSession, session, inputTokens, outputTokens);
+    if (err instanceof ModelConfigurationError) {
+      return json({ error: err.message, code: "model_provider_required", retryable: false }, 409);
+    }
+    if (err instanceof ModelProviderError) {
       return json({ error: err.message, retryable: err.retryable }, err.status >= 500 ? 502 : 400);
     }
     console.error("ask_aval_unhandled", err);

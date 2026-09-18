@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { getDb } from '@/db';
-import { agentTasks } from '@/db/schema';
+import type { DbSession } from "@/db/postgres/session";
+import { agentTasks } from "@/db/postgres/schema";
 /**
  * Opening a delegated child task (§19).
  *
@@ -31,21 +31,21 @@ export type DelegationResult = { ok: true; task: TaskRecord } | DelegationRefusa
  * authority in this system belongs to a person, and a delegated run must not
  * be able to act on behalf of someone the original request never involved.
  */
-export async function delegate(parent: TaskRecord, toPersonaId: string, goal: string): Promise<DelegationResult> {
-  const fresh = await getTask(parent.organizationId, parent.id);
+export async function delegate(dbSession: DbSession, parent: TaskRecord, toPersonaId: string, goal: string): Promise<DelegationResult> {
+  const fresh = await getTask(dbSession, parent.organizationId, parent.id);
   if (!fresh || ['FAILED','COMPLETED','CANCELLED'].includes(fresh.status)) return {ok:false,code:'cancelled',reason:'The parent is no longer active.'};
   parent = fresh;
   const check = checkDelegation(parent, toPersonaId);
   if (!check.ok) return check;
 
   const budget = childBudget(parent);
-  const reserved = await getDb().update(agentTasks).set({
+  const reserved = await dbSession.db.update(agentTasks).set({
     maxSteps:sql`${agentTasks.maxSteps} - ${budget.maxSteps}`,
     maxTokens:sql`${agentTasks.maxTokens} - ${budget.maxTokens}`,
   }).where(and(eq(agentTasks.id,parent.id),eq(agentTasks.organizationId,parent.organizationId),eq(agentTasks.maxSteps,parent.maxSteps),eq(agentTasks.maxTokens,parent.maxTokens),eq(agentTasks.stepCount,parent.stepCount),eq(agentTasks.cancelRequested,false))).returning({id:agentTasks.id});
   if (!reserved.length) return {ok:false,code:'no_budget',reason:'Another worker changed the parent budget. Replan from current state.'};
   // A crash after reservation can leave unused capacity, but cannot mint more budget.
-  const task = await createTask({
+  const task = await createTask(dbSession, {
     executionScope: JSON.parse(parent.executionScopeJson),
     organizationId: parent.organizationId,
     userId: parent.userId,

@@ -1,18 +1,15 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import type { AgentWorkerEnv } from "@/lib/agents/worker";
+import { authenticateSupabaseRequest, appendResponseCookies } from "@/lib/auth/supabase";
+import { withVerifiedIdentityHeaders, withoutUntrustedIdentityHeaders } from "@/lib/auth/request-identity";
+import type { AvalRuntimeBindings } from "@/lib/runtime/bindings";
 
-interface Env {
+interface Env extends AvalRuntimeBindings {
   ASSETS: Fetcher;
-  DB: D1Database;
-  ANTHROPIC_API_KEY?: string;
-  ANTHROPIC_MODEL?: string;
-  AI_DAILY_CALL_CAP?: string;
-  STRIPE_SECRET_KEY?: string;
-  AGENT_HEALTH_TOKEN?: string;
-  AGENT_ALERT_WEBHOOK_URL?: string;
-  AGENT_ALERT_WEBHOOK_TOKEN?: string;
+  HYPERDRIVE: { connectionString: string };
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -48,20 +45,31 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    // Public callers can supply arbitrary headers. Strip all identity-shaped
+    // headers, validate the HttpOnly Supabase session, then add a private
+    // identity envelope for the Vinext route and Server Component layers.
+    let requestHeaders = withoutUntrustedIdentityHeaders(request.headers);
+    let responseCookies: string[] = [];
+    const staticAsset = url.pathname.startsWith("/_next/") || url.pathname.startsWith("/assets/") || url.pathname === "/favicon.ico";
+    const authMutation = ["/api/auth/login", "/api/auth/signup", "/api/auth/logout", "/api/auth/forgot-password", "/api/auth/resend-verification", "/api/auth/confirm"].includes(url.pathname);
+    if (!staticAsset && !authMutation) {
+      const authentication = await authenticateSupabaseRequest(request, env);
+      if (authentication) {
+        requestHeaders = withVerifiedIdentityHeaders(requestHeaders, authentication.identity);
+        responseCookies = authentication.responseCookies;
+      }
+    }
+    const appRequest = new Request(request, { headers: requestHeaders });
+    const response = await handler.fetch(appRequest, env, ctx);
+    return appendResponseCookies(response, responseCookies);
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     // Request waitUntil gives new tasks a fast start; this minute sweep is the
-    // durable continuation and crash-recovery path. Keep the import lazy: the
-    // regular fetch bundle can be loaded by non-Workers render/test harnesses
-    // without eagerly resolving the Cloudflare-only D1 environment module.
-    ctx.waitUntil(import("@/lib/integrations/sync-worker").then(({ runImportWorker }) =>
-      runImportWorker(env as unknown as Record<string, string | undefined>),
-    ));
-    ctx.waitUntil(import("@/lib/communications/poll-worker").then(({ pollCommunicationSources }) => pollCommunicationSources()));
-    ctx.waitUntil(import("@/lib/agents/worker").then(({ runAgentWorkerBatch }) =>
-      runAgentWorkerBatch(env as unknown as AgentWorkerEnv, "scheduled"),
+    // durable continuation and crash-recovery path. The sweep resolves tenant
+    // work with the system role and opens one RLS-scoped session per tenant.
+    ctx.waitUntil(import("@/lib/workers/scheduled-sweep").then(({ runScheduledSweep }) =>
+      runScheduledSweep(env),
     ));
   },
 };

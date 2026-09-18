@@ -120,7 +120,7 @@ export function FinancialAgentControls() {
           <h2>{t("FinancialAgentControls.title")}</h2>
         </div>
         <span className={`financial-policy-status ${active ? "active" : "inactive"}`}>
-          {active ? <Check width={13} height={13}/> : <Lock width={13} height={13}/>} 
+          {active ? <Check width={13} height={13}/> : <Lock width={13} height={13}/>}
           {t(`FinancialAgentControls.status_${policy.status}`)}
         </span>
       </div>

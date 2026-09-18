@@ -17,8 +17,8 @@
  */
 
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { operationsConflicts } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { operationsConflicts } from "@/db/postgres/schema";
 import { MANUAL_SOURCE, type ConflictEntityType } from "./types";
 
 export { planMerge } from "./merge";
@@ -36,14 +36,14 @@ import type { FieldConflict } from "./merge";
  * it was a decision and re-flagging it every night would undo that decision by
  * attrition.
  */
-export async function recordConflicts(
+export async function recordConflicts(dbSession: DbSession,
   organizationId: string,
   entityType: ConflictEntityType,
   entityId: string,
-  conflicts: FieldConflict[],
+  conflicts: FieldConflict[]
 ): Promise<number> {
   if (conflicts.length === 0) return 0;
-  const db = getDb();
+  const db = dbSession.db;
   const now = new Date();
 
   for (const conflict of conflicts) {
@@ -96,8 +96,8 @@ export interface ConflictRow {
 }
 
 /** Open conflicts for a workspace, newest first. */
-export async function listOpenConflicts(organizationId: string, limit = 100): Promise<ConflictRow[]> {
-  return getDb()
+export async function listOpenConflicts(dbSession: DbSession, organizationId: string, limit = 100): Promise<ConflictRow[]> {
+  return dbSession.db
     .select()
     .from(operationsConflicts)
     .where(and(eq(operationsConflicts.organizationId, organizationId), eq(operationsConflicts.status, "open")))
@@ -113,12 +113,12 @@ export async function listOpenConflicts(organizationId: string, limit = 100): Pr
  * column's real type, and coercing a text value back into a typed column here
  * is exactly the kind of guess this module exists to avoid.
  */
-export async function resolveConflict(
+export async function resolveConflict(dbSession: DbSession,
   organizationId: string,
   conflictId: string,
-  resolution: "kept_a" | "kept_b" | "dismissed",
+  resolution: "kept_a" | "kept_b" | "dismissed"
 ): Promise<boolean> {
-  const db = getDb();
+  const db = dbSession.db;
   const [existing] = await db
     .select({ id: operationsConflicts.id })
     .from(operationsConflicts)

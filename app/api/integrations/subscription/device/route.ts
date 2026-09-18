@@ -1,6 +1,8 @@
+import { withApiSession } from "@/lib/api/with-session";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
 import { env } from "cloudflare:workers";
-import { getDb } from "@/db";
-import { integrationConnections } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections } from "@/db/postgres/schema";
 import { encryptSecret } from "@/lib/integrations/crypto";
 import { getProvider } from "@/lib/integrations/catalog";
 import { pollChatgptDeviceLogin, startChatgptDeviceLogin } from "@/lib/integrations/subscription-oauth";
@@ -34,8 +36,9 @@ const POLL_RULE = { limit: 400, windowMs: 20 * 60 * 1000 };
  * keeping the server stateless means a poll costs one round trip instead of
  * three.
  */
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  if (!PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const provider = getProvider("chatgpt");
@@ -50,15 +53,15 @@ export async function POST(request: Request) {
   const rule = action === "poll" ? POLL_RULE : START_RULE;
   const scope = `device:${action}:${identity.userId}`;
   const ipScope = `device:${action}:ip:${clientIp(request)}`;
-  if (await isRateLimited(scope, rule) || await isRateLimited(ipScope, rule)) {
+  if (await isRateLimited(dbSession, scope, rule) || await isRateLimited(dbSession, ipScope, rule)) {
     return Response.json({ error: "Too many attempts. Wait a minute and try again." }, { status: 429 });
   }
-  await recordAttempt(scope);
-  await recordAttempt(ipScope);
+  await recordAttempt(dbSession, scope);
+  await recordAttempt(dbSession, ipScope);
 
   if (action === "start") {
     try {
-      const started = await startChatgptDeviceLogin();
+      const started = await dbSession.outsideTransaction(() => startChatgptDeviceLogin());
       return Response.json({
         deviceAuthId: started.deviceAuthId,
         userCode: started.userCode,
@@ -77,7 +80,7 @@ export async function POST(request: Request) {
 
   let result;
   try {
-    result = await pollChatgptDeviceLogin(body.deviceAuthId, body.userCode);
+    result = await dbSession.outsideTransaction(() => pollChatgptDeviceLogin(body.deviceAuthId!, body.userCode!));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Device login failed." }, { status: 502 });
   }
@@ -91,7 +94,7 @@ export async function POST(request: Request) {
   if (result.status === "failed") return Response.json({ error: result.detail }, { status: 400 });
 
   const credential = result.credential;
-  const db = getDb();
+  const db = dbSession.db;
   const now = new Date();
   const accessTokenCiphertext = await encryptSecret(credential.access, encryptionKey);
   // A device login without a refresh token still works until it expires; the
@@ -123,3 +126,5 @@ export async function POST(request: Request) {
 
   return Response.json({ status: "connected" });
 }
+
+export const POST = withApiSession(POSTWithSession);

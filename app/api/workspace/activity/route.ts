@@ -1,8 +1,10 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { readActivity, recordActivity } from "@/lib/activity/store";
-async function activity(request: Request) {
-  const identity = await getApiIdentity(request);
+async function activity(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity || isGuestIdentity(identity))
     return Response.json({ error: "Authentication required" }, { status: 401 });
   if (request.method === "POST") {
@@ -14,17 +16,17 @@ async function activity(request: Request) {
       return Response.json({ error: "Invalid origin" }, { status: 403 });
   }
   try {
-    await ensureOrganization(identity);
+    await ensureOrganization(dbSession, identity);
     if (request.method === "POST") {
       // Server time only. Client timestamps and identities are never accepted.
-      await recordActivity(identity.organizationId, identity.userId);
+      await recordActivity(dbSession, identity.organizationId, identity.userId);
       return Response.json(
         { ok: true },
         { headers: { "cache-control": "no-store" } },
       );
     }
     return Response.json(
-      await readActivity(identity.organizationId, identity.userId),
+      await readActivity(dbSession, identity.organizationId, identity.userId),
       { headers: { "cache-control": "no-store" } },
     );
   } catch {
@@ -34,5 +36,5 @@ async function activity(request: Request) {
     );
   }
 }
-export const GET = activity;
-export const POST = activity;
+export const GET = withApiSession(activity);
+export const POST = withApiSession(activity);

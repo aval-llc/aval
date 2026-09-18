@@ -107,9 +107,9 @@ test('a worker that loses its lease cannot report a saved completion',async()=>{
 test('task retry exhaustion stops after the initial call and four retries', async () => {
  const sqlite=await bootRuntime(); const {createTask}=await import('../../lib/agents/tasks.ts');
  const runtime=await import('../../lib/agents/runtime.ts'); const {ENV}=await import('./harness.mjs');
- const {AnthropicError}=await import('../../lib/ask-aval/anthropic.ts');
+ const {ModelProviderError}=await import('../../lib/ask-aval/model-types.ts');
  const task=await createTask({organizationId:'org_1',userId:'user_1',agentId:'general',goal:'Inspect channels',check:{kind:'evidence',tools:['get_communication_channels']}});
- let calls=0; globalThis.__MODEL__=async()=>{calls++;throw new AnthropicError('overloaded',529,true);};
+ let calls=0; globalThis.__MODEL__=async()=>{calls++;throw new ModelProviderError('overloaded',529,true);};
  for(let i=0;i<5;i++) {
   sqlite.prepare('UPDATE agent_tasks SET next_attempt_at=NULL WHERE id=?').run(task.id);
   const result=await runtime.advanceTask(ENV,'org_1',task.id,runtime.newWorkerId());

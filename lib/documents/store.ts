@@ -4,8 +4,8 @@
  */
 
 import { and, desc, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { documents } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { documents } from "@/db/postgres/schema";
 import { MAX_DOCUMENT_CHARS, MAX_DOCUMENT_TITLE_CHARS, type DocumentKind, type StoredDocument } from "./types";
 
 export interface SaveDocumentInput {
@@ -30,7 +30,7 @@ export interface SavedDocument extends StoredDocument {
  * later answer about that lease quietly unreliable, with nothing on screen to
  * indicate why.
  */
-export async function saveDocument(input: SaveDocumentInput): Promise<SavedDocument> {
+export async function saveDocument(dbSession: DbSession, input: SaveDocumentInput): Promise<SavedDocument> {
   const title = input.title.trim().slice(0, MAX_DOCUMENT_TITLE_CHARS) || "Untitled document";
   const full = input.contentText.trim();
   const contentText = full.slice(0, MAX_DOCUMENT_CHARS);
@@ -39,7 +39,7 @@ export async function saveDocument(input: SaveDocumentInput): Promise<SavedDocum
     : crypto.randomUUID();
   const createdAt = new Date();
 
-  await getDb().insert(documents).values({
+  await dbSession.db.insert(documents).values({
     id,
     organizationId: input.organizationId,
     title,
@@ -51,7 +51,7 @@ export async function saveDocument(input: SaveDocumentInput): Promise<SavedDocum
   }).onConflictDoNothing();
 
   if (input.requestId) {
-    const stored = await getDocument(input.organizationId, id);
+    const stored = await getDocument(dbSession, input.organizationId, id);
     if (!stored || stored.contentText !== contentText || stored.title !== title || stored.kind !== input.kind) throw new Error("Upload request was reused with different content");
     return { id: stored.id, title: stored.title, kind: stored.kind, charCount: stored.charCount, createdAt: stored.createdAt, truncated: full.length > contentText.length };
   }
@@ -60,8 +60,8 @@ export async function saveDocument(input: SaveDocumentInput): Promise<SavedDocum
 }
 
 /** Document metadata for a workspace, newest first. Bodies are not read here. */
-export async function listDocuments(organizationId: string): Promise<StoredDocument[]> {
-  const rows = await getDb()
+export async function listDocuments(dbSession: DbSession, organizationId: string): Promise<StoredDocument[]> {
+  const rows = await dbSession.db
     .select({ id: documents.id, title: documents.title, kind: documents.kind, charCount: documents.charCount, createdAt: documents.createdAt })
     .from(documents)
     .where(eq(documents.organizationId, organizationId))
@@ -70,8 +70,8 @@ export async function listDocuments(organizationId: string): Promise<StoredDocum
 }
 
 /** One document with its text, or null if it doesn't exist in this organization. */
-export async function getDocument(organizationId: string, documentId: string): Promise<(StoredDocument & { contentText: string }) | null> {
-  const [row] = await getDb()
+export async function getDocument(dbSession: DbSession, organizationId: string, documentId: string): Promise<(StoredDocument & { contentText: string }) | null> {
+  const [row] = await dbSession.db
     .select()
     .from(documents)
     .where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)))
@@ -81,6 +81,6 @@ export async function getDocument(organizationId: string, documentId: string): P
 }
 
 /** Permanently removes a document. Scoped so one workspace cannot delete another's row. */
-export async function deleteDocument(organizationId: string, documentId: string): Promise<void> {
-  await getDb().delete(documents).where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
+export async function deleteDocument(dbSession: DbSession, organizationId: string, documentId: string): Promise<void> {
+  await dbSession.db.delete(documents).where(and(eq(documents.organizationId, organizationId), eq(documents.id, documentId)));
 }

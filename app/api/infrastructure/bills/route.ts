@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { listBills, recordBill, MeterNotFoundError } from "@/lib/infrastructure/meters";
@@ -11,8 +13,8 @@ const MAX_USAGE_AMOUNT = 100_000_000;
 const MAX_COST_CENTS = 100_000_000_00;
 const MAX_EXTRACTION_NOTE_CHARS = 1000;
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const params = new URL(request.url).searchParams;
@@ -20,14 +22,14 @@ export async function GET(request: Request) {
   const utilityTypeParam = params.get("utilityType");
   const utilityType = UTILITY_TYPES.includes(utilityTypeParam as UtilityType) ? (utilityTypeParam as UtilityType) : undefined;
 
-  const bills = await listBills(identity.organizationId, { meterId, utilityType });
+  const bills = await listBills(dbSession, identity.organizationId, { meterId, utilityType });
   return Response.json({ bills });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   const body = (await request.json().catch(() => ({}))) as {
     meterId?: string;
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
     // person, even when its fields were pre-filled from an /extract call —
     // "ai_extracted" is reserved for a row saved automatically, which this
     // app doesn't do yet (see bill-extraction.ts's doc comment).
-    const bill = await recordBill(identity.organizationId, {
+    const bill = await recordBill(dbSession, identity.organizationId, {
       meterId: body.meterId,
       periodStart,
       periodEnd,
@@ -76,3 +78,6 @@ export async function POST(request: Request) {
     throw err;
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

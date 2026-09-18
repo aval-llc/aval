@@ -1,18 +1,18 @@
 import { and, eq, gte, lt, sql } from "drizzle-orm";
-import { getDb } from "@/db";
-import { workspaceUsage } from "@/db/schema";
-export async function recordActivity(
+import type { DbSession } from "@/db/postgres/session";
+import { workspaceUsage } from "@/db/postgres/schema";
+export async function recordActivity(dbSession: DbSession,
   organizationId: string,
   userId: string,
-  now = new Date(),
+  now = new Date()
 ) {
   const minute = Math.floor(+now / 60000);
-  await getDb()
+  await dbSession.db
     .insert(workspaceUsage)
     .values({ id: crypto.randomUUID(), organizationId, userId, minute })
     .onConflictDoNothing();
   // Keep a little over a year of minute buckets; no content, keystrokes, or page names are recorded.
-  await getDb()
+  await dbSession.db
     .delete(workspaceUsage)
     .where(
       and(
@@ -22,17 +22,17 @@ export async function recordActivity(
       ),
     );
 }
-export async function readActivity(
+export async function readActivity(dbSession: DbSession,
   organizationId: string,
   userId: string,
-  now = new Date(),
+  now = new Date()
 ) {
   const today = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   );
   const since = new Date(+today - 364 * 86400000);
-  const day = sql<string>`strftime('%Y-%m-%d', ${workspaceUsage.minute} * 60, 'unixepoch')`;
-  const days = await getDb()
+  const day = sql<string>`to_char(to_timestamp(${workspaceUsage.minute} * 60) AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
+  const days = await dbSession.db
     .select({ date: day, minutes: sql<number>`count(*)` })
     .from(workspaceUsage)
     .where(

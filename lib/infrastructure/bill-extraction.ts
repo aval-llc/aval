@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * POST /api/infrastructure/bills/extract
  *
@@ -9,13 +10,13 @@
  * A GitHub sourcing pass for utility-bill parsing (docs/DECISIONS.md) found
  * nothing beyond a 0-star proof-of-concept — production tools in this space
  * are commercial data brokers (Urjanet/Arcadia-style), not OSS. Aval already
- * has a Claude client wired in for document work (lib/ask-aval/anthropic.ts)
+ * has the shared model router wired in for document work
  * — reusing it for structured extraction is more realistic than adopting a
  * fragile scraper/OCR pipeline, and it costs against the same per-org daily
  * cap and token balance as every other model call in this app.
  */
 
-import { AnthropicError, type AskAvalEnv, type Message, type ToolSchema, type ToolUseBlock } from "@/lib/ask-aval/anthropic";
+import { ModelProviderError, type AskAvalEnv, type Message, type ToolSchema, type ToolUseBlock } from "@/lib/ask-aval/model-types";
 import { callModel } from "@/lib/ask-aval/model-router";
 import { checkUsageBlocked, recordUsage, type AskAvalSession } from "@/lib/ask-aval/usage";
 import { json } from "@/lib/ask-aval/loop";
@@ -70,25 +71,25 @@ Hard rules:
 - cost_cents must be the total amount due, in minor units of the bill's own currency.
 Call extract_utility_bill exactly once. Write no prose outside it.`;
 
-export async function handleUtilityBillExtraction(rawBillText: string, env: AskAvalEnv, session: AskAvalSession): Promise<Response> {
+export async function handleUtilityBillExtraction(dbSession: DbSession, rawBillText: string, env: AskAvalEnv, session: AskAvalSession): Promise<Response> {
   const billText = rawBillText.trim().slice(0, MAX_BILL_TEXT_CHARS);
   if (!billText) return json({ error: "Bill text is required" }, 400);
 
-  const blockReason = await checkUsageBlocked(env, session);
+  const blockReason = await checkUsageBlocked(dbSession, env, session);
   if (blockReason === "token_balance") return json({ error: "Aval has run out of tokens for this billing period. Purchase more to continue.", code: "token_balance" }, 402);
   if (blockReason === "daily_cap") return json({ error: "Aval has reached its usage cap for today. Try again tomorrow.", code: "daily_cap" }, 429);
 
   const messages: Message[] = [{ role: "user", content: billText }];
 
   try {
-    const res = await callModel(env, session.orgId, {
+    const res = await callModel(dbSession, env, session.orgId, {
       system: SYSTEM,
       messages,
       tools: [EXTRACT_TOOL],
       tool_choice: { type: "tool", name: TOOL_NAME },
       max_tokens: 1024,
     });
-    await recordUsage(session, res.usage.input_tokens, res.usage.output_tokens);
+    await recordUsage(dbSession, session, res.usage.input_tokens, res.usage.output_tokens);
 
     const toolUse = res.content.find((block): block is ToolUseBlock => block.type === "tool_use" && block.name === TOOL_NAME);
     if (!toolUse) return json({ error: "The model did not return a structured extraction." }, 502);
@@ -109,7 +110,7 @@ export async function handleUtilityBillExtraction(rawBillText: string, env: AskA
 
     return json({ extracted });
   } catch (err) {
-    if (err instanceof AnthropicError) return json({ error: err.message, retryable: err.retryable }, err.status >= 500 ? 502 : 400);
+    if (err instanceof ModelProviderError) return json({ error: err.message, retryable: err.retryable }, err.status >= 500 ? 502 : 400);
     console.error("utility_bill_extraction_unhandled", err);
     return json({ error: "Bill extraction is unavailable right now." }, 500);
   }

@@ -84,6 +84,7 @@ test("the implemented mutation inventory is explicit", () => {
     "plan_goal",
     "write_memory",
     "record_preference",
+    "create_maintenance_work_order",
     "send_external_message",
     "place_call",
     "publish_listing",

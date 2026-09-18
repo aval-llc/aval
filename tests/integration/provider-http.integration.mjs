@@ -3,10 +3,34 @@ import test from "node:test";
 import { providerJson, ProviderHttpError } from "../../lib/integrations/http.ts";
 import { requestOAuthToken } from "../../lib/integrations/oauth.ts";
 import { verifyAdditionalCredentials, verifyOAuthReadAccess } from "../../lib/integrations/verification.ts";
+import { dispatchMessage } from "../../lib/communications/providers.ts";
+
+test("Workers-compatible manual redirects reject credential forwarding", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    calls++;
+    assert.equal(init.redirect, "manual", "Workers must never receive redirect:error or follow");
+    return new Response('private provider body', { status: 302, headers: { location: 'https://untrusted.test' } });
+  });
+  await assert.rejects(providerJson('https://provider.test', { headers: { authorization: 'Bearer fixture' } }),
+    error => error instanceof ProviderHttpError && error.status === 302 && !error.retryable && !error.message.includes('private'));
+  await assert.rejects(dispatchMessage({ provider: 'outlook', to: 'fixture@example.test', body: 'Fixture' },
+    { accessToken: 'fixture' }, {}, 'fixture-operation'), /302/);
+  assert.equal(calls, 2, 'no request is made to the redirect destination');
+});
+
+test("Outlook accepts its bodyless 202 response", async (t) => {
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    assert.equal(init.redirect, 'manual');
+    return new Response(null, { status: 202 });
+  });
+  assert.deepEqual(await dispatchMessage({ provider: 'outlook', to: 'fixture@example.test', body: 'Fixture' },
+    { accessToken: 'fixture' }, {}, 'fixture-operation'), { id: null, status: 'accepted' });
+});
 
 test("provider HTTP rejects redirects, oversized bodies, malformed JSON, and API-level errors", async (t) => {
   t.mock.method(globalThis, "fetch", async (_url, init) => {
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     return new Response("x".repeat(2_000_001));
   });
   await assert.rejects(providerJson("https://provider.test"), /safe page size/);

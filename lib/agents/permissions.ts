@@ -28,6 +28,7 @@ export type Permission =
   | "leases.read"
   | "documents.read"
   | "maintenance.read"
+  | "maintenance.create"
   | "leasing.read"
   | "market.read"
   | "provenance.read"
@@ -105,7 +106,7 @@ export const AGENT_PERMISSIONS: Record<AgentRole, readonly Permission[]> = {
   // The only role holding a PMS write permission by default, matching the
   // workflow defaults in lib/pms/types.ts: maintenance writes on, everything
   // else off. `vendor.dispatch` is the pre-existing permission for the same act.
-  maintenance: ["maintenance.read", "portfolio.read", "accounting.read", "preferences.write", "messaging.send.external", "vendor.dispatch", "pms.maintenance.write"],
+  maintenance: ["maintenance.read", "maintenance.create", "portfolio.read", "accounting.read", "preferences.write", "messaging.send.external", "vendor.dispatch", "pms.maintenance.write"],
 
   // §17: "The agent with the widest visibility should often have the least
   // mutation authority." Risk Analyst reads across every domain and holds no

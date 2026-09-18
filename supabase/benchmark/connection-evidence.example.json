@@ -1,0 +1,11 @@
+{
+  "projectRef": "REPLACE_WITH_REAL_PROJECT_REF",
+  "projectRegion": "us-west-2",
+  "workerPlacement": "aws:us-west-2",
+  "hyperdriveId": "REPLACE_WITH_REAL_HYPERDRIVE_ID",
+  "queryCachingDisabled": false,
+  "directEndpoint": false,
+  "connectionLimit": null,
+  "maxOriginConnections": null,
+  "notes": "Fill from actual project/configuration and connection metrics during the run. False/null defaults intentionally fail the gate. Never include passwords."
+}

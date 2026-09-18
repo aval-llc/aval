@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET   /api/operations/units        — units, filterable by property or status.
  * POST  /api/operations/units        — add a unit.
@@ -24,13 +26,13 @@ import {
   requireString,
 } from "@/lib/operations/validation";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const url = new URL(request.url);
   const statusParam = url.searchParams.get("status");
-  const units = await listUnits(identity.organizationId, {
+  const units = await listUnits(dbSession, identity.organizationId, {
     propertyId: url.searchParams.get("propertyId") ?? undefined,
     status: UNIT_STATUSES.includes(statusParam as (typeof UNIT_STATUSES)[number])
       ? (statusParam as (typeof UNIT_STATUSES)[number])
@@ -39,14 +41,14 @@ export async function GET(request: Request) {
   return Response.json({ units });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
-    const unit = await createUnit(identity.organizationId, {
+    const unit = await createUnit(dbSession, identity.organizationId, {
       propertyId: requireString(body, "propertyId", 64),
       unitNumber: requireString(body, "unitNumber", 40),
       bedrooms: optionalInt(body, "bedrooms", 0, 20),
@@ -61,13 +63,13 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PATCH(request: Request) {
-  const identity = await getApiIdentity(request);
+async function PATCHWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   try {
     const body = await readJsonBody(request);
-    const unit = await setUnitStatus(
+    const unit = await setUnitStatus(dbSession,
       identity.organizationId,
       requireString(body, "unitId", 64),
       requireEnum(body, "status", UNIT_STATUSES),
@@ -77,3 +79,7 @@ export async function PATCH(request: Request) {
     return operationsErrorResponse(error);
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);
+export const PATCH = withApiSession(PATCHWithSession);

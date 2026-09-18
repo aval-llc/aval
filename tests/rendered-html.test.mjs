@@ -2,33 +2,47 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render(path = "/", authenticated = true) {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+import './integration/module-hooks.mjs';
+import { registerHooks } from 'node:module';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { NextIntlClientProvider } from 'next-intl';
 
-  return worker.fetch(
-    new Request(`https://aval.test${path}`, {
-      headers: { host: "aval.test", "x-forwarded-host": "aval.test", accept: "text/html", ...(authenticated ? { "oai-authenticated-user-id": "render-user", "oai-authenticated-user-email": "render@example.test", "oai-authenticated-user-full-name": "Evan" } : {}) },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+// Render real page components with a resolved identity fixture. Authentication
+// itself is tested separately; public identity headers are never credentials.
+const seams = {
+  '@/lib/api/with-session': 'export const withPageSession = async work => globalThis.__RENDER_IDENTITY__ ? work({}) : null;',
+  '@/lib/integrations/session': 'export const getPageIdentity = async () => globalThis.__RENDER_IDENTITY__; ',
+  '@/app/[locale]/navigation': 'export const useRouter = () => ({push(){}, replace(){}}); export const usePathname = () => "/en";',
+};
+registerHooks({
+  resolve(specifier, context, next) {
+    const key = specifier === './navigation' && context.parentURL?.includes('dashboard-client') ? '@/app/[locale]/navigation' : specifier;
+    if (key in seams) return { url: 'render-fixture:' + key, shortCircuit: true };
+    return next(['next/headers', 'next/server'].includes(specifier) ? specifier + '.js' : specifier, context);
+  },
+  load(url, context, next) {
+    if (url.startsWith('render-fixture:')) return { format: 'module', source: seams[url.slice('render-fixture:'.length)], shortCircuit: true };
+    return next(url, context);
+  },
+});
+const { default: Home } = await import('../app/[locale]/page.tsx');
+async function render(path = '/en', authenticated = true) {
+  const url = new URL(path, 'https://aval.test');
+  const locale = url.pathname.split('/')[1] || 'en';
+  globalThis.__RENDER_IDENTITY__ = authenticated ? { source: 'password', displayName: 'Evan', email: 'render@example.test' } : null;
+  const page = await Home({ searchParams: Promise.resolve(Object.fromEntries(url.searchParams)) });
+  const messages = JSON.parse(await readFile(new URL(`../messages/${locale}.json`, import.meta.url), 'utf8'));
+  const html = renderToStaticMarkup(React.createElement(NextIntlClientProvider, { locale, messages, timeZone: 'UTC' }, page));
+  return new Response(html, { headers: { 'content-type': 'text/html' } });
 }
 
-test("redirects the unlocalized root to the default locale", async () => {
-  const response = await render("/");
+test('redirects the unlocalized root to the default locale', async () => {
+  const { default: middleware } = await import('../middleware.ts');
+  const { NextRequest } = await import('next/server.js');
+  const response = middleware(new NextRequest('https://aval.test/'));
   assert.equal(response.status, 307);
-  const location = response.headers.get("location") ?? "";
-  const pathname = location.startsWith("http") ? new URL(location).pathname : location;
-  assert.match(pathname, /^\/en\/?$/);
+  assert.equal(new URL(response.headers.get('location')).pathname, '/en');
 });
 
 test("authenticated first render waits for saved onboarding state", async () => {

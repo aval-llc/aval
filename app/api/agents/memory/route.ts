@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { forgetPreference, listPreferenceOptions, listPreferences, setPreferenceFromSetup, PREFERENCE_TOPICS, type PreferenceTopic } from "@/lib/ask-aval/preferences";
@@ -16,17 +18,17 @@ function suggestionsFor(taught: { topic: string }[]) {
  * future Ask Aval system prompt (getPreferenceContext), so this is the same
  * memory the assistant actually reasons with — not a separate display copy.
  */
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
-  const taught = await listPreferences(identity.organizationId);
+  await ensureOrganization(dbSession, identity);
+  const taught = await listPreferences(dbSession, identity.organizationId);
   return Response.json({ taught, options: listPreferenceOptions(), suggestions: suggestionsFor(taught) });
 }
 
 /** POST { topic, statement } — teach one fact. Both must come from the fixed taxonomy. */
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   const body = await request.json().catch(() => ({})) as { topic?: string; statement?: string; text?: string };
   let topic = body.topic;
@@ -47,21 +49,25 @@ export async function POST(request: Request) {
   if (!topic || !statement || !(topic in PREFERENCE_TOPICS)) {
     return Response.json({ error: "Unknown preference" }, { status: 400 });
   }
-  await ensureOrganization(identity);
-  const saved = await setPreferenceFromSetup(identity.organizationId, topic as PreferenceTopic, statement);
+  await ensureOrganization(dbSession, identity);
+  const saved = await setPreferenceFromSetup(dbSession, identity.organizationId, topic as PreferenceTopic, statement);
   if (!saved) return Response.json({ error: "Unknown preference" }, { status: 400 });
-  const updated = await listPreferences(identity.organizationId);
+  const updated = await listPreferences(dbSession, identity.organizationId);
   return Response.json({ taught: updated, suggestions: suggestionsFor(updated), matched: { topic, statement } });
 }
 
 /** DELETE ?topic=… — forget one topic. */
-export async function DELETE(request: Request) {
-  const identity = await getApiIdentity(request);
+async function DELETEWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   const topic = new URL(request.url).searchParams.get("topic");
   if (!topic || !(topic in PREFERENCE_TOPICS)) return Response.json({ error: "Unknown preference" }, { status: 400 });
-  await ensureOrganization(identity);
-  await forgetPreference(identity.organizationId, topic);
-  const updated = await listPreferences(identity.organizationId);
+  await ensureOrganization(dbSession, identity);
+  await forgetPreference(dbSession, identity.organizationId, topic);
+  const updated = await listPreferences(dbSession, identity.organizationId);
   return Response.json({ taught: updated, suggestions: suggestionsFor(updated) });
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);
+export const DELETE = withApiSession(DELETEWithSession);

@@ -8,9 +8,9 @@
  * authority without rewriting an approval row.
  */
 
-import { and, eq, gt, inArray, sql } from "drizzle-orm";
-import { getDb } from "@/db";
-import { agentExecutionPolicies, agentFinancialOperations, organizations } from "@/db/schema";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import type { DbSession } from "@/db/postgres/session";
+import { accessGrants, agentExecutionPolicies, agentFinancialOperations } from "@/db/postgres/schema";
 import {
   DEFAULT_FINANCIAL_POLICY,
   approvalTierFor,
@@ -40,17 +40,24 @@ export interface PolicyDraft {
   allowedAccountIds: string[];
 }
 
-export async function isOrganizationOwner(organizationId: string, userId: string): Promise<boolean> {
-  const [row] = await getDb()
-    .select({ ownerUserId: organizations.ownerUserId })
-    .from(organizations)
-    .where(eq(organizations.id, organizationId))
+export async function canManageFinancialPolicy(dbSession: DbSession, organizationId: string, userId: string): Promise<boolean> {
+  const [row] = await dbSession.db
+    .select({ id: accessGrants.id })
+    .from(accessGrants)
+    .where(and(
+      eq(accessGrants.organizationId, organizationId),
+      eq(accessGrants.principalId, userId),
+      eq(accessGrants.role, "org_admin"),
+      eq(accessGrants.organizationScope, true),
+      isNull(accessGrants.revokedAt),
+      or(isNull(accessGrants.expiresAt), gt(accessGrants.expiresAt, new Date())),
+    ))
     .limit(1);
-  return row?.ownerUserId === userId;
+  return row !== undefined;
 }
 
-export async function getFinancialPolicy(organizationId: string): Promise<FinancialPolicyRecord> {
-  const [row] = await getDb()
+export async function getFinancialPolicy(dbSession: DbSession, organizationId: string): Promise<FinancialPolicyRecord> {
+  const [row] = await dbSession.db
     .select()
     .from(agentExecutionPolicies)
     .where(eq(agentExecutionPolicies.organizationId, organizationId))
@@ -83,10 +90,10 @@ export async function getFinancialPolicy(organizationId: string): Promise<Financ
 }
 
 /** Publish a new, owner-approved policy version. No draft silently becomes active. */
-export async function approveFinancialPolicy(
+export async function approveFinancialPolicy(dbSession: DbSession,
   organizationId: string,
-  ownerUserId: string,
-  draft: PolicyDraft,
+  administratorUserId: string,
+  draft: PolicyDraft
 ): Promise<{ ok: true; policy: FinancialPolicyRecord } | { ok: false; reason: string }> {
   const normalized = {
     singleApprovalMaxCents: draft.singleApprovalMaxCents,
@@ -101,10 +108,10 @@ export async function approveFinancialPolicy(
     return { ok: false, reason: "At least one provider account must be allowlisted." };
   }
 
-  const current = await getFinancialPolicy(organizationId);
+  const current = await getFinancialPolicy(dbSession, organizationId);
   const now = new Date();
   const accountFingerprints = await Promise.all(accountIds.map(fingerprintAccount));
-  await getDb().insert(agentExecutionPolicies).values({
+  await dbSession.db.insert(agentExecutionPolicies).values({
     organizationId,
     status: "approved",
     singleApprovalMaxCents: normalized.singleApprovalMaxCents,
@@ -113,7 +120,7 @@ export async function approveFinancialPolicy(
     allowedCurrenciesJson: JSON.stringify(normalized.allowedCurrencies),
     allowedAccountFingerprintsJson: JSON.stringify(accountFingerprints),
     version: current.version + 1,
-    approvedByUserId: ownerUserId,
+    approvedByUserId: administratorUserId,
     approvedAt: now,
     createdAt: current.createdAt.getTime() === 0 ? now : current.createdAt,
     updatedAt: now,
@@ -127,16 +134,16 @@ export async function approveFinancialPolicy(
       allowedCurrenciesJson: JSON.stringify(normalized.allowedCurrencies),
       allowedAccountFingerprintsJson: JSON.stringify(accountFingerprints),
       version: current.version + 1,
-      approvedByUserId: ownerUserId,
+      approvedByUserId: administratorUserId,
       approvedAt: now,
       updatedAt: now,
     },
   });
-  return { ok: true, policy: await getFinancialPolicy(organizationId) };
+  return { ok: true, policy: await getFinancialPolicy(dbSession, organizationId) };
 }
 
-export async function suspendFinancialPolicy(organizationId: string): Promise<void> {
-  await getDb().update(agentExecutionPolicies).set({
+export async function suspendFinancialPolicy(dbSession: DbSession, organizationId: string): Promise<void> {
+  await dbSession.db.update(agentExecutionPolicies).set({
     status: "suspended",
     approvedByUserId: null,
     approvedAt: null,
@@ -149,13 +156,13 @@ export type FinancialProposalDecision =
   | { ok: false; reason: string };
 
 /** Deterministic, storage-backed evaluation used at proposal and execution time. */
-export async function evaluateFinancialProposal(
+export async function evaluateFinancialProposal(dbSession: DbSession,
   organizationId: string,
   tool: ToolDescriptor,
   args: Record<string, unknown>,
 ): Promise<FinancialProposalDecision> {
   if (!tool.financial) return { ok: false, reason: `Tool "${tool.name}" has no financial contract.` };
-  const policy = await getFinancialPolicy(organizationId);
+  const policy = await getFinancialPolicy(dbSession, organizationId);
   if (policy.status !== "approved" || !policy.approvedByUserId || !policy.approvedAt) {
     return { ok: false, reason: "This workspace has no active, owner-approved financial policy." };
   }
@@ -169,7 +176,7 @@ export async function evaluateFinancialProposal(
     return { ok: false, reason: "The proposed destination is not on the workspace financial allowlist." };
   }
 
-  const committed = await committedFinancialSpendCents(organizationId);
+  const committed = await committedFinancialSpendCents(dbSession, organizationId);
   const daily = withinDailyLimit(committed, amountCents, policy.dailyLimitCents);
   if (!daily.ok) return { ok: false, reason: daily.reason ?? "The rolling daily limit would be exceeded." };
 
@@ -178,9 +185,9 @@ export async function evaluateFinancialProposal(
   return { ok: true, policy, tier: tier as Exclude<ApprovalTier, "automatic" | "refused">, requiredApprovals: requiredApprovalsFor(tier), accountFingerprint, amountCents, currency };
 }
 
-export async function committedFinancialSpendCents(organizationId: string, now = new Date()): Promise<number> {
+export async function committedFinancialSpendCents(dbSession: DbSession, organizationId: string, now = new Date()): Promise<number> {
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const [row] = await getDb().select({ total: sql<number>`coalesce(sum(${agentFinancialOperations.amountCents}), 0)` })
+  const [row] = await dbSession.db.select({ total: sql<number>`coalesce(sum(${agentFinancialOperations.amountCents}), 0)` })
     .from(agentFinancialOperations)
     .where(and(
       eq(agentFinancialOperations.organizationId, organizationId),

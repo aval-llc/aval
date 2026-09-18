@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "sourceHash": "8a1ba41e161ccfcc518d6561f70059568b356250cc8bfba21ccbfa1c4fa76854",
+  "path": "local-postgres",
+  "projectRef": "local",
+  "samples": [
+    {
+      "concurrency": 1,
+      "operation": "list",
+      "count": 100,
+      "errors": 0,
+      "p50Ms": 73.02440000000024,
+      "p95Ms": 82.53369999999995,
+      "maxMs": 90.51490000000013
+    },
+    {
+      "concurrency": 1,
+      "operation": "write",
+      "count": 100,
+      "errors": 0,
+      "p50Ms": 72.89719999999943,
+      "p95Ms": 90.88130000000092,
+      "maxMs": 96.78249999999935
+    },
+    {
+      "concurrency": 1,
+      "operation": "claim",
+      "count": 100,
+      "errors": 0,
+      "p50Ms": 64.6304999999993,
+      "p95Ms": 81.0589,
+      "maxMs": 86.33030000000144
+    },
+    {
+      "concurrency": 10,
+      "operation": "list",
+      "count": 100,
+      "errors": 0,
+      "p50Ms": 225.31620000000112,
+      "p95Ms": 303.97659999999814,
+      "maxMs": 324.18420000000333
+    },
+    {
+      "concurrency": 10,
+      "operation": "write",
+      "count": 100,
+      "errors": 0,
+      "p50Ms": 228.41319999999905,
+      "p95Ms": 273.71320000000196,
+      "maxMs": 288.0787999999993
+    },
+    {
+      "concurrency": 10,
+      "operation": "claim",
+      "count": 100,
+      "errors": 0,
+      "p50Ms": 223.47850000000108,
+      "p95Ms": 252.72950000000128,
+      "maxMs": 277.53729999999996
+    },
+    {
+      "concurrency": 50,
+      "operation": "list",
+      "count": 150,
+      "errors": 0,
+      "p50Ms": 1075.3572999999997,
+      "p95Ms": 1361.222099999999,
+      "maxMs": 1378.5727000000006
+    },
+    {
+      "concurrency": 50,
+      "operation": "write",
+      "count": 150,
+      "errors": 0,
+      "p50Ms": 1145.5862999999954,
+      "p95Ms": 1344.8821000000025,
+      "maxMs": 1364.0248999999967
+    },
+    {
+      "concurrency": 50,
+      "operation": "claim",
+      "count": 150,
+      "errors": 0,
+      "p50Ms": 1158.1717999999964,
+      "p95Ms": 1374.5403000000006,
+      "maxMs": 1396.4778000000006
+    },
+    {
+      "concurrency": 100,
+      "operation": "list",
+      "count": 300,
+      "errors": 0,
+      "p50Ms": 2408.9833999999973,
+      "p95Ms": 2653.863599999997,
+      "maxMs": 3343.054599999996
+    },
+    {
+      "concurrency": 100,
+      "operation": "write",
+      "count": 300,
+      "errors": 0,
+      "p50Ms": 2240.084799999997,
+      "p95Ms": 2477.4622999999992,
+      "maxMs": 2526.0489000000016
+    },
+    {
+      "concurrency": 100,
+      "operation": "claim",
+      "count": 300,
+      "errors": 0,
+      "p50Ms": 2101.244700000003,
+      "p95Ms": 2158.808499999999,
+      "maxMs": 2183.7925999999934
+    }
+  ],
+  "checks": {
+    "contextIsolation": true,
+    "readAfterWrite": true,
+    "claimsUnique": true,
+    "restrictedRole": true
+  },
+  "ingressColos": [],
+  "evidence": null,
+  "completedAt": "2026-09-10T23:57:01.765Z",
+  "gate": {
+    "passed": false,
+    "failures": [
+      "A local run cannot satisfy the hosted benchmark gate",
+      "US West project and Worker placement must be verified",
+      "Verify uncached Hyperdrive using the Supabase direct endpoint",
+      "Missing matching Supabase project evidence",
+      "Missing Hyperdrive configuration evidence",
+      "Missing measured peak origin connection count or insufficient connection headroom",
+      "list/10 needs zero errors and p95 <= 300ms",
+      "list/50 needs zero errors and p95 <= 300ms",
+      "write/50 needs zero errors and p95 <= 500ms",
+      "claim/50 needs zero errors and p95 <= 500ms",
+      "list/100 needs zero errors and p95 <= 300ms",
+      "write/100 needs zero errors and p95 <= 500ms",
+      "claim/100 needs zero errors and p95 <= 500ms"
+    ]
+  }
+}

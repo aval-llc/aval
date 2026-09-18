@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET /api/operations/insights
  *
@@ -14,12 +16,12 @@ import { getApiIdentity } from "@/lib/integrations/session";
 import { countBySeverity, INSIGHT_THRESHOLDS } from "@/lib/operations/insights";
 import { buildOperationsOverview, parsePeriod } from "@/lib/operations/summary";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const period = parsePeriod(new URL(request.url).searchParams.get("period"));
-  const overview = await buildOperationsOverview(identity.organizationId, period);
+  const overview = await buildOperationsOverview(dbSession, identity.organizationId, period);
 
   return Response.json({
     insights: overview.insights,
@@ -31,3 +33,5 @@ export async function GET(request: Request) {
     period: overview.period,
   });
 }
+
+export const GET = withApiSession(GETWithSession);

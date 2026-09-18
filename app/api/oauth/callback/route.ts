@@ -1,25 +1,26 @@
+import { withApiSession } from "@/lib/api/with-session";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { verifyOAuthReadAccess } from "@/lib/integrations/verification";
 import { env } from "cloudflare:workers";
 import { and, eq, gt } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections, oauthStates } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections, oauthStates } from "@/db/postgres/schema";
 import { encryptSecret } from "@/lib/integrations/crypto";
 import { getProvider } from "@/lib/integrations/catalog";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { oauthAccount, oauthScopes, requestOAuthToken, safeReturnTo, type IntegrationEnv } from "@/lib/integrations/oauth";
 import { providerIsReadOnly } from "@/lib/pms/derive.ts";
 
-export async function GET(request: Request) {
+async function GETWithSession(dbSession: DbSession, request: Request) {
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state");
   if (!stateValue) return Response.json({ error: "Missing OAuth state" }, { status: 400 });
-  const identity = await getApiIdentity(request);
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Sign in and restart the connection" }, { status: 401 });
   if (identity.role !== "owner") return Response.json({ error: "Only the workspace owner can manage connections" }, { status: 403 });
   const config = env as unknown as IntegrationEnv;
   if (!config.INTEGRATION_TOKEN_ENCRYPTION_KEY) return Response.json({ error: "Credential encryption is not configured" }, { status: 503 });
-  const db = getDb();
+  const db = dbSession.db;
   // Consume once BEFORE exchange; concurrent callbacks cannot reuse authority.
   const [state] = await db.delete(oauthStates).where(and(eq(oauthStates.state, stateValue), eq(oauthStates.userId, identity.userId), eq(oauthStates.organizationId, identity.organizationId), gt(oauthStates.expiresAt, new Date()))).returning();
   if (!state) return Response.json({ error: "OAuth state is invalid, expired, or already used" }, { status: 400 });
@@ -34,9 +35,12 @@ export async function GET(request: Request) {
   const blocker = connectionBlocker(provider.id);
   if (blocker) return Response.json({ error: blocker }, { status: 409 });
   try {
-    const token = await requestOAuthToken(provider.id, config, { grant_type: "authorization_code", code, redirect_uri: `${url.origin}/api/oauth/callback`, ...(state.codeVerifier ? { code_verifier: state.codeVerifier } : {}) });
-    const account = await oauthAccount(provider.id, token, url.searchParams.get("realmId"), config);
-    await verifyOAuthReadAccess(provider.id, token.access_token);
+    const { token, account } = await dbSession.outsideTransaction(async () => {
+      const token = await requestOAuthToken(provider.id, config, { grant_type: "authorization_code", code, redirect_uri: `${url.origin}/api/oauth/callback`, ...(state.codeVerifier ? { code_verifier: state.codeVerifier } : {}) });
+      const account = await oauthAccount(provider.id, token, url.searchParams.get("realmId"), config);
+      await verifyOAuthReadAccess(provider.id, token.access_token);
+      return { token, account };
+    });
     const accessTokenCiphertext = await encryptSecret(token.access_token, config.INTEGRATION_TOKEN_ENCRYPTION_KEY);
     const refreshTokenCiphertext = token.refresh_token ? await encryptSecret(token.refresh_token, config.INTEGRATION_TOKEN_ENCRYPTION_KEY) : null;
     const now = new Date();
@@ -55,3 +59,5 @@ export async function GET(request: Request) {
     return Response.json({ error: error instanceof Error ? error.message : "OAuth connection failed. Restart authorization." }, { status: 502, headers: { "cache-control": "no-store" } });
   }
 }
+
+export const GET = withApiSession(GETWithSession);

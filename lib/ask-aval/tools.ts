@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 import { HARNESS_TOOLS, runHarnessTool } from '@/lib/agents/harness-tools';
 /**
  * Tools available to Ask Aval.
@@ -14,7 +15,7 @@ import { HARNESS_TOOLS, runHarnessTool } from '@/lib/agents/harness-tools';
  * executor says so in a `note` field instead of inventing a plausible value.
  */
 
-import type { ToolSchema } from "./anthropic";
+import type { ToolSchema } from "./model-types";
 import { COMMUNICATION_TOOLS, runCommunicationTool } from "@/lib/communications/tools";
 import { PMS_WRITE_TOOL_SCHEMAS, runPmsWriteTool } from "@/lib/pms/tools.ts";
 import { isPmsWriteTool } from "@/lib/pms/tool-map.ts";
@@ -227,14 +228,14 @@ function collectNumbers(v: unknown, out: number[] = []): number[] {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export async function runTool(name: string, input: Record<string, unknown>, organizationId?: string, operationKey?: string, taskContext?: {id:string;stepIndex:number;approvalId?:string;personaId?:string}): Promise<ToolOutput> {
+export async function runTool(dbSession: DbSession, name: string, input: Record<string, unknown>, organizationId?: string, operationKey?: string, taskContext?: {id:string;stepIndex:number;approvalId?:string;personaId?:string}): Promise<ToolOutput> {
   // Before the harness/communication branches: a PMS write is the only kind
   // of tool here that reaches into a customer's system of record, and its
   // whole gate chain lives behind this one call.
   if (isPmsWriteTool(name)) {
     if (!organizationId) throw new Error("A workspace is required.");
     return {
-      json: await runPmsWriteTool(name, input, organizationId, operationKey, {
+      json: await runPmsWriteTool(dbSession, name, input, organizationId, operationKey, {
         personaId: taskContext?.personaId,
         approvalId: taskContext?.approvalId,
       }),
@@ -245,23 +246,23 @@ export async function runTool(name: string, input: Record<string, unknown>, orga
   }
   if (HARNESS_TOOLS.some(tool=>tool.name===name)) {
     if(!organizationId)throw Error('A workspace is required.');
-    return {json:await runHarnessTool(name,input,organizationId,taskContext?.id,operationKey,taskContext?.stepIndex),numbers:[]};
+    return {json:await runHarnessTool(dbSession, name,input,organizationId,taskContext?.id,operationKey,taskContext?.stepIndex),numbers:[]};
   }
   if (COMMUNICATION_TOOLS.some(tool => tool.name === name)) {
     if (!organizationId) throw new Error("A workspace is required.");
-    return { json: await runCommunicationTool(name, input, organizationId, operationKey), numbers: [] };
+    return { json: await runCommunicationTool(dbSession, name, input, organizationId, operationKey), numbers: [] };
   }
   // The operations layer gets first refusal. It returns null both for names it
   // does not own and for the two shared names on a workspace with no records,
   // so the snapshot executors below stay reachable for workspaces whose
   // connectors only push aggregates.
-  const fromOperations = await runOperationsTool(name, input, organizationId);
+  const fromOperations = await runOperationsTool(dbSession, name, input, organizationId);
   if (fromOperations) return fromOperations;
 
   switch (name) {
     case "get_portfolio_metrics": {
       if (!organizationId) return { json: noDataAvailable("portfolio metrics"), numbers: [] };
-      const metrics = await readMetrics(organizationId);
+      const metrics = await readMetrics(dbSession, organizationId);
       if (metrics.size === 0) return { json: noDataAvailable("portfolio metrics"), numbers: [] };
 
       const read = (key: MetricKey) => metrics.get(key) ?? null;
@@ -305,7 +306,7 @@ export async function runTool(name: string, input: Record<string, unknown>, orga
       // not have; portfolio_snapshots is portfolio-wide only. Saying so is
       // correct — inventing rows to fill the shape would be the exact failure
       // this rewrite exists to remove.
-      const metrics = await readMetrics(organizationId, ["total_units", "total_properties", "economic_occupancy_pct"]);
+      const metrics = await readMetrics(dbSession, organizationId, ["total_units", "total_properties", "economic_occupancy_pct"]);
       if (metrics.size === 0) return { json: noDataAvailable("a property-level breakdown"), numbers: [] };
       const json: Record<string, unknown> = {
         available: true,
@@ -323,7 +324,7 @@ export async function runTool(name: string, input: Record<string, unknown>, orga
 
     case "get_leasing_funnel": {
       if (!organizationId) return { json: noDataAvailable("leasing funnel counts"), numbers: [] };
-      const stages = await readFunnel(organizationId);
+      const stages = await readFunnel(dbSession, organizationId);
       if (stages.length === 0) return { json: noDataAvailable("leasing funnel counts"), numbers: [] };
       const byStage = new Map(stages.map((row) => [row.stage, row.count]));
       const json: Record<string, unknown> = { available: true };
@@ -345,7 +346,7 @@ export async function runTool(name: string, input: Record<string, unknown>, orga
       if (!organizationId) return { json: noDataAvailable("a metric history"), numbers: [] };
       const metric = String(input.metric ?? "");
       if (!metric) return { json: noDataAvailable("a metric history"), numbers: [] };
-      const points = await readMetricSeries(organizationId, metric);
+      const points = await readMetricSeries(dbSession, organizationId, metric);
       if (points.length === 0) return { json: noDataAvailable(`a history for "${metric}"`), numbers: [] };
       const json = {
         available: true,
@@ -358,7 +359,7 @@ export async function runTool(name: string, input: Record<string, unknown>, orga
 
     case "get_accounting_breakdown": {
       if (!organizationId) return { json: noDataAvailable("an accounting breakdown"), numbers: [] };
-      const metrics = await readMetrics(organizationId, ["noi", "rent_billed", "rent_collected"]);
+      const metrics = await readMetrics(dbSession, organizationId, ["noi", "rent_billed", "rent_collected"]);
       if (metrics.size === 0) return { json: noDataAvailable("an accounting breakdown"), numbers: [] };
       const json: Record<string, unknown> = {
         available: true,
@@ -375,7 +376,7 @@ export async function runTool(name: string, input: Record<string, unknown>, orga
     case "list_documents": {
       if (!organizationId) return { json: { documents: [] }, numbers: [] };
       const { listDocuments } = await import("@/lib/documents/store");
-      const documents = await listDocuments(organizationId);
+      const documents = await listDocuments(dbSession, organizationId);
       return {
         json: { documents: documents.map((doc) => ({ id: doc.id, title: doc.title, kind: doc.kind, characters: doc.charCount })) },
         // Character counts are metadata about the list, not figures about the
@@ -388,7 +389,7 @@ export async function runTool(name: string, input: Record<string, unknown>, orga
       if (!organizationId) return { json: { error: "No workspace context." }, numbers: [] };
       const documentId = typeof input.document_id === "string" ? input.document_id : "";
       const { getDocument } = await import("@/lib/documents/store");
-      const document = documentId ? await getDocument(organizationId, documentId) : null;
+      const document = documentId ? await getDocument(dbSession, organizationId, documentId) : null;
       if (!document) return { json: { error: "No such document in this workspace." }, numbers: [] };
       return {
         json: { title: document.title, kind: document.kind, text: document.contentText },
@@ -407,7 +408,7 @@ export async function runTool(name: string, input: Record<string, unknown>, orga
       if (!organizationId || !allowed.includes(statement)) {
         return { json: { error: "Not a recognized topic/statement pair. Nothing was recorded." }, numbers: [] };
       }
-      await recordPreference(organizationId, topic, statement);
+      await recordPreference(dbSession, organizationId, topic, statement);
       return { json: { recorded: describePreference(topic, statement) }, numbers: [] };
     }
 

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * A taught preference is only real if it reaches whichever agent takes the
@@ -30,15 +32,21 @@ test("every entry point that starts the Ask Aval loop feeds it taught preference
 test("no unlisted file starts the Ask Aval loop", async () => {
   // If this fails, a new entry point exists: add it above *and* make sure it
   // passes preference context, rather than just widening the list.
-  const { execSync } = await import("node:child_process");
-  const root = new URL("..", import.meta.url).pathname;
-  const found = execSync(
-    `grep -rl "runAskAvalLoop(" ${root}lib ${root}app --include="*.ts" || true`,
-    { encoding: "utf8" },
-  )
-    .split("\n")
-    .map((line) => line.trim().replace(root, ""))
-    .filter((line) => line.length > 0 && !line.endsWith("lib/ask-aval/loop.ts"))
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const sourceFiles = async (directory: string): Promise<string[]> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    const nested = await Promise.all(entries.map((entry) => {
+      const target = join(directory, entry.name);
+      return entry.isDirectory() ? sourceFiles(target) : Promise.resolve(entry.name.endsWith(".ts") ? [target] : []);
+    }));
+    return nested.flat();
+  };
+  const files = [...await sourceFiles(join(root, "lib")), ...await sourceFiles(join(root, "app"))];
+  const matches = await Promise.all(files.map(async (file) => (await readFile(file, "utf8")).includes("runAskAvalLoop(") ? file : null));
+  const found = matches
+    .filter((file): file is string => file !== null)
+    .map((file) => relative(root, file).replaceAll("\\", "/"))
+    .filter((file) => file !== "lib/ask-aval/loop.ts")
     .sort();
   assert.deepEqual(found, [...LOOP_CALLERS].sort());
 });

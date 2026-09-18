@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * Ask Aval's tools over the operations record layer.
  *
@@ -19,7 +20,7 @@
  * deliberately withheld from it (see `read_document`).
  */
 
-import type { ToolSchema } from "./anthropic";
+import type { ToolSchema } from "./model-types";
 import { noDataAvailable } from "./portfolio-data";
 import { summarizeAccounting } from "@/lib/operations/accounting";
 import { summarizeLeasing } from "@/lib/operations/leasing";
@@ -131,7 +132,7 @@ function periodFrom(input: Record<string, unknown>) {
  *   there is no data, so the record-based path takes over only where records
  *   actually exist. Every other tool here is new and answers for itself.
  */
-export async function runOperationsTool(
+export async function runOperationsTool(dbSession: DbSession,
   name: string,
   input: Record<string, unknown>,
   organizationId: string | undefined,
@@ -141,7 +142,7 @@ export async function runOperationsTool(
 
   switch (name) {
     case "get_property_breakdown": {
-      const portfolio = await summarizePortfolio(organizationId);
+      const portfolio = await summarizePortfolio(dbSession, organizationId);
       // No unit records: let the snapshot-based executor answer instead.
       if (portfolio.occupancy.totalUnits === 0) return null;
 
@@ -162,7 +163,7 @@ export async function runOperationsTool(
     case "get_delinquent_accounts": {
       const limit = Math.min(Math.max(Number(input.limit) || 20, 1), 50);
       const period = currentMonthPeriod();
-      const accounting = await summarizeAccounting(organizationId, period.start, period.end);
+      const accounting = await summarizeAccounting(dbSession, organizationId, period.start, period.end);
       // No ledger: fall through, so the answer comes from one place rather
       // than two paths that could word "no data" differently.
       if (!accounting.aging) return null;
@@ -174,7 +175,7 @@ export async function runOperationsTool(
       }
 
       const top = accounting.delinquents.slice(0, limit);
-      const residents = await residentsForLeases(organizationId, top.map((account) => account.leaseId));
+      const residents = await residentsForLeases(dbSession, organizationId, top.map((account) => account.leaseId));
       const json = {
         available: true,
         aging_totals_cents: accounting.aging.totals,
@@ -203,7 +204,7 @@ export async function runOperationsTool(
 
     case "get_operating_statement": {
       const period = periodFrom(input);
-      const accounting = await summarizeAccounting(organizationId, period.start, period.end);
+      const accounting = await summarizeAccounting(dbSession, organizationId, period.start, period.end);
       if (!accounting.profitAndLoss && !accounting.collections) {
         return { json: noDataAvailable("general-ledger or resident-ledger data"), numbers: [] };
       }
@@ -227,7 +228,7 @@ export async function runOperationsTool(
 
     case "get_maintenance_performance": {
       const period = periodFrom(input);
-      const report = await summarizeMaintenanceOperations(organizationId, period.start, period.end);
+      const report = await summarizeMaintenanceOperations(dbSession, organizationId, period.start, period.end);
       if (report.summary.totalWorkOrders === 0) return { json: noDataAvailable("work-order records"), numbers: [] };
 
       const json = {
@@ -251,7 +252,7 @@ export async function runOperationsTool(
 
     case "get_leasing_velocity": {
       const period = periodFrom(input);
-      const leasing = await summarizeLeasing(organizationId, period.start, period.end);
+      const leasing = await summarizeLeasing(dbSession, organizationId, period.start, period.end);
       if (!leasing.health && leasing.activeLeaseCount === 0) {
         return { json: noDataAvailable("leasing lead or lease records"), numbers: [] };
       }
@@ -273,11 +274,11 @@ export async function runOperationsTool(
     case "get_operations_insights": {
       const period = periodFrom(input);
       const [portfolio, leasing, maintenance, accounting, conflicts] = await Promise.all([
-        summarizePortfolio(organizationId),
-        summarizeLeasing(organizationId, period.start, period.end),
-        summarizeMaintenanceOperations(organizationId, period.start, period.end),
-        summarizeAccounting(organizationId, period.start, period.end),
-        listOpenConflicts(organizationId),
+        summarizePortfolio(dbSession, organizationId),
+        summarizeLeasing(dbSession, organizationId, period.start, period.end),
+        summarizeMaintenanceOperations(dbSession, organizationId, period.start, period.end),
+        summarizeAccounting(dbSession, organizationId, period.start, period.end),
+        listOpenConflicts(dbSession, organizationId),
       ]);
       const insights = deriveInsights({ portfolio, leasing, maintenance, accounting, conflicts });
       if (insights.length === 0) {
@@ -312,7 +313,7 @@ export async function runOperationsTool(
     }
 
     case "get_data_conflicts": {
-      const conflicts = await listOpenConflicts(organizationId);
+      const conflicts = await listOpenConflicts(dbSession, organizationId);
       if (conflicts.length === 0) {
         return { json: { available: true, conflicts: [], note: "No connected systems currently disagree about a stored field." }, numbers: [] };
       }

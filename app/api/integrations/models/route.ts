@@ -1,12 +1,14 @@
+import { withApiSession } from "@/lib/api/with-session";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections } from "@/db/postgres/schema";
 import { decryptSecret } from "@/lib/integrations/crypto";
 import { getProvider } from "@/lib/integrations/catalog";
 import { isModelProviderId, listModelsDetailed } from "@/lib/integrations/model-providers";
 import { codexInstallationId, isSubscriptionProviderId } from "@/lib/integrations/subscription-oauth";
 import { getApiIdentity } from "@/lib/integrations/session";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
 
 const bindings = () => env as unknown as Record<string, string | undefined>;
 
@@ -17,10 +19,11 @@ const bindings = () => env as unknown as Record<string, string | undefined>;
  * org to already have a connected credential for that provider; there's
  * nothing to list a model catalog against otherwise.
  */
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   const providerId = new URL(request.url).searchParams.get("provider") ?? "";
+  if (isSubscriptionProviderId(providerId) && !PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
   if (!isModelProviderId(providerId)) return Response.json({ error: "Unknown provider" }, { status: 400 });
   const catalogEntry = getProvider(providerId);
   if (!catalogEntry) return Response.json({ error: "Unknown provider" }, { status: 400 });
@@ -28,7 +31,7 @@ export async function GET(request: Request) {
   const encryptionKey = bindings().INTEGRATION_TOKEN_ENCRYPTION_KEY;
   if (!encryptionKey) return Response.json({ error: "Credential encryption is not configured" }, { status: 409 });
 
-  const db = getDb();
+  const db = dbSession.db;
   const [connection] = await db.select({ accessTokenCiphertext: integrationConnections.accessTokenCiphertext, status: integrationConnections.status, externalAccountId: integrationConnections.externalAccountId })
     .from(integrationConnections)
     .where(and(eq(integrationConnections.organizationId, identity.organizationId), eq(integrationConnections.provider, providerId)))
@@ -45,12 +48,10 @@ export async function GET(request: Request) {
     // ChatGPT-Account-ID the inference requests send.
     // Same derived, workspace-stable install id the inference path sends —
     // this backend requires it on every route.
-    const result = await listModelsDetailed(
-      providerId,
-      accessToken,
-      connection.externalAccountId ?? undefined,
-      await codexInstallationId(identity.organizationId),
-    );
+    const installationId = await codexInstallationId(identity.organizationId);
+    const result = await dbSession.outsideTransaction(() => listModelsDetailed(
+      providerId, accessToken, connection.externalAccountId ?? undefined, installationId,
+    ));
     return Response.json({
       provider: providerId,
       models: result.models,
@@ -67,3 +68,5 @@ export async function GET(request: Request) {
     return Response.json({ error: error instanceof Error ? error.message : "Could not list models for this provider." }, { status: 502 });
   }
 }
+
+export const GET = withApiSession(GETWithSession);

@@ -1,19 +1,21 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { createCustomPersona, listCustomPersonas, InvalidPersonaInputError } from "@/lib/ask-aval/custom-personas";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
-  const personas = await listCustomPersonas(identity.organizationId);
+  const personas = await listCustomPersonas(dbSession, identity.organizationId);
   return Response.json({ personas });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   const body = (await request.json().catch(() => ({}))) as {
     label?: string;
@@ -24,7 +26,7 @@ export async function POST(request: Request) {
   };
 
   try {
-    const persona = await createCustomPersona(identity.organizationId, identity.userId, {
+    const persona = await createCustomPersona(dbSession, identity.organizationId, identity.userId, {
       label: typeof body.label === "string" ? body.label : "",
       focusDescription: typeof body.focusDescription === "string" ? body.focusDescription : "",
       toolNames: Array.isArray(body.toolNames) ? body.toolNames.filter((name) => typeof name === "string") : null,
@@ -37,3 +39,6 @@ export async function POST(request: Request) {
     throw err;
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

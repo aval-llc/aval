@@ -1,3 +1,5 @@
+import { withApiSession, withWorkerOrganizationSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 import { env } from "cloudflare:workers";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
@@ -21,25 +23,25 @@ import { runTaskInBackground, type AgentWorkerEnv } from "@/lib/agents/worker";
  * so "a person approved this" would be a claim about nobody.
  */
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   // The cron is authoritative; this opportunistic sweep keeps a just-expired
   // request from appearing actionable between minute ticks.
-  await expireStaleApprovals(identity.organizationId);
+  await expireStaleApprovals(dbSession, identity.organizationId);
 
   const rootId = new URL(request.url).searchParams.get("rootTaskId");
   let taskIds: string[] | undefined;
   if (rootId) {
-    const plan = await goalPlan(identity.organizationId, rootId);
+    const plan = await goalPlan(dbSession, identity.organizationId, rootId);
     if (!plan) return Response.json({ error: "No such task" }, { status: 404 });
     taskIds = [rootId, ...plan.nodes.map(node => node.id)];
   }
   // Apply the task scope before the inbox limit, so a busy workspace cannot
   // hide this conversation's pending decision behind unrelated approvals.
-  const pending = await listPendingApprovals(identity.organizationId, 50, taskIds);
+  const pending = await listPendingApprovals(dbSession, identity.organizationId, 50, taskIds);
   return Response.json({
     approvals: pending.map((approval) => ({
       id: approval.id,
@@ -58,10 +60,10 @@ export async function GET(request: Request) {
   }, { headers: { "cache-control": "no-store" } });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
   if (isGuestIdentity(identity)) {
     return Response.json({ error: "Sign in to approve or reject an agent action." }, { status: 403 });
   }
@@ -71,12 +73,12 @@ export async function POST(request: Request) {
   const decision = body.decision === "approved" || body.decision === "rejected" ? body.decision : null;
   if (!approvalId || !decision) return Response.json({ error: "approvalId and decision ('approved' | 'rejected') are required" }, { status: 400 });
 
-  const approval = await getApproval(identity.organizationId, approvalId);
+  const approval = await getApproval(dbSession, identity.organizationId, approvalId);
   if (!approval) return Response.json({ error: "No such approval" }, { status: 404 });
-  const task = await getTask(identity.organizationId, approval.taskId);
+  const task = await getTask(dbSession, identity.organizationId, approval.taskId);
   if (!task) return Response.json({ error: "No such task" }, { status: 404 });
 
-  const outcome = await decideApproval(
+  const outcome = await decideApproval(dbSession,
     identity.organizationId,
     approvalId,
     decision,
@@ -97,15 +99,16 @@ export async function POST(request: Request) {
     return Response.json({ error: MESSAGES[outcome.reason] }, { status });
   }
 
-  await appendAuditEvents(identity.organizationId, [
+  await appendAuditEvents(dbSession, identity.organizationId, [
     { kind: "approval_decided", label: `${approval.toolName}:${decision}`, payloadDigest: await digestPayload(approvalId), count: approval.stepIndex },
   ]);
 
   // A first decision on an elevated action leaves it parked until a second,
   // distinct person approves. Rejection is immediately final.
   if (outcome.complete) {
-    const work = runTaskInBackground(env as unknown as AgentWorkerEnv, identity.organizationId, task.id, "approval")
-      .catch((error) => console.error("agent_approval_background_failed", { approvalId, taskId: task.id, error }));
+    const work = dbSession.afterCommit(() => withWorkerOrganizationSession(identity.organizationId, (workerSession) =>
+      runTaskInBackground(workerSession, env as unknown as AgentWorkerEnv, identity.organizationId, task.id, "approval"),
+    )).catch((error) => console.error("agent_approval_background_failed", { approvalId, taskId: task.id, error }));
     getRequestExecutionContext()?.waitUntil(work);
   }
   return Response.json({
@@ -130,3 +133,6 @@ const MESSAGES = {
 function safeParse(json: string): unknown {
   try { return JSON.parse(json); } catch { return {}; }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);

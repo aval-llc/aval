@@ -1,4 +1,5 @@
-import { taskBoundary } from './task-boundary';
+import type { DbSession } from "@/db/postgres/session";
+import { taskBoundary, inboundToolAllowed } from './task-boundary';
 /**
  * The tool executor: the only path from a model's proposal to a tool actually
  * running.
@@ -68,10 +69,10 @@ export interface ExecutionOutcome {
 /** Backoff between retries. Exponential with a floor, so a transient D1 blip does not become four immediate hammer-blows. */
 const RETRY_BASE_MS = 250;
 
-export async function executeTool(request: ExecutionRequest): Promise<ExecutionOutcome> {
+export async function executeTool(dbSession: DbSession, request: ExecutionRequest): Promise<ExecutionOutcome> {
   const audit: AuditEvent[] = [];
   if (request.task) {
-    const refusal = await taskBoundary(request.subject.organizationId, request.subject.userId, request.task.id, request.toolName, request.args);
+    const refusal = await taskBoundary(dbSession, request.subject.organizationId, request.subject.userId, request.task.id, request.toolName, request.args);
     if (refusal) {
       audit.push({kind:'policy_decision',label:request.toolName+':deny',payloadDigest:await digestPayload(refusal),count:0});
       return {result:{status:'denied',code:'permission_denied',reason:refusal},audit};
@@ -79,7 +80,7 @@ export async function executeTool(request: ExecutionRequest): Promise<ExecutionO
   }
   const descriptor = getTool(request.toolName);
   if (request.task) {
-    const task = await getTask(request.subject.organizationId, request.task.id);
+    const task = await getTask(dbSession, request.subject.organizationId, request.task.id);
     const scope = task ? JSON.parse(task.executionScopeJson) : {};
     if (task && ['send_external_message','place_call','publish_listing'].includes(request.toolName)) {
       const evidence = evidenceNumbersFromTranscript(JSON.parse(task.transcriptJson));
@@ -87,11 +88,11 @@ export async function executeTool(request: ExecutionRequest): Promise<ExecutionO
       if (!checkFaithfulness(claims, withDerivedNumbers(evidence)).ok) return { result: { status: 'denied', code: 'invalid_arguments', reason: 'The proposed communication contains figures not verified by this task’s evidence. Read the supporting records or remove the unsupported figures.' }, audit };
     }
 
-    if (scope.source === 'inbound' && descriptor?.mutates && (request.toolName !== 'send_external_message' || request.args.conversation_id !== scope.conversationId || request.args.to !== undefined || request.args.provider !== undefined)) return { result: { status: 'denied', code: 'permission_denied', reason: 'An inbound-message task can only reply to its originating conversation.' }, audit };
+    if (scope.source === 'inbound' && descriptor?.mutates && !inboundToolAllowed(scope, request.toolName, request.args)) return { result: { status: 'denied', code: 'permission_denied', reason: 'An inbound-message task can only reply to its originating conversation.' }, audit };
   }
 
   if (descriptor && !descriptor.unimplemented && (descriptor.mutates || request.toolName === 'request_execution_plan')) {
-    const authority = await executionAuthority(request.subject.organizationId, request.subject.userId, request.task?.id, request.toolName, request.args);
+    const authority = await executionAuthority(dbSession, request.subject.organizationId, request.subject.userId, request.task?.id, request.toolName, request.args);
     if (!authority.role || (descriptor.requiredPermission === 'messaging.send.external' && authority.role === 'member' && !request.task?.approvalId && !authority.planned)) return { result: { status: 'denied', code: 'permission_denied', reason: 'Current workspace membership does not authorize this action.' }, audit };
     request = { ...request, context: { ...request.context, autonomyMode: authority.mode, approvedPlanAction: authority.planned } };
   }
@@ -137,7 +138,7 @@ export async function executeTool(request: ExecutionRequest): Promise<ExecutionO
   }
 
   const financialDecision = tool.financial
-    ? await evaluateFinancialProposal(request.subject.organizationId, tool, request.args)
+    ? await evaluateFinancialProposal(dbSession, request.subject.organizationId, tool, request.args)
     : null;
   if (financialDecision && !financialDecision.ok) {
     return {
@@ -184,7 +185,7 @@ export async function executeTool(request: ExecutionRequest): Promise<ExecutionO
     };
   }
 
-  return reserveThenRun(tool, request, key, audit, financialDecision?.ok ? financialDecision : null);
+  return reserveThenRun(dbSession, tool, request, key, audit, financialDecision?.ok ? financialDecision : null);
 }
 
 /**
@@ -194,7 +195,7 @@ export async function executeTool(request: ExecutionRequest): Promise<ExecutionO
  * impossible, so it must happen before the side effect, not after it. A
  * read-only tool has no key and skips straight through.
  */
-async function reserveThenRun(
+async function reserveThenRun(dbSession: DbSession,
   tool: ToolDescriptor,
   request: ExecutionRequest,
   key: string | null,
@@ -202,7 +203,7 @@ async function reserveThenRun(
   financial: Extract<FinancialProposalDecision, { ok: true }> | null = null,
 ): Promise<ExecutionOutcome> {
   if (key && request.task) {
-    const reserved = await reserveMutation({
+    const reserved = await reserveMutation(dbSession, {
       taskId: request.task.id,
       organizationId: request.subject.organizationId,
       stepIndex: request.task.stepIndex,
@@ -219,7 +220,7 @@ async function reserveThenRun(
 
   let financialOperationId: string | null = null;
   if (key && request.task && financial) {
-    const reservation = await reserveFinancialOperation({
+    const reservation = await reserveFinancialOperation(dbSession, {
       organizationId: request.subject.organizationId,
       taskId: request.task.id,
       approvalId: request.task.approvalId,
@@ -240,7 +241,7 @@ async function reserveThenRun(
     }
     financialOperationId = reservation.operation.id;
   }
-  return runWithRetries(tool, request, key, audit, financialOperationId);
+  return runWithRetries(dbSession, tool, request, key, audit, financialOperationId);
 }
 
 /**
@@ -252,10 +253,10 @@ async function reserveThenRun(
  * still performed, because an approval from an hour ago is not evidence that
  * the permission still stands now.
  */
-export async function executeApprovedTool(request: ExecutionRequest & { task: { id: string; stepIndex: number } }): Promise<ExecutionOutcome> {
+export async function executeApprovedTool(dbSession: DbSession, request: ExecutionRequest & { task: { id: string; stepIndex: number } }): Promise<ExecutionOutcome> {
   const audit: AuditEvent[] = [];
   if (request.task) {
-    const refusal = await taskBoundary(request.subject.organizationId, request.subject.userId, request.task.id, request.toolName, request.args);
+    const refusal = await taskBoundary(dbSession, request.subject.organizationId, request.subject.userId, request.task.id, request.toolName, request.args);
     if (refusal) {
       audit.push({kind:'policy_decision',label:request.toolName+':deny',payloadDigest:await digestPayload(refusal),count:0});
       return {result:{status:'denied',code:'permission_denied',reason:refusal},audit};
@@ -263,7 +264,7 @@ export async function executeApprovedTool(request: ExecutionRequest & { task: { 
   }
   const descriptor = getTool(request.toolName);
   if (request.task) {
-    const task = await getTask(request.subject.organizationId, request.task.id);
+    const task = await getTask(dbSession, request.subject.organizationId, request.task.id);
     const scope = task ? JSON.parse(task.executionScopeJson) : {};
     if (task && ['send_external_message','place_call','publish_listing'].includes(request.toolName)) {
       const evidence = evidenceNumbersFromTranscript(JSON.parse(task.transcriptJson));
@@ -271,11 +272,11 @@ export async function executeApprovedTool(request: ExecutionRequest & { task: { 
       if (!checkFaithfulness(claims, withDerivedNumbers(evidence)).ok) return { result: { status: 'denied', code: 'invalid_arguments', reason: 'The proposed communication contains figures not verified by this task’s evidence. Read the supporting records or remove the unsupported figures.' }, audit };
     }
 
-    if (scope.source === 'inbound' && descriptor?.mutates && (request.toolName !== 'send_external_message' || request.args.conversation_id !== scope.conversationId || request.args.to !== undefined || request.args.provider !== undefined)) return { result: { status: 'denied', code: 'permission_denied', reason: 'An inbound-message task can only reply to its originating conversation.' }, audit };
+    if (scope.source === 'inbound' && descriptor?.mutates && !inboundToolAllowed(scope, request.toolName, request.args)) return { result: { status: 'denied', code: 'permission_denied', reason: 'An inbound-message task can only reply to its originating conversation.' }, audit };
   }
 
   if (descriptor && !descriptor.unimplemented && (descriptor.mutates || request.toolName === 'request_execution_plan')) {
-    const authority = await executionAuthority(request.subject.organizationId, request.subject.userId, request.task?.id, request.toolName, request.args);
+    const authority = await executionAuthority(dbSession, request.subject.organizationId, request.subject.userId, request.task?.id, request.toolName, request.args);
     if (!authority.role || (descriptor.requiredPermission === 'messaging.send.external' && authority.role === 'member' && !request.task?.approvalId && !authority.planned)) return { result: { status: 'denied', code: 'permission_denied', reason: 'Current workspace membership does not authorize this action.' }, audit };
     request = { ...request, context: { ...request.context, autonomyMode: authority.mode, approvedPlanAction: authority.planned } };
   }
@@ -287,7 +288,7 @@ export async function executeApprovedTool(request: ExecutionRequest & { task: { 
   const shape = validateToolArguments(TOOL_SCHEMAS.get(tool.name), request.args);
   if (!shape.ok) return { result: { status: 'denied', code: 'invalid_arguments', reason: shape.problems.join(' ') }, audit };
   const financialDecision = tool.financial
-    ? await evaluateFinancialProposal(request.subject.organizationId, tool, request.args)
+    ? await evaluateFinancialProposal(dbSession, request.subject.organizationId, tool, request.args)
     : null;
   if (financialDecision && !financialDecision.ok) {
     return { result: { status: "denied", code: "financial_policy_denied", reason: financialDecision.reason }, audit };
@@ -296,10 +297,10 @@ export async function executeApprovedTool(request: ExecutionRequest & { task: { 
     return { result: { status: "denied", code: "financial_policy_denied", reason: "The financial policy changed after approval. The action must be proposed again." }, audit };
   }
   const key = tool.mutates ? idempotencyKey(request.task.id, request.task.stepIndex, tool.name) : null;
-  return reserveThenRun(tool, request, key, audit, financialDecision?.ok ? financialDecision : null);
+  return reserveThenRun(dbSession, tool, request, key, audit, financialDecision?.ok ? financialDecision : null);
 }
 
-async function runWithRetries(
+async function runWithRetries(dbSession: DbSession,
   tool: ToolDescriptor,
   request: ExecutionRequest,
   _key: string | null,
@@ -312,7 +313,7 @@ async function runWithRetries(
   for (let attempt = 1; attempt <= tool.maxRetries + 1; attempt++) {
     try {
       const out = await withTimeout(
-        runTool(tool.name, request.args, request.subject.organizationId, request.task ? `${request.task.id}:${tool.name}:${await digestPayload(canonicalAction(request.args))}` : _key ?? undefined,
+        runTool(dbSession, tool.name, request.args, request.subject.organizationId, request.task ? `${request.task.id}:${tool.name}:${await digestPayload(canonicalAction(request.args))}` : _key ?? undefined,
           // The persona travels with the task coordinates so a PMS write can
           // re-resolve this agent's deployments at execution time, not just at
           // assembly. `approvalId` is already on `task` and reaches the same gate.
@@ -329,7 +330,7 @@ async function runWithRetries(
         audit.push({ kind: "tool_call", label: `${tool.name}:truncated`, payloadDigest: await digestPayload(bounded.originalChars), count: bounded.originalChars });
       }
       if (financialOperationId) {
-        const recorded = await recordFinancialToolResult(financialOperationId, request.subject.organizationId, bounded.json);
+        const recorded = await recordFinancialToolResult(dbSession, financialOperationId, request.subject.organizationId, bounded.json);
         if (!recorded.ok) {
           audit.push({ kind: "tool_error", label: `${tool.name}:reconciliation_required`, payloadDigest: await digestPayload(recorded.reason), count: attempt });
           return { result: { status: "failed", reason: `${recorded.reason} The operation is marked unknown and requires reconciliation; it will not be retried.`, attempts: attempt, tool }, audit };

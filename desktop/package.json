@@ -1,6 +1,6 @@
 {
   "name": "aval-desktop",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "description": "Trusted desktop shell for Aval with a local Codex App Server bridge",
   "main": "main.cjs",

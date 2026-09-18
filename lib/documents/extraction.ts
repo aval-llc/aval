@@ -1,3 +1,4 @@
+import type { DbSession } from "@/db/postgres/session";
 /**
  * Extracts named financial fields from a stored document — the langflow
  * `Financial Report Parser` idea, which was deferred until Aval had somewhere
@@ -11,7 +12,7 @@
  * document's own wording instead of trusting the reading.
  */
 
-import { AnthropicError, type AskAvalEnv, type Message, type ToolSchema, type ToolUseBlock } from "@/lib/ask-aval/anthropic";
+import { ModelProviderError, type AskAvalEnv, type Message, type ToolSchema, type ToolUseBlock } from "@/lib/ask-aval/model-types";
 import { callModel } from "@/lib/ask-aval/model-router";
 import { checkUsageBlocked, recordUsage, type AskAvalSession } from "@/lib/ask-aval/usage";
 import { json } from "@/lib/ask-aval/loop";
@@ -73,7 +74,7 @@ export interface DocumentExtraction {
   truncated: boolean;
 }
 
-export async function extractDocumentFinancials(
+export async function extractDocumentFinancials(dbSession: DbSession,
   documentText: string,
   kind: DocumentKind,
   env: AskAvalEnv,
@@ -82,7 +83,7 @@ export async function extractDocumentFinancials(
   const text = documentText.trim();
   if (!text) return json({ error: "The document has no text to read." }, 400);
 
-  const blockReason = await checkUsageBlocked(env, session);
+  const blockReason = await checkUsageBlocked(dbSession, env, session);
   if (blockReason === "token_balance") return json({ error: "Aval has run out of tokens for this billing period. Purchase more to continue.", code: "token_balance" }, 402);
   if (blockReason === "daily_cap") return json({ error: "Aval has reached its usage cap for today. Try again tomorrow.", code: "daily_cap" }, 429);
 
@@ -96,14 +97,14 @@ export async function extractDocumentFinancials(
   }];
 
   try {
-    const res = await callModel(env, session.orgId, {
+    const res = await callModel(dbSession, env, session.orgId, {
       system: SYSTEM,
       messages,
       tools: [EXTRACT_TOOL],
       tool_choice: { type: "tool", name: TOOL_NAME },
       max_tokens: 2048,
     });
-    await recordUsage(session, res.usage.input_tokens, res.usage.output_tokens);
+    await recordUsage(dbSession, session, res.usage.input_tokens, res.usage.output_tokens);
 
     const toolUse = res.content.find((block): block is ToolUseBlock => block.type === "tool_use" && block.name === TOOL_NAME);
     if (!toolUse) return json({ error: "The model did not return a structured extraction." }, 502);
@@ -129,7 +130,7 @@ export async function extractDocumentFinancials(
     };
     return json({ extraction });
   } catch (err) {
-    if (err instanceof AnthropicError) {
+    if (err instanceof ModelProviderError) {
       return json({ error: err.message, retryable: err.retryable }, err.status >= 500 ? 502 : 400);
     }
     console.error("document_extraction_unhandled", err);

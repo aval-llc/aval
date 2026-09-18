@@ -449,15 +449,14 @@ function ProviderAccordionRow({ provider, twin, isOpen, onToggle, isActive, swit
  * separated by a plain "/" — a live, real picker, not a static echo. The
  * model side fetches the connected provider's real, current model list
  * (`GET /api/integrations/models`) rather than a hand-typed guess frozen
- * at whenever this catalog was written. Aval's own bundled default has no
- * live list to fetch (there's nothing to pick between), so it renders as
- * plain text instead of a combobox.
+ * at whenever this catalog was written. When no provider is selected, the
+ * row directs the workspace to connect one before model-backed features run.
  */
 function ModelBeingUsedRow({ providers, activeProvider, activeEntry, onSwitchProvider, onConfigureProvider, onModelChanged }: {
   providers: Provider[];
   activeProvider: string | null;
   activeEntry: Provider | undefined;
-  onSwitchProvider: (providerId: string | null) => void;
+  onSwitchProvider: (providerId: string) => void;
   onConfigureProvider: (providerId: string) => void;
   onModelChanged: () => void;
 }) {
@@ -481,7 +480,7 @@ function ModelBeingUsedRow({ providers, activeProvider, activeEntry, onSwitchPro
   const [savingModel, setSavingModel] = useState(false);
 
   const connectedProviders = providers.filter((provider) => provider.category === "Model" && provider.connection?.status === "connected");
-  const currentModel = activeEntry?.defaultModel ?? (activeProvider ? t("IntelligenceSettings.subscriptionDefaultModelShort") : t("IntelligenceSettings.includedWithAval"));
+  const currentModel = activeEntry?.defaultModel ?? (activeProvider ? t("IntelligenceSettings.subscriptionDefaultModelShort") : t("IntelligenceSettings.notConnected"));
 
   const loadModels = async () => {
     if (!activeProvider) return;
@@ -530,15 +529,13 @@ function ModelBeingUsedRow({ providers, activeProvider, activeEntry, onSwitchPro
       <div className="intelligence-model-row-controls">
         <div className="intelligence-model-picker">
           <button type="button" className="intelligence-model-picker-trigger" onClick={() => setProviderMenuOpen((current) => !current)}>
-            <BrandMark provider={activeProvider ?? "aval"} small />
-            <span>{activeProvider ? (activeEntry?.title ?? activeProvider) : t("IntelligenceSettings.avalDefault")}</span>
+            {activeProvider ? <BrandMark provider={activeProvider} small /> : <WarningTriangle width={16} height={16} />}
+            <span>{activeProvider ? (activeEntry?.title ?? activeProvider) : t("IntelligenceSettings.noProvider")}</span>
             <NavArrowDown width={13} height={13} className={providerMenuOpen ? "provider-row-chevron open" : "provider-row-chevron"} />
           </button>
           {providerMenuOpen && (
             <div className="menu-popover intelligence-model-menu">
-              <button type="button" onClick={() => { onSwitchProvider(null); setProviderMenuOpen(false); }}>
-                <BrandMark provider="aval" small />{t("IntelligenceSettings.avalDefault")}
-              </button>
+              {connectedProviders.length === 0 && <p className="intelligence-model-menu-status">{t("IntelligenceSettings.connectProviderFirst")}</p>}
               {connectedProviders.map((provider) => (
                 <button type="button" key={provider.id} onClick={() => { onSwitchProvider(provider.id); setProviderMenuOpen(false); }}>
                   <BrandMark provider={provider.id} small />{provider.title}
@@ -582,13 +579,6 @@ function ModelBeingUsedRow({ providers, activeProvider, activeEntry, onSwitchPro
                   <button
                     type="button"
                     className="intelligence-model-unavailable-primary"
-                    onClick={() => { onSwitchProvider(null); setModelMenuOpen(false); }}
-                  >
-                    {t("IntelligenceSettings.useAvalIntelligence")}
-                  </button>
-                  <button
-                    type="button"
-                    className="intelligence-model-unavailable-secondary"
                     onClick={() => { setModelMenuOpen(false); onConfigureProvider("openai"); }}
                   >
                     {t("IntelligenceSettings.setUpOpenAiApiKey")}
@@ -713,11 +703,8 @@ function DesktopChatGPTCard({ state, connect, cancelLogin, logout, setActive, re
  * org. Reuses the exact same /api/integrations catalog, connect/verify
  * flow, and encrypted-credential storage as every other provider on the
  * Connections page — a model provider is just an IntegrationProvider with
- * category "Model" (lib/integrations/catalog.ts). Aval's own bundled
- * default ("Aval Intelligence" — Aval supplies the model, no key or
- * subscription needed) is a plain row in this same list, sharing the exact
- * same summary/chevron/expand shell as every real provider, just simpler
- * expanded content (a description and a "Use this" button, no forms).
+ * category "Model" (lib/integrations/catalog.ts). The workspace must connect
+ * and select a provider; there is no shared server-side model credential.
  */
 export function IntelligenceSettings() {
   const t = useTranslations();
@@ -743,8 +730,8 @@ export function IntelligenceSettings() {
 
   useEffect(() => { (async () => { await load(); })(); }, []);
 
-  const setActive = async (providerId: string | null) => {
-    setSwitching(providerId ?? "aval");
+  const setActive = async (providerId: string) => {
+    setSwitching(providerId);
     setError(null);
     try {
       if (desktop.state?.active) await desktop.setActive(false);
@@ -765,7 +752,8 @@ export function IntelligenceSettings() {
 
   if (!providers) return null;
   const modelProviders = providers.filter((provider) => provider.category === "Model" && !provider.subscriptionOf);
-  const twinByProvider = new Map(providers.filter((provider) => provider.subscriptionOf).map((provider) => [provider.subscriptionOf as string, provider]));
+  // Hosted pilot supports API keys only. The local desktop bridge is separate.
+  const twinByProvider = new Map<string, Provider>();
   const filtered = modelProviders.filter((provider) => provider.title.toLowerCase().includes(search.trim().toLowerCase()));
   const activeEntry = providers.find((provider) => provider.id === activeProvider);
   const desktopInUse = desktop.state?.active === true && desktop.state.account?.type === "chatgpt";
@@ -774,13 +762,14 @@ export function IntelligenceSettings() {
     <article className="settings-card intelligence-card" data-reveal>
       <p className="eyebrow">{t("IntelligenceSettings.eyebrow")}</p>
       <h2>{t("IntelligenceSettings.title")}</h2>
+      <p className="settings-muted">The hosted pilot uses your workspace API key. Existing subscription connections must be replaced; Aval will not silently switch providers.</p>
 
       {desktopInUse && desktop.state ? (
         <DesktopModelBeingUsedRow state={desktop.state} onModel={desktop.setModel} />
       ) : (
         <ModelBeingUsedRow
-          key={activeProvider ?? "aval"}
-          providers={providers}
+          key={activeProvider ?? "none"}
+          providers={modelProviders}
           activeProvider={activeProvider}
           activeEntry={activeEntry}
           onSwitchProvider={(id) => void setActive(id)}
@@ -815,24 +804,6 @@ export function IntelligenceSettings() {
               refresh={desktop.refresh}
             />
           )}
-          <div className={`provider-row ${expanded === "aval" ? "is-open" : ""} ${!activeProvider ? "active" : ""}`}>
-            <button type="button" className="provider-row-summary" aria-expanded={expanded === "aval"} onClick={() => setExpanded((current) => (current === "aval" ? null : "aval"))}>
-              <BrandMark provider="aval" small />
-              <span className="provider-row-name">{t("IntelligenceSettings.avalDefault")}</span>
-              {!activeProvider && <span className="connection-status connected">{t("IntelligenceSettings.inUse")}</span>}
-              <NavArrowDown width={14} height={14} className={expanded === "aval" ? "provider-row-chevron open" : "provider-row-chevron"} />
-            </button>
-            <div className="provider-row-body" style={{ gridTemplateRows: expanded === "aval" ? "1fr" : "0fr" }}>
-              <div className="provider-row-body-inner">
-                <p className="provider-row-description">{t("IntelligenceSettings.avalDefaultDescription")}</p>
-                {activeProvider && (
-                  <button type="button" className="soft-button" disabled={switching !== null} onClick={() => void setActive(null)}>
-                    {t("IntelligenceSettings.useThis")}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
           {filtered.map((provider) => {
             // In the desktop shell ChatGPT has its own safe local card. The
             // OpenAI row remains an explicitly separate API-key option.

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "status": "user-confirmed-empty",
+  "observedAt": "2026-09-10",
+  "userReport": "The user confirmed there is no customer data in Cloudflare and will configure Supabase later.",
+  "configuredSources": [
+    {
+      "kind": "standalone-cloudflare",
+      "configuration": "wrangler.deploy.jsonc",
+      "databaseId": "d82f33a0-a119-436c-85ec-b79873247fe9",
+      "databaseName": "aval-production",
+      "status": "not-visible-in-connected-account",
+      "tableCounts": null
+    },
+    {
+      "kind": "chatgpt-sites",
+      "configuration": ".openai/hosting.json",
+      "projectId": "appgprj_6a852ce6585881918d6e900d4ebf93ae",
+      "status": "project-not-found-in-connected-session",
+      "tableCounts": null
+    },
+    {
+      "kind": "local-d1",
+      "configuration": "vite.config.ts",
+      "status": "data-not-inventoried",
+      "tableCounts": null
+    }
+  ],
+  "cutoverAllowed": false,
+  "plannedPath": "clean-install",
+  "reason": "Create and benchmark the Supabase project first. Preserve any old D1 deployment untouched until its identity is confirmed and the clean-install smoke passes."
+}

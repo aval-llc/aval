@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * POST /api/assistant/fill-template
  *
@@ -14,8 +16,8 @@ import { renderDocxFromTemplate, DocxTemplateError } from "@/lib/ask-aval/docx-t
 const MAX_TEMPLATE_BYTES = 5 * 1024 * 1024;
 const DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const form = await request.formData().catch(() => null);
@@ -55,3 +57,5 @@ export async function POST(request: Request) {
     return Response.json({ error: "The template could not be processed." }, { status: 500 });
   }
 }
+
+export const POST = withApiSession(POSTWithSession);

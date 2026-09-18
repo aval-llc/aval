@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET   /api/operations/leads — leads with their stage timestamps.
  * POST  /api/operations/leads — record an inquiry.
@@ -14,27 +16,27 @@ import { advanceLead, createLead, listLeads, markLeadLost } from "@/lib/operatio
 import { ALL_LEAD_STAGES, type LeadStage } from "@/lib/operations/types";
 import { optionalDate, optionalString, readJsonBody, requireEnum, requireString } from "@/lib/operations/validation";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const sinceParam = new URL(request.url).searchParams.get("since");
   const since = sinceParam ? new Date(sinceParam) : undefined;
-  const leads = await listLeads(
+  const leads = await listLeads(dbSession,
     identity.organizationId,
     since && !Number.isNaN(since.getTime()) ? since : undefined,
   );
   return Response.json({ leads });
 }
 
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
-  await ensureOrganization(identity);
+  await ensureOrganization(dbSession, identity);
 
   try {
     const body = await readJsonBody(request);
-    const lead = await createLead(identity.organizationId, {
+    const lead = await createLead(dbSession, identity.organizationId, {
       propertyId: optionalString(body, "propertyId", 64),
       unitId: optionalString(body, "unitId", 64),
       residentId: optionalString(body, "residentId", 64),
@@ -48,8 +50,8 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PATCH(request: Request) {
-  const identity = await getApiIdentity(request);
+async function PATCHWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   try {
@@ -62,13 +64,17 @@ export async function PATCH(request: Request) {
       // A lost lead needs its reason: "why did we lose them" is the only
       // question the lost bucket can usefully answer, and a bucket of
       // reasonless losses answers nothing.
-      await markLeadLost(identity.organizationId, leadId, requireString(body, "lostReason", 200), at);
+      await markLeadLost(dbSession, identity.organizationId, leadId, requireString(body, "lostReason", 200), at);
       return Response.json({ ok: true });
     }
 
-    const lead = await advanceLead(identity.organizationId, leadId, stage, at);
+    const lead = await advanceLead(dbSession, identity.organizationId, leadId, stage, at);
     return Response.json({ lead });
   } catch (error) {
     return operationsErrorResponse(error);
   }
 }
+
+export const GET = withApiSession(GETWithSession);
+export const POST = withApiSession(POSTWithSession);
+export const PATCH = withApiSession(PATCHWithSession);

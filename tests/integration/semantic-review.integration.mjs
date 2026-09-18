@@ -18,7 +18,8 @@ test('semantic verdicts reject malformed, contradictory, empty, truncated and in
   assert.equal(parseSemanticVerdict(valid, packet).exitCode, 0);
   const claim = valid.content[0].input.claims[0];
   for (const invalid of [
-    response({ passed: 'true' }), response({ requirements: [] }), response({ claims: [] }),
+    response({ passed: 'true' }), response({ requirements: [] }), response({ requirements: undefined }),
+    response({ claims: [] }), response({ claims: '{"claims":[{"claims_check":true}]}' }),
     response({ passed: true, issues: ['Missing expenses.'] }), response({ passed: false }),
     response({ requirements: [{ requirement: 'Expenses', satisfied: false, explanation: 'Omitted', nodeKeys: [] }] }),
     response({ claims: [{ ...claim, supported: false }] }),

@@ -147,6 +147,8 @@ const DESCRIPTORS: ToolDescriptor[] = [
   // denies every one of them (`unimplemented`), so declaring them here grants
   // nothing today and forces the next mutating feature to arrive with a risk
   // level, a permission and an approval posture already decided.
+  { ...READ_DEFAULTS, name: "read_maintenance_context", summary: "Resolve one inbound message to its resident and active lease.", requiredPermission: "maintenance.read" },
+  { name: "create_maintenance_work_order", summary: "Create an approved internal work order for a matched inbound request.", riskLevel: "high", mutates: true, requiredPermission: "maintenance.create", timeoutMs: 15_000, maxRetries: 0, idempotent: true, requiresApproval: true },
   { name: "send_external_message", summary: "Send a message to a resident or vendor over a real channel.", riskLevel: "high", mutates: true, requiredPermission: "messaging.send.external", timeoutMs: 20_000, maxRetries: 0, idempotent: false, requiresApproval: true, routine: true },
   { name: "place_call", summary: "Place a call and optionally connect a configured team.", riskLevel: "high", mutates: true, requiredPermission: "messaging.send.external", timeoutMs: 20000, maxRetries: 0, idempotent: false, requiresApproval: true, routine: true },
   { ...READ_DEFAULTS, name: "get_communication_channels", summary: "Connected channels and team routes.", requiredPermission: "portfolio.read" },

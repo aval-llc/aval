@@ -14,14 +14,33 @@ permissions:
 
 jobs:
   verify-migrate-deploy-smoke:
-    name: Verify, migrate D1, deploy, smoke
+    name: Verify, migrate Supabase, deploy, smoke
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 25
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: aval-ci-disposable-only
+          POSTGRES_DB: aval_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aval_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       AVAL_PRODUCTION_URL: ${{ vars.AVAL_PRODUCTION_URL }}
+      AVAL_HYPERDRIVE_ID: ${{ vars.AVAL_HYPERDRIVE_ID }}
+      SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+      AVAL_SMOKE_EMAIL: ${{ secrets.AVAL_SMOKE_EMAIL }}
+      AVAL_SMOKE_PASSWORD: ${{ secrets.AVAL_SMOKE_PASSWORD }}
+      AVAL_POSTGRES_CLIENT_IMAGE: postgres:17
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +55,12 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
           [[ "$AVAL_PRODUCTION_URL" == https://* ]] || { echo "::error::AVAL_PRODUCTION_URL must be an HTTPS production URL"; exit 1; }
+          [[ "$SUPABASE_URL" == https://* ]] || { echo "::error::SUPABASE_URL must be the hosted HTTPS project URL"; exit 1; }
+          test -n "$SUPABASE_ANON_KEY" || { echo "::error::Missing SUPABASE_ANON_KEY"; exit 1; }
+          test -n "$DATABASE_URL" || { echo "::error::Missing SUPABASE_DB_URL"; exit 1; }
+          test -n "$AVAL_HYPERDRIVE_ID" || { echo "::error::Missing AVAL_HYPERDRIVE_ID"; exit 1; }
+          test -n "$AVAL_SMOKE_EMAIL" || { echo "::error::Missing AVAL_SMOKE_EMAIL"; exit 1; }
+          test -n "$AVAL_SMOKE_PASSWORD" || { echo "::error::Missing AVAL_SMOKE_PASSWORD"; exit 1; }
 
       - run: npm ci
       # The root suite discovers desktop/test/, whose cases read the
@@ -44,25 +69,82 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
-
-      # Apply additive migrations before the Worker writes the new tables.
-      - name: Apply production D1 migrations
-        run: npx wrangler d1 migrations apply aval-production --remote --config wrangler.deploy.jsonc
-
-      - name: Prepare an isolated authenticated verification account
+      - run: npm run test:postgres
         env:
-          AVAL_SMOKE_EMAIL: ${{ secrets.AVAL_SMOKE_EMAIL }}
-          AVAL_SMOKE_PASSWORD: ${{ secrets.AVAL_SMOKE_PASSWORD }}
-        run: node scripts/prepare-smoke-account.mjs
+          AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
+
+      - name: Encrypt production backup before migration
+        env:
+          AVAL_BACKUP_PUBLIC_KEY: ${{ secrets.AVAL_BACKUP_PUBLIC_KEY }}
+          AVAL_BACKUP_DIRECTORY: ${{ runner.temp }}/aval-encrypted-backup
+        run: node scripts/backup-database.mjs
+
+      # This public repository retains ciphertext only. Data fingerprints and
+      # record counts are encrypted too; the private key stays in production secrets.
+      - name: Retain encrypted backup for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/aval-encrypted-backup/database.enc
+            ${{ runner.temp }}/aval-encrypted-backup/manifest.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Download retained backup for independent restoration
+        uses: actions/download-artifact@v5
+        with:
+          name: production-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/aval-downloaded-backup
+
+      - name: Require backup recovery credentials
+        env:
+          AVAL_BACKUP_PRIVATE_KEY: ${{ secrets.AVAL_BACKUP_PRIVATE_KEY }}
+        run: |
+          test -n "$AVAL_BACKUP_PRIVATE_KEY" || { echo "::error::Missing backup recovery key; migrations must not proceed"; exit 1; }
+
+      - name: Start isolated Supabase recovery database
+        run: |
+          docker run --detach --name aval-recovery --publish 127.0.0.1:5433:5432 \
+            --env POSTGRES_PASSWORD=aval-disposable-recovery-only \
+            supabase/postgres:17.6.1.136
+          for attempt in {1..60}; do
+            if docker exec aval-recovery pg_isready -U postgres; then
+              # Supabase's postgres role is not a superuser. Use the image's
+              # local administrator only inside this disposable recovery instance.
+              docker exec aval-recovery psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+                -c "ALTER ROLE supabase_admin WITH LOGIN PASSWORD 'aval-disposable-recovery-only'"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Disposable recovery database did not start"; exit 1
+
+      - name: Restore downloaded backup and verify data and isolation before migration
+        env:
+          AVAL_BACKUP_PRIVATE_KEY: ${{ secrets.AVAL_BACKUP_PRIVATE_KEY }}
+          AVAL_RESTORE_DATABASE_URL: postgresql://supabase_admin:aval-disposable-recovery-only@127.0.0.1:5433/aval_restore_production
+          BACKUP_DIRECTORY: ${{ runner.temp }}/aval-downloaded-backup
+        run: node scripts/restore-database.mjs "$BACKUP_DIRECTORY/database.enc" "$BACKUP_DIRECTORY/manifest.json"
+
+      - name: Remove disposable recovery container
+        if: always()
+        run: docker rm --force --volumes aval-recovery >/dev/null 2>&1 || true
+
+      - name: Apply production Supabase migrations
+        run: npm run db:migrate -- --allow-remote
+
+      - name: Materialize protected Hyperdrive configuration
+        run: npm run cloudflare:deploy-config
 
       - name: Deploy production Worker and cron
-        run: npx wrangler deploy --config wrangler.deploy.jsonc
+        run: >-
+          npx wrangler deploy --config wrangler.deploy.generated.jsonc
+          --tag "$GITHUB_SHA"
+          --message "GitHub Actions $GITHUB_SHA"
+          --var "SUPABASE_URL:$SUPABASE_URL"
+          --var "SUPABASE_ANON_KEY:$SUPABASE_ANON_KEY"
 
-      - name: Prove one authenticated live durable-agent run
-        env:
-          AVAL_SMOKE_CREDENTIALS_FILE: ${{ runner.temp }}/aval-smoke-credentials.json
-        run: node scripts/smoke-durable-agent.mjs "$AVAL_PRODUCTION_URL"
-
-      - name: Remove temporary verification credentials
-        if: always()
-        run: rm -f "$RUNNER_TEMP/aval-smoke-credentials.json" "$RUNNER_TEMP/aval-smoke-account.sql"
+      - name: Verify authenticated production readiness without a model call
+        run: node scripts/smoke-production-readiness.mjs "$AVAL_PRODUCTION_URL"

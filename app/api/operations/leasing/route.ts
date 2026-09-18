@@ -1,3 +1,5 @@
+import { withApiSession } from "@/lib/api/with-session";
+import type { DbSession } from "@/db/postgres/session";
 /**
  * GET /api/operations/leasing
  *
@@ -9,14 +11,16 @@ import { getApiIdentity } from "@/lib/integrations/session";
 import { availableUnits, summarizeLeasing } from "@/lib/operations/leasing";
 import { parsePeriod } from "@/lib/operations/summary";
 
-export async function GET(request: Request) {
-  const identity = await getApiIdentity(request);
+async function GETWithSession(dbSession: DbSession, request: Request) {
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const period = parsePeriod(new URL(request.url).searchParams.get("period"));
   const [summary, available] = await Promise.all([
-    summarizeLeasing(identity.organizationId, period.start, period.end),
-    availableUnits(identity.organizationId),
+    summarizeLeasing(dbSession, identity.organizationId, period.start, period.end),
+    availableUnits(dbSession, identity.organizationId),
   ]);
   return Response.json({ summary, availableUnits: available });
 }
+
+export const GET = withApiSession(GETWithSession);

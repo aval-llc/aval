@@ -11,8 +11,8 @@
  */
 
 import { eq, and } from "drizzle-orm";
-import { getDb } from "@/db";
-import { learnedPreferences } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { learnedPreferences } from "@/db/postgres/schema";
 import { PREFERENCE_TOPICS, describePreference, type PreferenceTopic } from "./preference-taxonomy";
 
 export {
@@ -22,10 +22,10 @@ export {
   type PreferenceTopic,
 } from "./preference-taxonomy";
 
-export async function recordPreference(organizationId: string, topic: PreferenceTopic, statement: string): Promise<void> {
+export async function recordPreference(dbSession: DbSession, organizationId: string, topic: PreferenceTopic, statement: string): Promise<void> {
   const allowed: readonly string[] = PREFERENCE_TOPICS[topic] ?? [];
   if (!allowed.includes(statement)) return;
-  const db = getDb();
+  const db = dbSession.db;
   const existing = await db
     .select()
     .from(learnedPreferences)
@@ -42,8 +42,8 @@ export async function recordPreference(organizationId: string, topic: Preference
   }
 }
 
-export async function getPreferenceContext(organizationId: string): Promise<string> {
-  const db = getDb();
+export async function getPreferenceContext(dbSession: DbSession, organizationId: string): Promise<string> {
+  const db = dbSession.db;
   const rows = await db.select().from(learnedPreferences).where(eq(learnedPreferences.organizationId, organizationId));
   if (rows.length === 0) return "";
   const lines = rows.map((row) => `- ${describePreference(row.topic, row.statement)}`);
@@ -58,8 +58,8 @@ export interface StoredPreference {
   createdAt: Date;
 }
 
-export async function listPreferences(organizationId: string): Promise<StoredPreference[]> {
-  const db = getDb();
+export async function listPreferences(dbSession: DbSession, organizationId: string): Promise<StoredPreference[]> {
+  const db = dbSession.db;
   const rows = await db.select().from(learnedPreferences).where(eq(learnedPreferences.organizationId, organizationId));
   return rows.map((row) => ({
     topic: row.topic,
@@ -76,10 +76,10 @@ export async function listPreferences(organizationId: string): Promise<StoredPre
  * recordPreference — only `source` differs, so the two origins stay
  * distinguishable when showing where a remembered fact came from.
  */
-export async function setPreferenceFromSetup(organizationId: string, topic: PreferenceTopic, statement: string): Promise<boolean> {
+export async function setPreferenceFromSetup(dbSession: DbSession, organizationId: string, topic: PreferenceTopic, statement: string): Promise<boolean> {
   const allowed: readonly string[] = PREFERENCE_TOPICS[topic] ?? [];
   if (!allowed.includes(statement)) return false;
-  const db = getDb();
+  const db = dbSession.db;
   const existing = await db
     .select()
     .from(learnedPreferences)
@@ -98,7 +98,7 @@ export async function setPreferenceFromSetup(organizationId: string, topic: Pref
 }
 
 /** Forgets one topic. The taxonomy is fixed, so "forget" means dropping the row, not storing a negation. */
-export async function forgetPreference(organizationId: string, topic: string): Promise<void> {
-  const db = getDb();
+export async function forgetPreference(dbSession: DbSession, organizationId: string, topic: string): Promise<void> {
+  const db = dbSession.db;
   await db.delete(learnedPreferences).where(and(eq(learnedPreferences.organizationId, organizationId), eq(learnedPreferences.topic, topic)));
 }

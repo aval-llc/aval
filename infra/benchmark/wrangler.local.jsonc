@@ -1,0 +1,12 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "aval-supabase-benchmark-local",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "vars": {
+    "BENCHMARK_SOURCE_HASH": "local-bundle-check-only",
+    "BENCHMARK_PROJECT_REF": "local"
+  }
+}

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { buildiumBase } from "./buildium";
 import { verifyAdditionalCredentials } from "./verification";
 import { providerJson, record, requiredString, safeSegment } from "./http";
 import { isModelProviderId, verifyModelProviderKey } from "./model-providers";
@@ -30,8 +31,8 @@ export async function verifyCredentials(provider: string, credentials: Record<st
     return { accountId: "granola", accountName: "Granola workspace", metadata: { hasNotes: Array.isArray(record(payload).notes) && (record(payload).notes as unknown[]).length > 0 } };
   }
   if (provider === "buildium") {
-    await providerJson("https://api.buildium.com/v1/rentals", { headers: { "x-buildium-client-id": credentials.clientId, "x-buildium-client-secret": credentials.clientSecret } });
-    return { accountId: "buildium", accountName: "Buildium account", metadata: { api: "verified" } };
+    await providerJson(`${buildiumBase(credentials.environment)}/rentals?limit=1`, { headers: { "x-buildium-client-id": credentials.clientId, "x-buildium-client-secret": credentials.clientSecret } });
+    return { accountId: `${credentials.environment}:${credentials.clientId}`, accountName: `Buildium ${credentials.environment}`, metadata: { api: "verified", environment: credentials.environment, validation: "credentials_only" } };
   }
   if (provider === "twilio") {
     const payload = await providerJson(`https://api.twilio.com/2010-04-01/Accounts/${safeSegment(credentials.accountSid)}.json`, { headers: { authorization: basic(credentials.accountSid, credentials.authToken) } });

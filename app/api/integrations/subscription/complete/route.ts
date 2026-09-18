@@ -1,7 +1,9 @@
+import { withApiSession } from "@/lib/api/with-session";
+import { PILOT_POLICY, subscriptionDisabledResponse } from "@/lib/pilot-policy";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { integrationConnections, oauthStates } from "@/db/schema";
+import type { DbSession } from "@/db/postgres/session";
+import { integrationConnections, oauthStates } from "@/db/postgres/schema";
 import { encryptSecret } from "@/lib/integrations/crypto";
 import { getProvider } from "@/lib/integrations/catalog";
 import { exchangeSubscriptionCode, isSubscriptionProviderId, parsePastedAuthorization } from "@/lib/integrations/subscription-oauth";
@@ -26,11 +28,13 @@ const MAX_PASTED_INPUT_LENGTH = 4096;
  * deleted on a failed parse/exchange, so a mistyped paste can be retried
  * against the same PKCE verifier without restarting the whole flow.
  */
-export async function POST(request: Request) {
-  const identity = await getApiIdentity(request);
+async function POSTWithSession(dbSession: DbSession, request: Request) {
+  if (!PILOT_POLICY.subscriptionOAuth) return subscriptionDisabledResponse();
+  const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   const body = await request.json().catch(() => ({})) as { provider?: string; state?: string; pastedInput?: string };
   if (!body.provider || !isSubscriptionProviderId(body.provider)) return Response.json({ error: "Unknown subscription provider" }, { status: 400 });
+  const subscriptionProvider = body.provider;
   if (!body.state || !body.pastedInput) return Response.json({ error: "Missing authorization state or pasted input" }, { status: 400 });
   if (body.pastedInput.length > MAX_PASTED_INPUT_LENGTH) return Response.json({ error: "That doesn't look like a valid code or redirect URL." }, { status: 400 });
   const provider = getProvider(body.provider);
@@ -40,13 +44,13 @@ export async function POST(request: Request) {
 
   const scope = `subscription-complete:org:${identity.organizationId}`;
   const ipScope = `subscription-complete:ip:${clientIp(request)}`;
-  if ((await isRateLimited(scope, COMPLETE_RULE)) || (await isRateLimited(ipScope, COMPLETE_RULE))) {
+  if ((await isRateLimited(dbSession, scope, COMPLETE_RULE)) || (await isRateLimited(dbSession, ipScope, COMPLETE_RULE))) {
     return Response.json({ error: "Too many attempts. Wait a few minutes and try again." }, { status: 429 });
   }
-  await recordAttempt(scope);
-  await recordAttempt(ipScope);
+  await recordAttempt(dbSession, scope);
+  await recordAttempt(dbSession, ipScope);
 
-  const db = getDb();
+  const db = dbSession.db;
   const [pending] = await db.select().from(oauthStates).where(and(eq(oauthStates.state, body.state), eq(oauthStates.userId, identity.userId), eq(oauthStates.provider, provider.id))).limit(1);
   if (!pending || !pending.codeVerifier) return Response.json({ error: "This sign-in expired. Try connecting again." }, { status: 400 });
   if (pending.expiresAt.getTime() < Date.now()) return Response.json({ error: "This sign-in expired. Try connecting again." }, { status: 400 });
@@ -55,7 +59,7 @@ export async function POST(request: Request) {
     const parsed = parsePastedAuthorization(body.pastedInput);
     if (parsed.state && parsed.state !== pending.state) return Response.json({ error: "This sign-in expired. Try connecting again." }, { status: 400 });
 
-    const credential = await exchangeSubscriptionCode(body.provider, { code: parsed.code, state: pending.state, verifier: pending.codeVerifier });
+    const credential = await dbSession.outsideTransaction(() => exchangeSubscriptionCode(subscriptionProvider, { code: parsed.code, state: pending.state, verifier: pending.codeVerifier! }));
     const now = new Date();
     const accessTokenCiphertext = await encryptSecret(credential.access, encryptionKey);
     const refreshTokenCiphertext = await encryptSecret(credential.refresh, encryptionKey);
@@ -89,3 +93,5 @@ export async function POST(request: Request) {
     return Response.json({ error: error instanceof Error ? error.message : "Could not connect this subscription" }, { status: 422 });
   }
 }
+
+export const POST = withApiSession(POSTWithSession);
