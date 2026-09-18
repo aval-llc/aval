@@ -7,7 +7,7 @@
     "tables": 74,
     "migrations": 38,
     "triggers": 6,
-    "getDbFiles": 13
+    "getDbFiles": 0
   },
   "migrations": [
     {
@@ -19101,86 +19101,6 @@
       "sha256": "4420318285ace60e55b93b071abbaedd859425349b9e3f54696013fc569fff71"
     }
   ],
-  "consumers": [
-    {
-      "file": "app/api/pms/matrix/route.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/adapters/doorloop.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/assembly.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/deployments.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/enablement.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/execute.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/flows.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/grants.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/inbound/messages.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/inbound/notifications.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/inbound/seats.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "lib/pms/inbound/senders.ts",
-      "dependencies": [
-        "getDb"
-      ]
-    },
-    {
-      "file": "worker/pms-seat-reader.ts",
-      "dependencies": [
-        "getDb",
-        "D1 binding"
-      ]
-    }
-  ],
-  "inventorySha256": "3f9df1033a25df7068ceb99846dd938902c3e921dabc1f7f9bf50beaa0238f96"
+  "consumers": [],
+  "inventorySha256": "6f618ac0fb7a8f26782565f002b76857f9427598f9dcda3aef430fb2fce75185"
 }
