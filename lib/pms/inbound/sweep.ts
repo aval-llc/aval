@@ -91,7 +91,16 @@ export interface SweepSummary {
   held: number;
   unauthenticated: number;
   unassigned: number;
-  promoted: number;
+  /** Verified messages whose envelope was captured into `integration_events`. */
+  captured: number;
+  /**
+   * Captured messages a provider parser actually recognised.
+   *
+   * Reported separately from `captured` because they are different claims, and
+   * conflating them would make an empty parser registry look like working
+   * ingestion. Today this is always zero (see notifications.ts).
+   */
+  extracted: number;
   /** Objects that threw. Left in place, so the next run retries them. */
   failed: number;
   /** True when the limit was reached before the backlog was. */
@@ -154,7 +163,8 @@ export async function sweepSeatInbox(options: SweepOptions): Promise<SweepSummar
     held: 0,
     unauthenticated: 0,
     unassigned: 0,
-    promoted: 0,
+    captured: 0,
+    extracted: 0,
     failed: 0,
     truncated: false,
     observedAuthservIds: [],
@@ -193,7 +203,8 @@ export async function sweepSeatInbox(options: SweepOptions): Promise<SweepSummar
           if (state.disposition === null) continue;
           summary.processed += 1;
           summary[state.disposition] += 1;
-          if (state.promoted) summary.promoted += 1;
+          if (state.captured) summary.captured += 1;
+          if (state.extracted) summary.extracted += 1;
           for (const id of state.observedAuthservIds) observed.add(id);
         } catch {
           // Left where it is on purpose: the next run retries, and a message
@@ -223,7 +234,8 @@ async function processObject(
   },
 ): Promise<{
   disposition: SeatDisposition | null;
-  promoted: boolean;
+  captured: boolean;
+  extracted: boolean;
   observedAuthservIds: readonly string[];
 }> {
   const { bucket, authservId, promote } = context;
@@ -235,7 +247,7 @@ async function processObject(
     // Deleted between the list and the get — a concurrent sweep got there
     // first, and the row it wrote is the row this one would have written.
     // Counted as nothing rather than as a disposition it did not receive.
-    return { disposition: null, promoted: false, observedAuthservIds: [] };
+    return { disposition: null, captured: false, extracted: false, observedAuthservIds: [] };
   }
 
   const bytes = await body.arrayBuffer();
@@ -271,7 +283,8 @@ async function processObject(
     await bucket.delete(object.key);
   }
 
-  let promoted = false;
+  let captured = false;
+  let extracted = false;
   let reason = resolution.verdict.reason;
   if (disposition.state === "verified" && organizationId && disposition.providerId) {
     const outcome = await promote({
@@ -281,8 +294,11 @@ async function processObject(
       objectKey: key,
       raw,
     });
-    promoted = outcome.promoted;
-    reason = outcome.promoted ? reason : `${reason} ${outcome.reason}`;
+    captured = outcome.promoted;
+    extracted = outcome.extracted;
+    // Appended whether or not it succeeded. "Verified, captured, no parser yet"
+    // is the normal state today and the row is where anyone would look for it.
+    reason = `${reason} ${outcome.reason}`;
   }
 
   const observed = disposition.state === "unauthenticated" ? observedAuthservIds(raw) : [];
@@ -303,7 +319,7 @@ async function processObject(
     receivedAt: receivedAtOf(object),
   });
 
-  return { disposition: disposition.state, promoted, observedAuthservIds: observed };
+  return { disposition: disposition.state, captured, extracted, observedAuthservIds: observed };
 }
 
 /**

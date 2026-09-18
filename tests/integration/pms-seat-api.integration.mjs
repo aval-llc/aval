@@ -164,13 +164,16 @@ test("the review names authenticated senders and only counts the rest", async ()
   await route.POST(request("alice", { intent: "claim", slug: "acme-props" }));
   const organizationId = sqlite.prepare("SELECT organization_id FROM organization_seat_slugs").get().organization_id;
 
+  // `<recipient>:<digest>`, the key the reader writes — a content hash alone
+  // would collide across workspaces sent the same bytes.
+  const recipient = "agent-acme-props@aval.llc";
   const row = (digest, disposition, domain) =>
     sqlite
       .prepare(
-        "INSERT INTO pms_seat_messages (digest,recipient,organization_id,disposition,authenticated_domain,method,object_key,received_at,processed_at)"
-        + " VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO pms_seat_messages (id,digest,recipient,organization_id,disposition,authenticated_domain,method,object_key,received_at,processed_at)"
+        + " VALUES (?,?,?,?,?,?,?,?,?,?)",
       )
-      .run(digest, "agent-acme-props@aval.llc", organizationId, disposition, domain, domain ? "dmarc" : null, `k/${digest}`, NOW, NOW);
+      .run(`${recipient}:${digest}`, digest, recipient, organizationId, disposition, domain, domain ? "dmarc" : null, `k/${digest}`, NOW, NOW);
 
   row("d1", "held", "buildium.com");
   row("d2", "held", "buildium.com");

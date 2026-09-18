@@ -1,5 +1,6 @@
 CREATE TABLE `pms_seat_messages` (
-	`digest` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY NOT NULL,
+	`digest` text NOT NULL,
 	`recipient` text NOT NULL,
 	`organization_id` text,
 	`disposition` text NOT NULL,
@@ -14,4 +15,5 @@ CREATE TABLE `pms_seat_messages` (
 );
 --> statement-breakpoint
 CREATE INDEX `pms_seat_messages_org_idx` ON `pms_seat_messages` (`organization_id`,`disposition`);--> statement-breakpoint
-CREATE INDEX `pms_seat_messages_held_idx` ON `pms_seat_messages` (`organization_id`,`authenticated_domain`);
+CREATE INDEX `pms_seat_messages_held_idx` ON `pms_seat_messages` (`organization_id`,`authenticated_domain`);--> statement-breakpoint
+CREATE INDEX `pms_seat_messages_digest_idx` ON `pms_seat_messages` (`digest`);

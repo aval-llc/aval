@@ -34,6 +34,17 @@ export interface SeatMessageRecord {
 }
 
 /**
+ * The ledger key — `<recipient>:<digest>`.
+ *
+ * Constructed here rather than taken from the message, because the digest is a
+ * content hash and two workspaces can be sent the same bytes. See the column's
+ * note in `db/schema.ts` for what keying on the digest alone would have done.
+ */
+export function seatMessageId(recipient: string, digest: string): string {
+  return `${recipient}:${digest}`;
+}
+
+/**
  * Record what was decided about one message.
  *
  * Upserts on the digest. A re-sweep of a held message that has since been
@@ -43,6 +54,7 @@ export interface SeatMessageRecord {
 export async function recordSeatMessage(record: SeatMessageRecord): Promise<void> {
   const processedAt = new Date();
   const values = {
+    id: seatMessageId(record.recipient, record.digest),
     digest: record.digest,
     recipient: record.recipient,
     organizationId: record.organizationId,
@@ -61,7 +73,7 @@ export async function recordSeatMessage(record: SeatMessageRecord): Promise<void
     .insert(pmsSeatMessages)
     .values(values)
     .onConflictDoUpdate({
-      target: pmsSeatMessages.digest,
+      target: pmsSeatMessages.id,
       set: {
         organizationId: values.organizationId,
         disposition: values.disposition,

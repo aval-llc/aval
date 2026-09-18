@@ -131,7 +131,7 @@ test("an allowlisted sender's message is verified, moved, and recorded", async (
   assert.deepEqual(await seatMessageCounts("org_1"), { verified: 1 });
 });
 
-test("verified mail is not promoted yet, and says so rather than looking like silence", async () => {
+test("verified mail is captured but not extracted, and the row says which", async () => {
   const sqlite = await bootRuntime();
   const { sweepSeatInbox, allowSender, claimSeatSlug } = await modules();
   org(sqlite, "org_1", "Acme");
@@ -144,13 +144,53 @@ test("verified mail is not promoted yet, and says so rather than looking like si
   });
 
   const summary = await sweepSeatInbox({ bucket, authservId: CF });
-  // P1.1 is not built. The message is verified and retained, and the row records
-  // why nothing parsed it — an expected state, not a failure.
   assert.equal(summary.verified, 1);
-  assert.equal(summary.promoted, 0);
+  // Captured and extracted are different claims, reported separately. Merging
+  // them would make an empty parser registry look like working ingestion.
+  assert.equal(summary.captured, 1);
+  assert.equal(summary.extracted, 0);
+
   const [row] = sqlite.prepare("SELECT reason, provider_id FROM pms_seat_messages").all();
   assert.equal(row.provider_id, "appfolio");
   assert.match(row.reason, /parser/i);
+  // The envelope reached the read envelope's ingestion log.
+  const [event] = sqlite.prepare("SELECT provider, status FROM integration_events").all();
+  assert.equal(event.provider, "appfolio");
+  assert.equal(event.status, "received", "nothing has extracted entities from it");
+});
+
+test("two workspaces sent the same bytes each keep their own row", async () => {
+  const sqlite = await bootRuntime();
+  const { sweepSeatInbox, claimSeatSlug, seatReview } = await modules();
+  org(sqlite, "org_1", "Acme");
+  org(sqlite, "org_2", "Other");
+  await claimSeatSlug("org_1", "acme-props", "user_1");
+  await claimSeatSlug("org_2", "other-props", "user_2");
+
+  // One vendor notice addressed to both seats: identical content, so an
+  // identical digest. Keyed on the digest alone, the second row would overwrite
+  // the first and carry its organization_id away with it — one customer's held
+  // mail reattributed to another, with nothing to notice it.
+  const bucket = fakeBucket();
+  const raw = delivered();
+  bucket.store(unverifiedKey("agent-acme-props@aval.llc", "same"), raw, {
+    recipient: "agent-acme-props@aval.llc",
+  });
+  bucket.store(unverifiedKey("agent-other-props@aval.llc", "same"), raw, {
+    recipient: "agent-other-props@aval.llc",
+  });
+
+  const summary = await sweepSeatInbox({ bucket, authservId: CF });
+  assert.equal(summary.held, 2);
+  const rows = sqlite
+    .prepare("SELECT id, organization_id FROM pms_seat_messages ORDER BY organization_id")
+    .all();
+  assert.equal(rows.length, 2, "one row per delivery, not one per content hash");
+  assert.deepEqual(rows.map((row) => row.organization_id), ["org_1", "org_2"]);
+
+  // And each workspace's review shows its own message, not a shared one.
+  assert.equal((await seatReview("org_1")).held[0].messages, 1);
+  assert.equal((await seatReview("org_2")).held[0].messages, 1);
 });
 
 test("an authenticated sender nobody allowed is held and offered for review", async () => {

@@ -64,7 +64,8 @@ export default {
     console.log(
       `[pms-seat-reader] processed=${summary.processed} verified=${summary.verified} `
       + `held=${summary.held} unauthenticated=${summary.unauthenticated} `
-      + `unassigned=${summary.unassigned} promoted=${summary.promoted} `
+      + `unassigned=${summary.unassigned} captured=${summary.captured} `
+      + `extracted=${summary.extracted} `
       + `failed=${summary.failed} truncated=${summary.truncated}`,
     );
 

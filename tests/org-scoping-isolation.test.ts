@@ -84,9 +84,17 @@ test("the PMS write queue is keyed so one workspace's idempotency key cannot col
   );
 });
 
+const TENANT_PMS_TABLES = [
+  "pms_write_authorizations",
+  "pms_action_flows",
+  "pms_write_queue",
+  "pms_seat_senders",
+  "pms_seat_messages",
+];
+
 test("every new PMS table carries an organization column and scopes its unique indexes", () => {
   const schema = readFileSync(`${ROOT}db/schema.ts`, "utf8");
-  for (const table of ["pms_write_authorizations", "pms_action_flows", "pms_write_queue"]) {
+  for (const table of TENANT_PMS_TABLES) {
     const start = schema.indexOf(`"${table}"`);
     assert.ok(start > 0, `${table} is missing from the schema`);
     const block = schema.slice(start, schema.indexOf("\n);", start));
@@ -98,6 +106,28 @@ test("every new PMS table carries an organization column and scopes its unique i
         match[1],
         /^\s*table\.organizationId/,
         `${table} has a unique index that is not scoped to an organization: ${match[0]}`,
+      );
+    }
+  }
+});
+
+test("a tenant table's primary key is one Aval constructs, never a value two tenants could share", () => {
+  // Added after `pms_seat_messages` shipped with `digest` — a content hash — as
+  // its primary key. Two workspaces can be sent the same bytes: one vendor
+  // notice to both seats. The second row would have overwritten the first and
+  // taken its organization_id with it, and the unique-index rule above could not
+  // see it, because a primary key is not a uniqueIndex() call.
+  //
+  // `id` is the whole allowance: a key this codebase builds, which it can scope.
+  const schema = readFileSync(`${ROOT}db/schema.ts`, "utf8");
+  for (const table of TENANT_PMS_TABLES) {
+    const start = schema.indexOf(`"${table}"`);
+    const block = schema.slice(start, schema.indexOf("\n);", start));
+    for (const match of block.matchAll(/(\w+):\s*text\("([^"]+)"\)[^,\n]*\.primaryKey\(\)/g)) {
+      assert.equal(
+        match[2],
+        "id",
+        `${table}'s primary key is \`${match[2]}\`, which is data rather than a key Aval constructs`,
       );
     }
   }

@@ -585,13 +585,66 @@ callers that nothing in the code holds. Reporting it from the run keeps
 `lib/pms` uniformly org-scoped rather than moving the same query somewhere the
 scanner cannot see it.
 
-**Still open.** The settings surface — the allowlist editor and the review panel
-— is unbuilt; `seatReview()` and `suggestedSenderDomains()` are what it renders.
-`promoteVerifiedMessage()` is a stub that reports being one, so verified mail
-accumulates in `verified/` with a row saying why nothing parsed it; turning a
-provider's notification format into an `ImportBatch` is P1.1's remaining work.
-The reader is **built and not deployed** — it bundles clean (`--dry-run`, 61 KiB
-gzipped, all three bindings resolved) and no real message has passed through it.
+## P1 — the surface and the ingestion half, 2026-09-17
+
+**The seat has a surface.** `/api/pms/seat` and `app/components/pms-seat.tsx`,
+next to the capability matrix in the connections view rather than in Settings: an
+address is part of connecting a PMS. Owner-only through `canManagePolicy`, the
+same gate as write authorization — allowing a sender decides what may enter an
+agent's context, and a claimed slug is permanent. Until this existed the whole
+path was headless, which mattered more than a missing screen: `verifySender`
+refuses every message until a workspace has allowed a domain, so the seat stored
+mail and verified none of it, and no customer could change that.
+
+The panel states the slug's permanence *before* the claim. `generic_email` is
+always in the picker even with nothing connected, because that is the customer
+the seat exists for.
+
+**P1.1's ingestion half is real; its extraction half is deliberately empty.**
+`mime.ts` parses what is standardised — folded headers, RFC 2047 encoded words,
+multipart structure, quoted-printable and base64, declared charsets, attachment
+metadata. `notifications.ts` captures every verified message into
+`integration_events` and asks that provider's parser to read it.
+
+**The parser registry is empty on purpose.** Turning "AppFolio work order
+assigned" into an `ImportBatch` requires knowing AppFolio's notification layout,
+and nobody here has seen one. A parser written from an educated guess would be a
+fabricated vendor format that typechecks, and its failures would be the silent
+kind — fields quietly absent, a work order attached to the wrong unit. So a
+message resolves to `unlearned`, the word this codebase already uses for a path
+it has not been taught, and the sweep reports `captured` and `extracted` as
+separate counts so an empty registry can never look like working ingestion. The
+envelope is durable and the raw message is still in R2, so the first real parser
+can re-read everything that arrived before it existed.
+
+Attachment *content* is never returned by the parser. The raw message can be
+fetched deliberately; a default that decodes attachments turns "read my
+notifications" into "open anything anyone sends".
+
+**Two cross-tenant key bugs, same shape, one of them mine.**
+`integration_events` is unique on `(provider, external_event_id)` and not on the
+organization, so a content hash alone as the event key would have dropped the
+second workspace's copy of a notice sent to both. And `pms_seat_messages` shipped
+in the commit before this one with `digest` — a content hash — as its primary
+key: two workspaces sent the same bytes would have collided, the second row
+overwriting the first and taking its `organization_id` with it. Both are now
+keyed on something Aval constructs (`seat:<org>:<digest>` and
+`<recipient>:<digest>`). Migration 0036 was regenerated rather than patched with
+a rebuild, because it had never been applied anywhere — production is at 0034
+and no local database had the table.
+
+`tests/org-scoping-isolation.test.ts` could not have caught the second one: a
+primary key is not a `uniqueIndex()` call. It now asserts that a tenant table's
+single-column primary key is always `id`, and the two seat tables are in its
+list. The rule was checked against the old shape to confirm it fails on it.
+
+**Still open.** No provider notification parser, which is the remaining half of
+P1.1 and needs one real sample per provider. The reader is **built and not
+deployed**: `CF_API_TOKEN` is authorized for Workers, R2 and Email Routing but
+not D1 (`code 7403` on the D1 query endpoint), so migrations 0035 and 0036 cannot
+be applied from here — and deploying the cron ahead of them would schedule a
+Worker that throws every five minutes. Nothing about the seat path has been
+exercised by a real message.
 
 ## State at handoff — 2026-09-17
 

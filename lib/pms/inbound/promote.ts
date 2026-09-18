@@ -3,17 +3,18 @@
  *
  * The plumbing around this is real: the reader authenticates a message against
  * the workspace's allowlist, learns which system it is from (from the allowlist
- * row, never from the body), and calls this. What does not exist yet is the part
- * that turns one PMS's notification format into an `ImportBatch` for
- * `lib/operations/import-plan.ts` — that is per-provider work and it is P1.1's
- * remaining scope.
+ * row, never from the body), and calls this. This then captures the normalized
+ * envelope into `integration_events` and asks that provider's notification
+ * parser to read it.
  *
- * This module is deliberately a stub that *reports* being a stub rather than a
- * TODO comment in the sweep. The reader records the outcome, so "mail is
- * verified and nothing is parsing it" shows up as a queryable state instead of
- * looking like silence.
+ * `promoted` means **captured**, not extracted. Every verified message is
+ * durably recorded and can be re-read; no provider has an entity parser yet, so
+ * the outcome says `unlearned` and the event's status stays `received`. See
+ * `notifications.ts` for why that registry is empty rather than filled with
+ * formats nobody has seen.
  */
 
+import { captureNotification } from "./notifications.ts";
 import { pmsProvider } from "../providers/index.ts";
 
 export interface VerifiedMessage {
@@ -26,28 +27,33 @@ export interface VerifiedMessage {
 }
 
 export interface PromotionOutcome {
+  /** True when the envelope was captured — not that entities were extracted. */
   promoted: boolean;
+  /** True only when a provider parser recognised the notification. */
+  extracted: boolean;
   reason: string;
 }
 
-/**
- * Hand a verified message to the read envelope.
- *
- * Returns rather than throws when there is no parser: an unparsed verified
- * message is an expected state today, not a failure, and the object stays in
- * `verified/` so a later sweep — or the parser, once it exists — can pick it up
- * without the mail having to be sent again.
- */
 export async function promoteVerifiedMessage(message: VerifiedMessage): Promise<PromotionOutcome> {
   const descriptor = pmsProvider(message.providerId);
   if (!descriptor) {
-    return { promoted: false, reason: `No descriptor for ${message.providerId}; message retained.` };
+    // An allowlist row naming a provider that no longer exists. `allowSender`
+    // refuses to create one, so this is a registry change under an old row —
+    // worth refusing loudly rather than capturing under a name nothing resolves.
+    return {
+      promoted: false,
+      extracted: false,
+      reason: `No descriptor for ${message.providerId}; message retained unparsed.`,
+    };
   }
 
+  const captured = await captureNotification(message);
+
   return {
-    promoted: false,
-    reason:
-      `No ${descriptor.displayName} notification parser yet (P1.1). Message retained in `
-      + "verified/ for the read envelope.",
+    promoted: true,
+    extracted: captured.extraction.recognised,
+    reason: captured.created
+      ? `Captured as ${descriptor.displayName} notification. ${captured.extraction.reason}`
+      : `Already captured. ${captured.extraction.reason}`,
   };
 }

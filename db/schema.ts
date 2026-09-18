@@ -1673,8 +1673,21 @@ export const pmsSeatSenders = sqliteTable(
 export const pmsSeatMessages = sqliteTable(
   "pms_seat_messages",
   {
-    /** SHA-256 of the raw message, which is also its R2 key. */
-    digest: text("digest").primaryKey(),
+    /**
+     * `<recipient>:<digest>` — a key Aval constructs, not one taken from the mail.
+     *
+     * The digest alone cannot be the key. It is a content hash, and two
+     * workspaces can be sent the *same bytes* — one vendor notice addressed to
+     * both, or the same announcement to two seats. Keyed on the digest, the
+     * second workspace's row would overwrite the first, taking its
+     * organization_id with it: one customer's held mail silently reattributed
+     * to another. The recipient is in the key for that reason, and it works
+     * because a seat address belongs to one workspace forever
+     * (`organization_seat_slugs`).
+     */
+    id: text("id").primaryKey(),
+    /** SHA-256 of the raw message, and the last segment of its R2 key. */
+    digest: text("digest").notNull(),
     /** The seat address it was sent to. Ours, not the sender's, so safe to display. */
     recipient: text("recipient").notNull(),
     /** Null when the slug belongs to no workspace — mail to an address never issued. */
@@ -1704,5 +1717,6 @@ export const pmsSeatMessages = sqliteTable(
   (table) => [
     index("pms_seat_messages_org_idx").on(table.organizationId, table.disposition),
     index("pms_seat_messages_held_idx").on(table.organizationId, table.authenticatedDomain),
+    index("pms_seat_messages_digest_idx").on(table.digest),
   ],
 );
