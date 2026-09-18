@@ -1996,5 +1996,46 @@
       "leasing.lease.update_status": "Update lease status",
       "reporting.financials.read": "Read financials for reporting"
     }
+  },
+  "PmsSeat": {
+    "title": "Aval seat",
+    "description": "An address of your own that your property management system can mail, exactly as it would any employee. No API, no integration: your PMS sends, Aval receives. Because anyone can write to a public address, only senders you allow are ever read.",
+    "loading": "Loading your seat…",
+    "loadError": "Could not load the Aval seat.",
+    "saveError": "Could not save that change.",
+    "storageUnavailable": "The seat is unavailable for this workspace.",
+    "addressHeading": "Your seat address",
+    "addressInstruction": "Add this as a user in your PMS, or copy it on outbound notifications.",
+    "alsoReceiving": "Also still receiving: {addresses}",
+    "noAddressYet": "This workspace does not have a seat address yet.",
+    "slugLabel": "Choose a name",
+    "claim": "Claim this address",
+    "claiming": "Claiming…",
+    "slugPermanent": "This address is permanent. Once your PMS is sending to it, it cannot be reissued to anyone else — renaming later adds a second address and keeps this one working.",
+    "sendersHeading": "Senders allowed to write to your seat",
+    "sendersExplanation": "Mail is only read if it is cryptographically authenticated as coming from one of these domains. Subdomains are covered, so appfolio.com also allows mail.appfolio.com.",
+    "noSenders": "No sender is allowed yet, so nothing sent to your seat is being read.",
+    "revoke": "Revoke",
+    "revoking": "Revoking…",
+    "allow": "Allow",
+    "allowing": "Allowing…",
+    "allowed": "Sender allowed.",
+    "providerChanged": "{domain} will now be read as a different system.",
+    "suggestionsHeading": "Suggested for your connected systems",
+    "suggestionsCaveat": "Suggestions come from what each vendor publishes, not from mail Aval has seen. Large PMS deployments often send under your own domain instead — if what arrives is held below, allow that domain.",
+    "domainLabel": "Sender domain",
+    "providerLabel": "Read as",
+    "reviewHeading": "Waiting to be allowed",
+    "nothingWaiting": "Nothing is waiting.",
+    "heldCount": "{count, plural, one {# message} other {# messages}}",
+    "method": {
+      "dmarc": "DMARC verified",
+      "dkim": "DKIM signed"
+    },
+    "firstSeen": "first seen {date}",
+    "unauthenticated": "{count, plural, one {# message was} other {# messages were}} held from senders that could not be authenticated at all. They are not listed: the only sender name such a message carries is the one whoever sent it typed.",
+    "verifiedCount": "{count, plural, one {# message} other {# messages}} verified and passed to Aval.",
+    "sweepDelay": "Allowing a sender also releases the mail already waiting from it, within about five minutes.",
+    "ownerOnly": "Only the workspace owner can change the seat address or its allowed senders."
   }
 }

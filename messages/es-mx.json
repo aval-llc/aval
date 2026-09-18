@@ -1996,5 +1996,46 @@
       "leasing.lease.update_status": "Actualizar el estado del contrato",
       "reporting.financials.read": "Leer datos financieros para reportes"
     }
+  },
+  "PmsSeat": {
+    "title": "Asiento de Aval",
+    "description": "Una dirección propia a la que tu sistema de administración de propiedades puede enviar correo, igual que a cualquier empleado. Sin API, sin integración: tu PMS envía, Aval recibe. Como cualquiera puede escribir a una dirección pública, solo se leen los remitentes que autorices.",
+    "loading": "Cargando tu asiento…",
+    "loadError": "No se pudo cargar el asiento de Aval.",
+    "saveError": "No se pudo guardar ese cambio.",
+    "storageUnavailable": "El asiento no está disponible para este espacio de trabajo.",
+    "addressHeading": "Tu dirección de asiento",
+    "addressInstruction": "Agrégala como usuario en tu PMS, o inclúyela en copia en las notificaciones que envía.",
+    "alsoReceiving": "También sigue recibiendo: {addresses}",
+    "noAddressYet": "Este espacio de trabajo aún no tiene una dirección de asiento.",
+    "slugLabel": "Elige un nombre",
+    "claim": "Reservar esta dirección",
+    "claiming": "Reservando…",
+    "slugPermanent": "Esta dirección es permanente. Una vez que tu PMS le envíe correo, no puede reasignarse a nadie más: cambiar el nombre después agrega una segunda dirección y esta sigue funcionando.",
+    "sendersHeading": "Remitentes autorizados a escribir a tu asiento",
+    "sendersExplanation": "El correo solo se lee si está autenticado criptográficamente como proveniente de uno de estos dominios. Los subdominios quedan incluidos, así que appfolio.com también autoriza mail.appfolio.com.",
+    "noSenders": "Aún no hay ningún remitente autorizado, así que nada de lo que llega al asiento se está leyendo.",
+    "revoke": "Revocar",
+    "revoking": "Revocando…",
+    "allow": "Autorizar",
+    "allowing": "Autorizando…",
+    "allowed": "Remitente autorizado.",
+    "providerChanged": "{domain} ahora se leerá como un sistema distinto.",
+    "suggestionsHeading": "Sugerencias para los sistemas que conectaste",
+    "suggestionsCaveat": "Las sugerencias provienen de lo que publica cada proveedor, no de correo que Aval haya visto. Las instalaciones grandes de un PMS suelen enviar desde tu propio dominio: si lo que llega queda retenido abajo, autoriza ese dominio.",
+    "domainLabel": "Dominio del remitente",
+    "providerLabel": "Leer como",
+    "reviewHeading": "En espera de autorización",
+    "nothingWaiting": "No hay nada en espera.",
+    "heldCount": "{count, plural, one {# mensaje} other {# mensajes}}",
+    "method": {
+      "dmarc": "Verificado por DMARC",
+      "dkim": "Firmado con DKIM"
+    },
+    "firstSeen": "visto por primera vez el {date}",
+    "unauthenticated": "{count, plural, one {Se retuvo # mensaje} other {Se retuvieron # mensajes}} de remitentes que no se pudieron autenticar. No se listan: el único nombre de remitente que trae ese correo es el que escribió quien lo envió.",
+    "verifiedCount": "{count, plural, one {# mensaje verificado} other {# mensajes verificados}} y entregados a Aval.",
+    "sweepDelay": "Autorizar un remitente también libera el correo que ya estaba esperando de su parte, en unos cinco minutos.",
+    "ownerOnly": "Solo la persona propietaria del espacio de trabajo puede cambiar la dirección del asiento o sus remitentes."
   }
 }
