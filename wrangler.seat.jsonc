@@ -18,6 +18,14 @@
   "compatibility_date": "2026-05-22",
   "account_id": "3d090d893daad1536ed1dff3368d59b8",
 
+  // No public HTTP endpoint. This Worker has only an `email` handler, so a
+  // workers.dev URL serves nothing — but wrangler enables one by default, and
+  // the first deploy did: aval-pms-seat-inbound.evalxnder.workers.dev answered
+  // with error 1101. Harmless while there is no fetch handler, and exactly the
+  // kind of surface that stops being harmless the moment someone adds one.
+  // Mail reaches this Worker through an Email Routing rule, never over HTTP.
+  "workers_dev": false,
+
   // The only filter between the apex catch-all and stored mail is this Worker's
   // own recipient check, so its logs are the evidence that the check is working.
   "observability": {

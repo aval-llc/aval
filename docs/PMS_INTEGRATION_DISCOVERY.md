@@ -403,15 +403,19 @@ Next actions, in order:
    reachable end to end, and the third enforcement point for mandatory approval
    does not exist. Close the mid-turn pause gap in `pmsWriteAllowed()` in the
    same change.
-2. **P0.0.** Deploy `worker/pms-seat-inbound.ts` as `aval-pms-seat-inbound`
-   (`npx wrangler deploy --config wrangler.seat.jsonc`) and create the
-   `aval-pms-seat-inbox` R2 bucket. **Blocked on credentials:** the `CF_API_TOKEN`
-   in this workspace carries Zone DNS and Email Routing Rules only — no Workers
-   or R2 scope — so the deploy returns `Authentication error [code: 10000]`.
-   Then run `scripts/setup-pms-seat-dns.mjs` — dry run first, `--apply` second —
-   which points the apex catch-all at the Worker. Email Routing on the apex is
-   already on and the `evan@aval.llc` forward is unaffected; nothing else in the
-   zone changes.
+2. ~~**P0.0.**~~ **Applied 2026-09-17 18:16 UTC.** The seat path is live:
+   `aval-pms-seat-inbox` R2 bucket created, `aval-pms-seat-inbound` deployed from
+   `wrangler.seat.jsonc` with `env.PMS_SEAT_INBOX` bound and `workers_dev: false`
+   (the first deploy published a workers.dev URL; disabled and reverified 404),
+   and the apex catch-all switched from `{all} → drop, disabled` to
+   `{all} → worker aval-pms-seat-inbound, enabled`. Verified after the change by
+   reading the zone: `evan@aval.llc → evchau@berkeley.edu` still active at
+   priority 0, 17 DNS records unchanged, no `agents.*` records.
+
+   **The path is deployed, not exercised.** No real message has reached the
+   Worker. Until one does and is confirmed in R2 under
+   `unverified/<recipient>/<sha256>`, this is implemented and unverified in the
+   sense `AGENTS.md` means.
 3. **Build the deployments settings surface**, and make it state before the
    workspace's first deployment row that creating it narrows every other agent
    in the workspace at once.
