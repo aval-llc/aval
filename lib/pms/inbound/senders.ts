@@ -21,6 +21,7 @@ import { getDb } from "@/db";
 import { pmsSeatSenders } from "@/db/schema";
 import { isPmsProvider } from "../providers/index.ts";
 import {
+  authenticatedDomain,
   type AuthenticationResults,
   domainMatches,
   type SenderVerdict,
@@ -168,7 +169,19 @@ export async function resolveSeatSender(
 ): Promise<SeatSenderResolution> {
   const allowlist = await readSeatAllowlist(organizationId);
   const verdict = verifySender(auth, allowlist.map((sender) => sender.domain));
-  if (!verdict.verified || !verdict.domain) return { verdict };
+
+  if (!verdict.verified) {
+    // Report the authenticated domain even though the verdict failed, so a
+    // held message can be offered for review. `verifySender` cannot do this
+    // itself: it refuses an empty allowlist before reading the headers, which
+    // is the right rule and also the state a workspace is in at first contact.
+    const authenticated = verdict.domain ? null : authenticatedDomain(auth);
+    return authenticated
+      ? { verdict: { ...verdict, domain: authenticated.domain, method: authenticated.method } }
+      : { verdict };
+  }
+
+  if (!verdict.domain) return { verdict };
 
   const matched = allowlist.find((sender) => domainMatches(verdict.domain as string, sender.domain));
   if (!matched) {

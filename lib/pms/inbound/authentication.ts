@@ -129,6 +129,62 @@ export function parseAuthenticationResults(raw: string, expectedAuthservId: stri
 }
 
 /** The domain part of an address or bare domain, normalised. */
+export interface AuthenticatedDomain {
+  domain: string;
+  method: AuthMethod;
+}
+
+/**
+ * The domain a message actually authenticated as, independent of any allowlist.
+ *
+ * Separate from `verifySender` because the two questions are different and
+ * conflating them cost the held-sender review its whole purpose: `verifySender`
+ * refuses an empty allowlist before it looks at the headers, which is correct —
+ * absence is not permission — but it means the verdict carries no domain exactly
+ * when a workspace has allowlisted nothing. That is first contact, the one case
+ * where naming the sender is the entire point.
+ *
+ * DMARC first, because that is the claim about the `From:` a person reads. DKIM
+ * second, on its signing domain. Nothing else authenticates a domain here: an
+ * SPF pass is about the envelope and says nothing about either.
+ */
+export function authenticatedDomain(auth: AuthenticationResults | null): AuthenticatedDomain | null {
+  if (!auth) return null;
+
+  const dmarcDomain = domainOf(auth.properties.get("header.from"));
+  if (auth.results.get("dmarc") === "pass" && dmarcDomain) {
+    return { domain: dmarcDomain, method: "dmarc" };
+  }
+
+  const dkimDomain = domainOf(auth.properties.get("header.d"));
+  if (auth.results.get("dkim") === "pass" && dkimDomain) {
+    return { domain: dkimDomain, method: "dkim" };
+  }
+
+  return null;
+}
+
+/**
+ * Every authserv-id present on the message, in the order the headers appear.
+ *
+ * For triage, not for verification — the topmost id is the only one that could
+ * have come from the receiving MTA and `parseAuthenticationResults` already
+ * insists on it. This exists because the id Cloudflare stamps is not documented
+ * anywhere we could find, so a wrong `expectedAuthservId` fails every message
+ * closed and looks identical to "no PMS has written to us yet". One query over
+ * these answers which of the two it is.
+ */
+export function observedAuthservIds(raw: string): string[] {
+  const ids: string[] = [];
+  for (const line of headerLines(raw)) {
+    const [name, ...rest] = line.split(":");
+    if (name.trim().toLowerCase() !== "authentication-results") continue;
+    const id = stripComments(rest.join(":")).split(";")[0].trim().toLowerCase();
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
 function domainOf(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const at = value.lastIndexOf("@");
@@ -202,9 +258,19 @@ export function verifySender(
 
   // Named separately from a plain failure: an operator seeing this knows to add
   // a domain, not to investigate a forgery.
-  const authenticated = dmarcDomain ?? dkimDomain;
-  if (authenticated && (auth.results.get("dmarc") === "pass" || auth.results.get("dkim") === "pass")) {
-    return { verified: false, domain: authenticated, reason: `${authenticated} is authenticated but not allowlisted for this workspace.` };
+  //
+  // Taken from `authenticatedDomain` rather than `dmarcDomain ?? dkimDomain`,
+  // which was wrong in a way that mattered: with `dmarc=fail` and `dkim=pass` it
+  // returned the *failing* `header.from`, so a verdict could name a domain the
+  // message had not authenticated as — and `header.from` is chosen by the sender.
+  const authenticated = authenticatedDomain(auth);
+  if (authenticated) {
+    return {
+      verified: false,
+      domain: authenticated.domain,
+      method: authenticated.method,
+      reason: `${authenticated.domain} is authenticated but not allowlisted for this workspace.`,
+    };
   }
 
   const spf = auth.results.get("spf");

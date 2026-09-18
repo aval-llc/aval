@@ -253,6 +253,13 @@
       "when": 1789696318055,
       "tag": "0035_safe_jazinda",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1789696868736,
+      "tag": "0036_red_triathlon",
+      "breakpoints": true
     }
   ]
 }

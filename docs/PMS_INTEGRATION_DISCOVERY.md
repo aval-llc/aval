@@ -523,6 +523,76 @@ claimed domain would put attacker-chosen text on an operator's screen and invite
 a click next to it. Mail that failed authentication outright is shown as a count
 with no domain.
 
+## P1 — the reader, 2026-09-17
+
+**Resolved: a third Worker.** `aval-pms-seat-reader` (`wrangler.reader.jsonc`,
+cron every five minutes) holds the inbox and the database, and neither of the
+other two configs changes. The decision was the user's between three routes, and
+what settled it is that the P1.1 bridge needs a component with both handles
+anyway — reading a verified message body means reading R2, which the app Worker
+may not do. A service binding or a dedicated write-only store would have carried
+the held-sender summary and left the bridge still unsolved, so the "extra"
+Worker is not extra.
+
+Rejected with it: a service binding exposing one RPC method to the mail isolate
+(narrow, but a live path from unverified mail into the authenticated app), and a
+KV namespace or second D1 the mail isolate may only write (no path into the app
+at all, but two bindings, an in-memory join, and the bridge still open).
+
+**Verification runs at sweep time, not at receipt.** Deciding on arrival would
+need the allowlist inside the mail isolate, and that isolate's dumbness — store
+the bytes, parse nothing — is the property that makes it safe to point a domain
+catch-all at. So `worker/pms-seat-inbound.ts` is unchanged by all of this.
+
+**Four dispositions, and the object moves to match.** `verified/<org>/<digest>`,
+`held/<org>/<digest>`, `rejected/<org>/<digest>` for mail that authenticated
+nothing, `rejected/unassigned/<digest>` for a slug no workspace holds. Rows in
+`pms_seat_messages` (migration 0036) are keyed on the content hash, so a sweep
+that dies halfway, runs twice or overlaps itself converges instead of
+double-counting.
+
+**`held/` is re-swept, and swept first.** Re-swept because allowing a sender has
+to be retroactive — an operator told "4 messages are waiting" and shown nothing
+after clicking Allow would have been lied to, and nothing else in the system
+would have caught it. First because sweeping `unverified/` first moves messages
+into `held/` and the same run would then re-read what it had just written,
+double-counting every held message. The per-run budget is split across the
+prefixes for the same reason in reverse: a backlog of new mail must not starve
+the re-read an operator is waiting on.
+
+**Two bugs this found, both in code that had passing tests.**
+`verifySender` refuses an empty allowlist before reading the headers, which is
+the right rule — and it meant the verdict carried no authenticated domain
+exactly when a workspace had allowlisted nothing. That is first contact, the one
+case the review exists for, so the held list would have been empty precisely
+when it mattered. `authenticatedDomain()` now answers "what did this message
+authenticate as" independently of consent. Fixing it also exposed the second:
+the "authenticated but not allowlisted" branch took `dmarcDomain ?? dkimDomain`,
+so with `dmarc=fail, dkim=pass` it named the *failing* `header.from` — a
+sender-chosen string — as the authenticated domain.
+
+**The authserv-id is still unverified, and fails closed.** Cloudflare does not
+document the id Email Routing stamps on `Authentication-Results`, and
+`authentication.ts` refuses any result not bearing the expected one. So
+`PMS_SEAT_AUTHSERV_ID` is a var defaulting to `mx.cloudflare.net`, a missing
+value throws rather than defaulting, and a wrong value means nothing verifies —
+which is indistinguishable from an inbox nobody has written to. The sweep
+therefore reports the authserv-ids it actually saw on unauthenticated mail and
+the Worker logs them. That diagnostic started as a cross-org query and
+`tests/org-scoping-isolation.test.ts` refused it, correctly: on D1 there is no
+row-level security, and "it is only for diagnostics" is an assumption about
+callers that nothing in the code holds. Reporting it from the run keeps
+`lib/pms` uniformly org-scoped rather than moving the same query somewhere the
+scanner cannot see it.
+
+**Still open.** The settings surface — the allowlist editor and the review panel
+— is unbuilt; `seatReview()` and `suggestedSenderDomains()` are what it renders.
+`promoteVerifiedMessage()` is a stub that reports being one, so verified mail
+accumulates in `verified/` with a row saying why nothing parsed it; turning a
+provider's notification format into an `ImportBatch` is P1.1's remaining work.
+The reader is **built and not deployed** — it bundles clean (`--dry-run`, 61 KiB
+gzipped, all three bindings resolved) and no real message has passed through it.
+
 ## State at handoff — 2026-09-17
 
 Committed on `feat/pms-integration`, branched from `fix/codex-live-validation`

@@ -1642,3 +1642,67 @@ export const pmsSeatSenders = sqliteTable(
     index("pms_seat_senders_org_idx").on(table.organizationId),
   ],
 );
+
+/**
+ * One row per message the seat has processed — the reader's ledger.
+ *
+ * Written by `aval-pms-seat-reader` (worker/pms-seat-reader.ts), which is the
+ * only component holding both the unverified inbox and the database. The app
+ * never reads R2; it reads this. That split is deliberate and is the reason this
+ * table exists at all rather than the review surface listing the bucket:
+ * `d9210f8` took the inbox binding off the app Worker, and re-adding it to draw
+ * a settings panel would undo the boundary both wrangler configs exist to hold.
+ *
+ * `digest` is the primary key and is the message's own content hash, so a sweep
+ * that runs twice, or a PMS that sends the same notice twice, writes the same
+ * row. The sweep is therefore safe to re-run at any point, including mid-failure.
+ *
+ * ## What may be rendered from this table
+ *
+ * `authenticated_domain` is null unless the domain was actually authenticated by
+ * the topmost trusted `Authentication-Results`. That is a storage-level control,
+ * not a convention: a held message's `From` is chosen by whoever sent it, and a
+ * review surface that rendered a claimed domain would be putting attacker-picked
+ * text on an operator's screen next to an "Allow" button. Mail that authenticated
+ * nothing is counted, never named.
+ *
+ * `reason` and `observed_authserv_ids` are triage fields. They can contain
+ * sender-influenced text and are for a developer reading a query result, never
+ * for a customer-facing surface.
+ */
+export const pmsSeatMessages = sqliteTable(
+  "pms_seat_messages",
+  {
+    /** SHA-256 of the raw message, which is also its R2 key. */
+    digest: text("digest").primaryKey(),
+    /** The seat address it was sent to. Ours, not the sender's, so safe to display. */
+    recipient: text("recipient").notNull(),
+    /** Null when the slug belongs to no workspace — mail to an address never issued. */
+    organizationId: text("organization_id"),
+    /** verified | held | unauthenticated | unassigned — see lib/pms/inbound/disposition.ts. */
+    disposition: text("disposition").notNull(),
+    /** Set only when authentication established it. Null is the signal not to name a sender. */
+    authenticatedDomain: text("authenticated_domain"),
+    /** dmarc | dkim, whichever established the domain. */
+    method: text("method"),
+    /** The provider from the matching allowlist row, so the parser is chosen by consent. */
+    providerId: text("provider_id"),
+    /** Triage only. May contain sender-influenced text; never render to an operator. */
+    reason: text("reason"),
+    /**
+     * The authserv-ids actually seen on the message, recorded because the one
+     * Cloudflare uses is not documented anywhere we could find. If verification
+     * fails across the board, this column is the difference between a one-query
+     * answer and a blind hunt. Triage only — a sender can put ids here too.
+     */
+    observedAuthservIds: text("observed_authserv_ids"),
+    /** Where the object now lives, so a later sweep or an audit can fetch it. */
+    objectKey: text("object_key").notNull(),
+    receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
+    processedAt: integer("processed_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("pms_seat_messages_org_idx").on(table.organizationId, table.disposition),
+    index("pms_seat_messages_held_idx").on(table.organizationId, table.authenticatedDomain),
+  ],
+);
