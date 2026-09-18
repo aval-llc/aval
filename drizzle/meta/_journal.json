@@ -239,6 +239,13 @@
       "when": 1789678406703,
       "tag": "0033_silent_kang",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1789695129015,
+      "tag": "0034_mute_firebird",
+      "breakpoints": true
     }
   ]
 }

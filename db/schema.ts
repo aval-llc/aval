@@ -48,9 +48,19 @@ export const organizations = sqliteTable("organizations", {
   // Setup. Null means the built-in "general" persona, matching this app's
   // behavior before this column existed.
   defaultPersonaId: text("default_persona_id"),
+  // The seat slug currently shown to this workspace — its address is
+  // `agent-{seatSlug}@aval.llc`. Null until an operator picks one during setup;
+  // a workspace without one has no inbound seat and no PMS can mail it.
+  //
+  // This is the *current* address, not the set of addresses that reach here.
+  // Renaming adds a slug rather than replacing one, because a customer's PMS
+  // already has the old address on file and nothing we do should make mail they
+  // send disappear. `organization_seat_slugs` is that permanent set, and every
+  // value here must also exist there.
+  seatSlug: text("seat_slug"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+}, (table) => [uniqueIndex("organizations_seat_slug_uq").on(table.seatSlug)]);
 
 /**
  * Who belongs to a workspace, and what they may do in it.
@@ -1564,4 +1574,30 @@ export const agentDeployments = sqliteTable(
     uniqueIndex("agent_deployments_uq").on(table.organizationId, table.personaId, table.provider),
     index("agent_deployments_lookup_idx").on(table.organizationId, table.personaId, table.status),
   ],
+);
+
+/**
+ * Every seat slug ever issued, and who it belongs to. Permanently.
+ *
+ * `slug` is the primary key and rows are **never deleted**, which is the whole
+ * design: a slug cannot be reissued, so mail a PMS is still sending to a
+ * workspace's old address can never arrive at a different workspace. That is not
+ * a hypothetical — a seat address lives inside a customer's PMS configuration,
+ * outside our control, and may be used for years after they stopped thinking
+ * about it.
+ *
+ * A workspace that renames gains a row. It never gives one up, and every row it
+ * holds keeps resolving to it. `organizations.seatSlug` names which of them is
+ * the current one to display; this table decides which mail is whose.
+ */
+export const organizationSeatSlugs = sqliteTable(
+  "organization_seat_slugs",
+  {
+    slug: text("slug").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** Who claimed it, for the audit trail on an address a customer will type. */
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("organization_seat_slugs_org_idx").on(table.organizationId)],
 );

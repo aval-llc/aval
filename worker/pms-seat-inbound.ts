@@ -60,38 +60,20 @@ interface ForwardableEmailMessage {
 /** Messages above this are rejected rather than stored. A PMS notice is small. */
 const MAX_RAW_BYTES = 5 * 1024 * 1024;
 
-/** The domain seat addresses live on. Anything else is not ours to accept. */
-const SEAT_DOMAIN = "aval.llc";
-
 /**
- * The seat address shape: `agent-{orgSlug}@aval.llc`.
+ * What counts as a seat address is defined once, in a module the app imports
+ * too (`lib/pms/inbound/seat-address.ts`). A private copy here would drift the
+ * first time the slug rules changed, and the drift is the expensive kind: the
+ * app issues an address, the Worker rejects it, and the customer's PMS looks
+ * like the thing that is broken.
  *
- * This is a **shape** check and nothing more. `organizations` has no slug column
- * yet, so there is no set of real slugs to test membership against — see the
- * note in docs/PMS_INTEGRATION_DISCOVERY.md. `agent-notarealorg@aval.llc` gets
- * stored under its own key and belongs to no workspace until a slug column and a
- * lookup exist. Storing an unclaimed seat key is inert (P1 resolves recipient →
- * org and will find nothing); accepting mail for the whole domain would not be.
- *
- * Slug grammar matches what a URL-safe workspace identifier can be: lowercase
- * alphanumerics and internal hyphens, 1–40 characters, no leading or trailing
- * hyphen. Deliberately narrow — widening it later is a one-line change, while
- * having accepted too much is not reversible from R2.
+ * Still a shape check and nothing more. This Worker has no database, so it
+ * cannot ask whether a slug was ever issued. `agent-notarealorg@aval.llc` is
+ * stored under its own key and belongs to no workspace — inert, because
+ * resolving a recipient to an organization happens after sender verification.
+ * Accepting mail for the whole domain would not be inert.
  */
-const SEAT_LOCAL_PART = /^agent-([a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?)$/;
-
-/**
- * The org slug this message is addressed to, or `null` if it is not seat mail.
- *
- * Takes the envelope recipient (`message.to`), which Cloudflare gives us as the
- * RCPT TO — not a header, so it is not attacker-forgeable in the way `From:` is.
- */
-function seatOrgSlug(recipient: string): string | null {
-  const at = recipient.lastIndexOf("@");
-  if (at < 0) return null;
-  if (recipient.slice(at + 1) !== SEAT_DOMAIN) return null;
-  return SEAT_LOCAL_PART.exec(recipient.slice(0, at))?.[1] ?? null;
-}
+import { seatSlugOf } from "../lib/pms/inbound/seat-address.ts";
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
@@ -137,7 +119,7 @@ export default {
     // must not be buffered, hashed or stored — under the catch-all this is the
     // only check that distinguishes seat mail from the rest of the domain.
     const recipient = message.to.toLowerCase();
-    const orgSlug = seatOrgSlug(recipient);
+    const orgSlug = seatSlugOf(recipient);
     if (orgSlug === null) {
       disposeOfNonSeatMail(message, recipient);
       return;
