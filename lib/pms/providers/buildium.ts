@@ -11,6 +11,10 @@ export const buildium: ProviderDescriptor = {
   id: "buildium",
   displayName: "Buildium",
 
+  // Suggested during setup, never trusted: only a confirmed row in
+  // pms_seat_senders lets mail from here be read.
+  senderDomains: ["buildium.com"],
+
   read: {
     mechanisms: ["api"],
     supported: true,

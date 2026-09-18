@@ -25,6 +25,10 @@ export const appfolio: ProviderDescriptor = {
   id: "appfolio",
   displayName: "AppFolio",
 
+  // Suggested during setup, never trusted: only a confirmed row in
+  // pms_seat_senders lets mail from here be read.
+  senderDomains: ["appfolio.com"],
+
   read: {
     mechanisms: ["notification", "manual_export"],
     supported: true,

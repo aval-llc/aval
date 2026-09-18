@@ -13,6 +13,10 @@ export const doorloop: ProviderDescriptor = {
   id: "doorloop",
   displayName: "DoorLoop",
 
+  // Suggested during setup, never trusted: only a confirmed row in
+  // pms_seat_senders lets mail from here be read.
+  senderDomains: ["doorloop.com"],
+
   read: {
     mechanisms: ["api"],
     supported: true,

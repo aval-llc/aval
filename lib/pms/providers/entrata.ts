@@ -12,6 +12,13 @@ export const entrata: ProviderDescriptor = {
   id: "entrata",
   displayName: "Entrata",
 
+  // Suggested during setup, never trusted: only a confirmed row in
+  // pms_seat_senders lets mail from here be read.
+  // Enterprise deployments often send under the management company's own
+  // domain, so this suggestion will be wrong as often as right. The held-sender
+  // review is what tells an operator the domain their tenant actually uses.
+  senderDomains: ["entrata.com"],
+
   read: {
     mechanisms: ["api"],
     supported: true,

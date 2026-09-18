@@ -212,6 +212,24 @@ export interface ProviderDescriptor {
    * to permit.
    */
   unsupportedActions?: readonly PmsAction[];
+  /**
+   * Domains this provider is *expected* to send seat mail from, offered to an
+   * operator as a starting point during setup.
+   *
+   * **These are suggestions and never authority.** Nothing in the verification
+   * path reads this field: `verifySender` consults `pms_seat_senders`, and a row
+   * only gets there when an operator confirmed it. The distinction matters
+   * because the entries below are the same class of claim as `termsVerifiedAt` —
+   * researched, not observed — and an unconfirmed suggestion that silently
+   * became an allowlist entry would be Aval deciding whose mail may enter a
+   * customer's agent context.
+   *
+   * Apex domains only, because `domainMatches` already accepts subdomains.
+   * Enumerating `mail.`/`notifications.` here would be guessing at
+   * infrastructure that changes without notice, and guessing wider than we know
+   * is the failure mode this field is shaped to avoid.
+   */
+  senderDomains?: readonly string[];
 }
 
 

@@ -14,6 +14,10 @@ export const rentvine: ProviderDescriptor = {
   id: "rentvine",
   displayName: "Rentvine",
 
+  // Suggested during setup, never trusted: only a confirmed row in
+  // pms_seat_senders lets mail from here be read.
+  senderDomains: ["rentvine.com"],
+
   read: {
     mechanisms: ["api"],
     supported: true,

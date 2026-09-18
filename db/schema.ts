@@ -1601,3 +1601,44 @@ export const organizationSeatSlugs = sqliteTable(
   },
   (table) => [index("organization_seat_slugs_org_idx").on(table.organizationId)],
 );
+
+/**
+ * Who may write to a workspace's seat address.
+ *
+ * `verifySender` (lib/pms/inbound/authentication.ts) refuses every message when
+ * this table has no row for the workspace, and that is the intended reading: a
+ * workspace that has not said who may write to its seat has not consented. Same
+ * rule as `pms_write_authorizations` — absence is never permission.
+ *
+ * A row is (workspace, domain, provider). The provider is not decoration: it is
+ * how the read envelope knows which system's format a verified message is in,
+ * without inferring it from content an attacker could shape. Mail that
+ * authenticates as `mail.appfolio.com` is parsed as AppFolio because an operator
+ * said that domain is their AppFolio, not because the body looked like it.
+ *
+ * Domains are stored as the operator confirmed them, and matched by
+ * `domainMatches`, which accepts subdomains. So a row for `appfolio.com` covers
+ * `mail.appfolio.com` without an operator having to predict which subdomains
+ * their PMS will send from next year.
+ *
+ * Unlike `organization_seat_slugs`, rows here are deletable. Revoking a sender
+ * has to be possible and immediate — the address is permanent precisely so that
+ * consent does not have to be.
+ */
+export const pmsSeatSenders = sqliteTable(
+  "pms_seat_senders",
+  {
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** Normalized by `sender-domain.ts` before it gets here: lowercase, no scheme, no leading dot. */
+    domain: text("domain").notNull(),
+    /** A provider id from lib/pms/providers. Verified mail from this domain is read as this system. */
+    providerId: text("provider_id").notNull(),
+    /** Who allowed it. This is a consent record, so the approver is part of it. */
+    addedBy: text("added_by").notNull(),
+    addedAt: integer("added_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_seat_senders_uq").on(table.organizationId, table.domain),
+    index("pms_seat_senders_org_idx").on(table.organizationId),
+  ],
+);

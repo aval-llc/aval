@@ -12,6 +12,11 @@ export const realpage: ProviderDescriptor = {
   id: "realpage",
   displayName: "RealPage",
 
+  // Suggested during setup, never trusted: only a confirmed row in
+  // pms_seat_senders lets mail from here be read.
+  // Same caveat as Entrata: a large tenant's mail may carry its own domain.
+  senderDomains: ["realpage.com"],
+
   read: {
     mechanisms: ["api"],
     supported: true,

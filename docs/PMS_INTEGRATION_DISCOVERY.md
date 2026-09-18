@@ -440,11 +440,88 @@ DMARC pass on an allowlisted `header.from`, or a DKIM signature by an allowliste
 domain. An empty allowlist verifies nothing — a workspace that has not said who
 may write to its seat has not consented, the same rule as `enablement.ts`.
 
-**Still open in P1.** No storage for the per-org sender allowlist yet
-(`verifySender` takes one; nothing persists one). No bridge from verified seat
-mail into `lib/operations/` — that is P1.1's remaining work, and the read
-envelope itself already exists. The four workflows' read paths (P1.2–P1.5) are
-untouched.
+## P1 — the sender allowlist, 2026-09-17
+
+`verifySender` took an allowlist and nothing persisted one, so the seat could
+store mail and verify none of it: every message failed for the same reason, and
+both halves had passing tests because each was correct alone. `pms_seat_senders`
+(migration 0035) and `lib/pms/inbound/senders.ts` are that missing half.
+
+**An allowlist row is (workspace, domain, provider).** The provider is not
+decoration — it is how the read envelope will know which system's format a
+verified message is in. The alternative was to store the domain alone and let
+the parser work the format out from the message, which puts the question to the
+one thing in this path a sender fully controls. Mail that authenticates as
+`mail.appfolio.com` is read as AppFolio because an operator said that domain is
+their AppFolio, not because the body looked like it.
+
+**Descriptors suggest sender domains; only an operator's confirmation stores
+one.** `ProviderDescriptor.senderDomains` holds the vendors' apex domains, and
+nothing on the verification path reads that field. This is the same class of
+claim as `termsVerifiedAt` — researched, not observed — and the entries are the
+vendors' corporate domains rather than observed sending domains. Enterprise
+Yardi, RealPage and Entrata deployments commonly send under the management
+company's own domain, so those suggestions are noted as likely wrong. Apex only:
+`domainMatches` already accepts subdomains, and enumerating `mail.`/
+`notifications.` would be guessing at infrastructure that changes without notice.
+Deriving the allowlist from provider enablement was rejected — turning on
+AppFolio says "I use AppFolio", not "mail claiming to be appfolio.com may enter
+my agent's context".
+
+**Rejections are grants somebody would regret, not form validation.**
+`sender-domain.ts` refuses four things. `aval.llc` and its subdomains, because a
+seat must not trust its own forwarding or anything imitating it. A registry
+suffix under a two-letter ccTLD (`co.uk`), which would cover every organization
+beneath it — `co.com` is deliberately allowed, since a company can own it.
+Anything that is not a domain, rather than guessing what was meant. And consumer
+mailbox domains, because `gmail.com` on an allowlist is not a party but a
+population: every account holder may then write in, DMARC-clean, with no forgery
+involved. **That last rule's exemption set is deliberately empty and the policy
+is open** — whether `generic_email` should be exempt for the two-person customer
+whose PMS is a person forwarding from Gmail is the one decision this module
+leaves unmade, marked at `PUBLIC_MAILBOX_EXEMPT` and carried by a `todo` test
+that fails against the closed default rather than a suite that passes by
+omission.
+
+Normalization is forgiving where rejection is not: a pasted URL, mailbox,
+`*.` wildcard, port or trailing dot all reduce to the domain meant. The wildcard
+is stripped rather than honored as syntax, because `domainMatches` already
+covers subdomains and two spellings of one grant make a list harder to audit.
+
+**Revocation deletes the row.** The asymmetry against `organization_seat_slugs`,
+where nothing is ever deleted, is the point of both designs: the address is
+permanent so a customer's PMS configuration keeps working, and consent is
+revocable so permanence never becomes a standing grant nobody can take back. A
+disabled row left in place is a revocation a later code path can misread.
+
+**Still open in P1.** The held-sender review surface is decided but not built,
+and it is blocked on an architectural question rather than on work (below). No
+bridge from verified seat mail into `lib/operations/` — that is P1.1's remaining
+work, and `resolveSeatSender` is the join it will call. The four workflows' read
+paths (P1.2–P1.5) are untouched.
+
+## The held-sender review crosses a boundary that was drawn shut on purpose
+
+The agreed behavior for mail from a non-allowlisted sender is a review surface:
+*"4 messages from mail.appfolio.com since Tuesday — allow this sender?"* It turns
+first contact from a silent failure into one click, and it is also what
+*confirms* a descriptor's suggested domain against real mail.
+
+It cannot be built the obvious way. `d9210f8` removed the `aval-pms-seat-inbox`
+binding from the app Worker on the grounds that it "handed the authenticated app
+a handle on the unverified inbox — the thing these two configs are separate to
+prevent", and `wrangler.seat.jsonc` keeps D1 out of the mail isolate for the
+mirror-image reason. So the app cannot list R2 and the Worker cannot write the
+app's database, and a held-sender summary has to cross that boundary by some
+route that does not reopen either one. Candidates, unresolved: a service binding
+exposing one RPC method to the mail isolate; a dedicated KV namespace or second
+D1 the Worker may only write; a third Worker on a schedule holding both handles.
+
+One thing is settled regardless of route: **the review names authenticated
+domains only.** A held message's `From` is sender-supplied, so rendering a
+claimed domain would put attacker-chosen text on an operator's screen and invite
+a click next to it. Mail that failed authentication outright is shown as a count
+with no domain.
 
 ## State at handoff — 2026-09-17
 

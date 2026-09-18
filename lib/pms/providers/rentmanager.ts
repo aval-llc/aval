@@ -13,6 +13,10 @@ export const rentmanager: ProviderDescriptor = {
   id: "rentmanager",
   displayName: "Rent Manager",
 
+  // Suggested during setup, never trusted: only a confirmed row in
+  // pms_seat_senders lets mail from here be read.
+  senderDomains: ["rentmanager.com"],
+
   read: {
     mechanisms: ["api"],
     supported: true,

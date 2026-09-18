@@ -12,6 +12,12 @@ export const yardi: ProviderDescriptor = {
   id: "yardi",
   displayName: "Yardi Voyager",
 
+  // Suggested during setup, never trusted: only a confirmed row in
+  // pms_seat_senders lets mail from here be read.
+  // Voyager is commonly configured to send as the client, so expect this to
+  // need replacing with the customer's own domain.
+  senderDomains: ["yardi.com"],
+
   read: {
     mechanisms: ["api"],
     supported: true,
