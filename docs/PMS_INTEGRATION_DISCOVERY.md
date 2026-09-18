@@ -395,6 +395,57 @@ authorizations — does not know about deployments. It is not reachable today
 either way (see the executor note above), but it must be closed when the
 dispatch is wired.
 
+## P1 — decisions taken 2026-09-17
+
+**Seat slugs are operator-chosen, and permanent.** Decided by the user when the
+alternatives were put side by side. Deriving `slugify(org.name)` was rejected
+because the address goes into a customer's PMS configuration by hand: they should
+see and own it before that happens, not discover that "Acme Properties, LLC"
+became `agent-acme-properties-llc@` and that their second workspace is
+`agent-acme-properties-2@`. An opaque token (`agent-k7m2x9@`) would make the seat
+unguessable and cut probe traffic, and was rejected as unreadable — nobody,
+including support, could tell whose address it is.
+
+**A slug belongs to one workspace forever, and renaming adds an alias.**
+`organization_seat_slugs` has `slug` as its primary key and never deletes a row,
+so a slug cannot be reissued — the guarantee is structural rather than enforced
+by a check somebody can forget. `organizations.seatSlug` names the current one to
+display. The reasoning is that a seat address lives in a customer's PMS
+configuration, outside Aval's control, and may still be in use years after they
+stopped thinking about it; mail they send must never arrive at a stranger's
+workspace. Migration 0034.
+
+**`seat-address.ts` is shared by the Worker and the app.** Not a convenience: an
+address the app issues that the Worker rejects presents as a PMS that
+mysteriously sends nothing, and the customer's first conclusion is that their
+PMS is broken. The module has no dependencies so wrangler can bundle it into an
+isolate handling unverified mail. Adopting it tightened the Worker's rule, which
+was 1–40 characters and had no reserved list.
+
+**Verification reads the raw message, not the stored header.** The Worker records
+`headers.get("authentication-results")`, and that string is not evidence:
+`Headers.get` joins duplicates with a comma, and the *sender* controls the headers
+in the message they send, so a forged `Authentication-Results` claiming
+`dmarc=pass header.from=appfolio.com` is stored alongside the real one with
+nothing to distinguish them. `lib/pms/inbound/authentication.ts` parses the raw
+header block and takes the topmost result bearing the expected authserv-id —
+topmost being the one the receiving MTA added last. The residual assumption
+(Cloudflare adds a result to everything Email Routing accepts) is stated in the
+module rather than left implicit.
+
+**SPF alone never verifies.** It authenticates the envelope sender, which need
+not relate to the `From:` a person or a parser reads, so a message can be
+SPF-clean for `bounces.somewhere.example` and display as AppFolio. Passing means
+DMARC pass on an allowlisted `header.from`, or a DKIM signature by an allowlisted
+domain. An empty allowlist verifies nothing — a workspace that has not said who
+may write to its seat has not consented, the same rule as `enablement.ts`.
+
+**Still open in P1.** No storage for the per-org sender allowlist yet
+(`verifySender` takes one; nothing persists one). No bridge from verified seat
+mail into `lib/operations/` — that is P1.1's remaining work, and the read
+envelope itself already exists. The four workflows' read paths (P1.2–P1.5) are
+untouched.
+
 ## State at handoff — 2026-09-17
 
 Committed on `feat/pms-integration`, branched from `fix/codex-live-validation`
