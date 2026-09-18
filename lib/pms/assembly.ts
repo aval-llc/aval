@@ -147,11 +147,40 @@ export async function pmsWriteAllowed(
   organizationId: string,
   providerId: string,
   toolName: string,
+  personaId?: string,
 ): Promise<{ allowed: boolean; reason?: string; mandatoryApproval: boolean }> {
   ensurePmsAdaptersRegistered();
   const action = actionForTool(toolName);
   if (!action) return { allowed: false, reason: `"${toolName}" is not a PMS write tool.`, mandatoryApproval: false };
   try {
+    // The deployment narrowing, re-resolved. Assembly applied it at the top of
+    // the turn; without repeating it here, an operator pausing a deployment
+    // mid-turn only affected the *next* turn, and a turn already running kept
+    // tools the operator had just taken away. Pausing is the control an operator
+    // reaches for when something is going wrong, so "takes effect next turn" is
+    // the wrong answer at exactly the moment it matters.
+    if (personaId !== undefined) {
+      const deployments = await deploymentsForAgent(organizationId, personaId);
+      if (deployments.length > 0) {
+        const owns = deployments.some((deployment) =>
+          deployment.provider === providerId && deploymentOwnsAction(deployment, action)
+        );
+        if (!owns) {
+          return {
+            allowed: false,
+            reason: "This agent is no longer deployed into that system for this workflow.",
+            mandatoryApproval: false,
+          };
+        }
+      } else if (!unconfiguredAgentMayUseEveryProvider(await organizationHasDeployments(organizationId))) {
+        return {
+          allowed: false,
+          reason: "This workspace governs agents by deployment and this agent has none.",
+          mandatoryApproval: false,
+        };
+      }
+    }
+
     const matrix = await resolveMatrix(organizationId, providerId);
     const resolution = matrix.get(action);
     if (!resolution) return { allowed: false, reason: "Unknown action.", mandatoryApproval: false };

@@ -16,6 +16,8 @@ import { HARNESS_TOOLS, runHarnessTool } from '@/lib/agents/harness-tools';
 
 import type { ToolSchema } from "./anthropic";
 import { COMMUNICATION_TOOLS, runCommunicationTool } from "@/lib/communications/tools";
+import { PMS_WRITE_TOOL_SCHEMAS, runPmsWriteTool } from "@/lib/pms/tools.ts";
+import { isPmsWriteTool } from "@/lib/pms/tool-map.ts";
 import { OPERATIONS_TOOLS, runOperationsTool } from "./operations-tools";
 import { METRIC_KEYS, deltaPct, noDataAvailable, readFunnel, readMetricSeries, readMetrics, type MetricKey } from "./portfolio-data";
 import { PREFERENCE_TOPICS, recordPreference, describePreference, type PreferenceTopic } from "./preferences";
@@ -190,7 +192,14 @@ const COMPOSE_DOCUMENT_TOOL: ToolSchema = {
  * model picks by description, and the two families are described in terms of
  * what they can answer rather than which table they read.
  */
-const ALL_DATA_TOOLS: ToolSchema[] = [...DATA_TOOLS, ...OPERATIONS_TOOLS, ...COMMUNICATION_TOOLS, ...HARNESS_TOOLS];
+const ALL_DATA_TOOLS: ToolSchema[] = [
+  ...DATA_TOOLS, ...OPERATIONS_TOOLS, ...COMMUNICATION_TOOLS, ...HARNESS_TOOLS,
+  // Present in the schema list, absent from any given request unless the
+  // capability matrix assembled it in (lib/agents/runtime.ts). Listing them
+  // here is what makes that filter mean something — before this, it narrowed a
+  // set these tools were never in.
+  ...PMS_WRITE_TOOL_SCHEMAS,
+];
 
 /** Tools for a quick chat answer — `render_answer`'s `document` is optional. */
 export const TOOLS: ToolSchema[] = [...ALL_DATA_TOOLS, RENDER_ANSWER_TOOL];
@@ -218,7 +227,22 @@ function collectNumbers(v: unknown, out: number[] = []): number[] {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export async function runTool(name: string, input: Record<string, unknown>, organizationId?: string, operationKey?: string, taskContext?: {id:string;stepIndex:number}): Promise<ToolOutput> {
+export async function runTool(name: string, input: Record<string, unknown>, organizationId?: string, operationKey?: string, taskContext?: {id:string;stepIndex:number;approvalId?:string;personaId?:string}): Promise<ToolOutput> {
+  // Before the harness/communication branches: a PMS write is the only kind
+  // of tool here that reaches into a customer's system of record, and its
+  // whole gate chain lives behind this one call.
+  if (isPmsWriteTool(name)) {
+    if (!organizationId) throw new Error("A workspace is required.");
+    return {
+      json: await runPmsWriteTool(name, input, organizationId, operationKey, {
+        personaId: taskContext?.personaId,
+        approvalId: taskContext?.approvalId,
+      }),
+      // A provider's acknowledgement is not a measured figure. Nothing a PMS
+      // echoes back may enter the faithfulness gate's evidence set.
+      numbers: [],
+    };
+  }
   if (HARNESS_TOOLS.some(tool=>tool.name===name)) {
     if(!organizationId)throw Error('A workspace is required.');
     return {json:await runHarnessTool(name,input,organizationId,taskContext?.id,operationKey,taskContext?.stepIndex),numbers:[]};

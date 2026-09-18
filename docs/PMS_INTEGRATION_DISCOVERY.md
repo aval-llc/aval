@@ -300,18 +300,46 @@ a trust-ledger posting shape from documentation without a sandbox is how a
 payment lands on the wrong lease. Those actions resolve to `unlearned` — Aval's
 work, correctly attributed.
 
-**The ten PMS write tools have no executor.** `executePmsWrite()` is exported and
-has no caller: `runTool()` in `lib/ask-aval/tools.ts` has no branch for any of
-the ten, and they are not marked `unimplemented` in the registry, so `policy.ts`
-does not deny them either. A model that calls `create_work_order` today reaches
-`runTool`'s default case and gets `Unknown tool "create_work_order"`. It fails
-safe — no write happens — but two claims made elsewhere are wrong as shipped:
-the write path is not reachable end to end, and mandatory approval is enforced
-in *two* independent places, not three, because the refusal inside
-`executePmsWrite` is not on any live path. Wiring the dispatch is the next
-substantive piece of P0.3.
+**The ten PMS write tools have no executor.** ~~Resolved 2026-09-17.~~
+`executePmsWrite()` was exported and had no caller: `runTool()` in
+`lib/ask-aval/tools.ts` had no branch for any of the ten, and they were not
+marked `unimplemented` in the registry, so `policy.ts` did not deny them either.
+A model that called `create_work_order` reached `runTool`'s default case and got
+`Unknown tool "create_work_order"`.
 
----
+**The gap was larger than that entry recorded.** Wiring it turned up that the
+ten tools had no model-facing schema at all — they were in
+`lib/agents/registry.ts` (permissions, risk, approval), in `tool-map.ts`
+(tool → action) and in the `runtime.ts` filter, but never in `TOOLS`. So the
+capability-matrix filter at `runtime.ts` was narrowing a set the tools were
+never in, and no request could have included one however the matrix resolved.
+Four layers were each individually correct and the path was not connected.
+
+That is the failure mode worth naming, because every test passed throughout.
+`tests/integration/pms-tools.integration.mjs` now asserts the join itself —
+every write tool is in `TOOLS` and in `TOOL_SCHEMAS` — rather than asserting
+each layer separately, which is what let this hide.
+
+Shipped:
+
+- `lib/pms/tool-schemas.ts` — the ten schemas and their payload mappings, pure
+  and storage-free, following the `capability-rules.ts` / `capability.ts` split.
+  Schema and mapping are one object per tool because they are one decision:
+  apart, they drift silently and the model's `property_id` never reaches the
+  adapter's `propertyId`.
+- `lib/pms/tools.ts` — the dispatch. Refuses outside a durable task, because the
+  idempotency key comes from the task row and there is no safe way to invent
+  one. Reports `queued` as queued.
+- `runTool` dispatches PMS writes ahead of every other branch.
+- **The mid-turn pause gap is closed.** `pmsWriteAllowed()` now takes the
+  persona and re-resolves deployments, so pausing a deployment stops a turn
+  already in flight rather than only the next one. The persona reaches it
+  through `ExecutionRequest.context.personaId`, which all three `executeTool`
+  call sites already carried.
+
+Mandatory approval is now enforced in the three independent places the design
+claimed: the registry's `requiresApproval`, the resolution flag, and the refusal
+inside `executePmsWrite` — which is on a live path at last.
 
 ## Binding an agent to a connection — implemented 2026-09-17
 
@@ -398,11 +426,10 @@ updated, not suppressed.
 
 Next actions, in order:
 
-1. **Wire the executor.** The ten write tools have no dispatch to
-   `executePmsWrite()` (see above). Until that lands the write path is not
-   reachable end to end, and the third enforcement point for mandatory approval
-   does not exist. Close the mid-turn pause gap in `pmsWriteAllowed()` in the
-   same change.
+1. ~~**Wire the executor.**~~ **Done 2026-09-17** — see above. The write path is
+   reachable end to end, and the mid-turn pause gap in `pmsWriteAllowed()` is
+   closed. Still true: only DoorLoop maintenance has an adapter, so the other
+   six actions resolve to `unlearned` and are never assembled.
 2. ~~**P0.0.**~~ **Applied 2026-09-17 18:16 UTC.** The seat path is live:
    `aval-pms-seat-inbox` R2 bucket created, `aval-pms-seat-inbound` deployed from
    `wrangler.seat.jsonc` with `env.PMS_SEAT_INBOX` bound and `workers_dev: false`

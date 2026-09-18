@@ -312,7 +312,11 @@ async function runWithRetries(
   for (let attempt = 1; attempt <= tool.maxRetries + 1; attempt++) {
     try {
       const out = await withTimeout(
-        runTool(tool.name, request.args, request.subject.organizationId, request.task ? `${request.task.id}:${tool.name}:${await digestPayload(canonicalAction(request.args))}` : _key ?? undefined, request.task),
+        runTool(tool.name, request.args, request.subject.organizationId, request.task ? `${request.task.id}:${tool.name}:${await digestPayload(canonicalAction(request.args))}` : _key ?? undefined,
+          // The persona travels with the task coordinates so a PMS write can
+          // re-resolve this agent's deployments at execution time, not just at
+          // assembly. `approvalId` is already on `task` and reaches the same gate.
+          request.task ? { ...request.task, personaId: request.context?.personaId } : undefined),
         tool.timeoutMs,
         tool.name,
       );

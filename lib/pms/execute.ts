@@ -49,6 +49,14 @@ export interface PmsWriteRequest {
   idempotencyKey: string;
   /** The approval this write executes under, when one was required. */
   approvalId?: string;
+  /**
+   * The persona this write is running as, for the deployment re-check.
+   *
+   * Optional because a caller with no agent in hand (a queue drain, a settings
+   * preview) is not an agent acting. When present it is re-resolved against the
+   * deployment table here, not trusted from assembly — see below.
+   */
+  personaId?: string;
 }
 
 /** A runner that has asked for work inside this window is considered online. */
@@ -64,8 +72,16 @@ export async function executePmsWrite(request: PmsWriteRequest): Promise<PmsWrit
 
   // Re-resolve rather than trust assembly. Assembly ran at the top of a turn
   // that may have been running for minutes, and an authorization can be
-  // suspended in between — which is what makes same-day revocation real.
-  const gate = await pmsWriteAllowed(request.organizationId, request.providerId, request.toolName);
+  // suspended in between — which is what makes same-day revocation real. The
+  // persona goes with it so a deployment paused mid-turn is caught here too:
+  // without it, pausing only stopped the *next* turn's assembly, and a turn
+  // already in flight kept its tools.
+  const gate = await pmsWriteAllowed(
+    request.organizationId,
+    request.providerId,
+    request.toolName,
+    request.personaId,
+  );
   if (!gate.allowed) return { status: "denied", reason: gate.reason ?? "Not permitted." };
 
   // Fair Housing: these never execute without a named approval, whatever the
