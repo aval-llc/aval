@@ -23,11 +23,11 @@ import { parseTaskCheck, type TaskCheck } from './checks';
  *   that already started.
  */
 
-import { and, asc, desc, eq, gt, inArray, lt, lte, or, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte, or, isNull, sql } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { agentTasks, agentTaskSteps } from "@/db/postgres/schema";
 import { latestApprovalSettledPredicate } from "./task-sql.ts";
-import { canTransition, LEASE_MS, TERMINAL_STATES, type TaskState } from "./task-state.ts";
+import { canTransition, LEASE_MS, SCHEDULED_WAKE_ONLY_STATES, TERMINAL_STATES, type TaskState } from "./task-state.ts";
 import { DEFAULT_MAX_STEPS, DEFAULT_MAX_TOKENS } from "./task-state.ts";
 import { retryJitterMs, taskRetryDelayMs } from "./retry-policy.ts";
 
@@ -237,6 +237,38 @@ export async function updateTask(dbSession: DbSession, task: TaskRecord, workerI
   return affectedRows(result) === 1;
 }
 
+/**
+ * Records where an external effect landed, as a new row.
+ *
+ * The reservation is written before the provider is called, so it cannot carry
+ * the id of the record it is about to create. Updating it afterwards is not an
+ * option and should not be: `20260911000400_rls_hardening.sql` deliberately
+ * drops UPDATE and DELETE on this table for the application role, because the
+ * step log is append-only evidence. So the reference is appended instead, and
+ * `pendingExecutions` joins it back to the execution by `(tool, step)` — the
+ * same pair the reservation's idempotency key is derived from.
+ */
+export async function recordExternalReference(dbSession: DbSession, input: {
+  organizationId: string;
+  taskId: string;
+  stepIndex: number;
+  toolName: string;
+  sourceProvider?: string | null;
+  externalRecordId?: string | null;
+}): Promise<void> {
+  if (!input.sourceProvider && !input.externalRecordId) return;
+  await appendStep(dbSession, {
+    taskId: input.taskId,
+    organizationId: input.organizationId,
+    stepIndex: input.stepIndex,
+    kind: "external_reference",
+    toolName: input.toolName,
+    policyEffect: "allow",
+    sourceProvider: input.sourceProvider ?? null,
+    externalRecordId: input.externalRecordId ?? null,
+  });
+}
+
 export class IllegalTransitionError extends Error {
   constructor(from: TaskState, to: TaskState) {
     super(`Illegal task transition ${from} → ${to}.`);
@@ -317,7 +349,10 @@ async function cascadeCancel(dbSession: DbSession, organizationId: string, rootI
   }
 }
 
-/** Tasks that are runnable now: queued, or abandoned by a worker whose lease expired. */
+const RUNNABLE_NOW: readonly TaskState[] = ["QUEUED", "RUNNING", "WAITING_FOR_TOOL", "PENDING_VERIFICATION", "WAITING_FOR_PROVIDER"];
+const WAKE_ONLY: readonly TaskState[] = [...SCHEDULED_WAKE_ONLY_STATES];
+
+/** Tasks that are runnable now: queued, abandoned by a worker whose lease expired, or due for a scheduled wake-up. */
 export async function claimableTasks(dbSession: DbSession, limit = 5): Promise<TaskRecord[]> {
   const now = new Date();
   const rows = await dbSession.db
@@ -325,9 +360,23 @@ export async function claimableTasks(dbSession: DbSession, limit = 5): Promise<T
     .from(agentTasks)
     .where(
       and(
-        inArray(agentTasks.status, ["QUEUED", "RUNNING", "WAITING_FOR_TOOL", "PENDING_VERIFICATION"]),
+        or(
+          // Runnable as soon as nothing holds them: a null wake-up time means
+          // "now". Verification carries its own backoff in nextAttemptAt.
+          and(
+            inArray(agentTasks.status, RUNNABLE_NOW),
+            or(isNull(agentTasks.nextAttemptAt), lte(agentTasks.nextAttemptAt, now)),
+          ),
+          // Waiting on an outside party or on a clock. Here a null wake-up time
+          // means "nothing is expected yet", not "run it" — selecting these
+          // every tick would spend a claim a minute while nothing changed.
+          and(
+            inArray(agentTasks.status, WAKE_ONLY),
+            isNotNull(agentTasks.nextAttemptAt),
+            lte(agentTasks.nextAttemptAt, now),
+          ),
+        ),
         or(isNull(agentTasks.leaseExpiresAt), lt(agentTasks.leaseExpiresAt, now)),
-        or(isNull(agentTasks.nextAttemptAt), lte(agentTasks.nextAttemptAt, now)),
       ),
     )
     .orderBy(sql`CASE WHEN ${agentTasks.status} = 'WAITING_FOR_TOOL' THEN 1 ELSE 0 END`, asc(agentTasks.createdAt))
@@ -366,6 +415,9 @@ export interface StepInput {
   attempt?: number;
   durationMs?: number;
   idempotencyKey?: string;
+  /** Where an external effect landed, on an `external_reference` row. */
+  sourceProvider?: string | null;
+  externalRecordId?: string | null;
   error?: string;
 }
 
@@ -408,6 +460,8 @@ export async function appendStep(dbSession: DbSession, step: StepInput): Promise
     attempt: step.attempt ?? 1,
     durationMs: step.durationMs ?? null,
     idempotencyKey: step.idempotencyKey ?? null,
+    sourceProvider: step.sourceProvider ?? null,
+    externalRecordId: step.externalRecordId ?? null,
     error: step.error ?? null,
     createdAt: new Date(),
   }).onConflictDoNothing().returning({ id: agentTaskSteps.id });

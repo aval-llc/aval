@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { agentTaskSteps, agentApprovals } from "../../db/postgres/schema.ts";
 import { createTask, getTask, claimTask, claimableTasks, updateTask } from "../../lib/agents/tasks.ts";
+import { claimFromState } from "../../lib/agents/task-state.ts";
+import { DEFAULT_ATTEMPT_POLICIES } from "../../lib/agents/attempt-policy.ts";
 import { executeApprovedTool } from "../../lib/agents/executor.ts";
 import { requestApproval } from "../../lib/agents/approvals.ts";
 import { getTool } from "../../lib/agents/registry.ts";
@@ -127,6 +129,91 @@ export async function runCrashResumeCases(t, { session, userA, propertyId, admin
     const settled = await run((s, org) => getTask(s, org, task.id));
     assert.equal(settled.status, "WAITING_FOR_HUMAN");
     assert.notEqual(settled.status, "COMPLETED");
+  });
+
+  await t.test("a task parked for verification is re-claimed when its backoff elapses", async () => {
+    // The whole verification design rests on this: park, wait out the backoff,
+    // come back and re-read the provider. If the claim cannot take the row, the
+    // task is selected on every tick and dropped in silence — never re-verified,
+    // and never escalated to the person its attempt budget promises.
+    const task = await run((s, org) => createTask(s, {
+      organizationId: org, userId: userA, agentId: "maintenance",
+      goal: "Park for verification, then resume.",
+      check: { kind: "evidence", tools: ["get_portfolio_metrics"] },
+    }));
+
+    assert.equal(await run((s) => claimTask(s, task.id, "worker-one", "QUEUED")), true);
+    const running = await run((s, org) => getTask(s, org, task.id));
+    await run((s) => updateTask(s, running, "worker-one", {
+      status: "PENDING_VERIFICATION",
+      nextAttemptAt: new Date(Date.now() - DEFAULT_ATTEMPT_POLICIES.verification.initialDelayMs),
+      // Parking hands the lease back, exactly as `finish` does — the next tick
+      // is a different worker, which is the whole point of a durable park.
+      releaseLease: true,
+    }));
+
+    const parked = await run((s, org) => getTask(s, org, task.id));
+    assert.equal(parked.status, "PENDING_VERIFICATION");
+
+    // The worker selects it...
+    const claimable = await run((s) => claimableTasks(s, 50));
+    assert.ok(claimable.some((row) => row.id === task.id), "an elapsed backoff makes the task claimable");
+
+    // ...and claiming it from QUEUED — which is what the runtime used to do —
+    // matches no row at all, which is the silent stall this guards against.
+    assert.equal(
+      await run((s) => claimTask(s, task.id, "worker-two", "QUEUED")),
+      false,
+      "a PENDING_VERIFICATION row is not claimable as QUEUED",
+    );
+    assert.equal(
+      (await run((s, org) => getTask(s, org, task.id))).status,
+      "PENDING_VERIFICATION",
+      "the failed claim left the task exactly where it was",
+    );
+
+    // Claiming it from the state it is actually in takes the lease.
+    assert.equal(
+      await run((s) => claimTask(s, task.id, "worker-two", claimFromState(parked.status))),
+      true,
+      "the task resumes from the state it is actually in",
+    );
+    assert.equal((await run((s, org) => getTask(s, org, task.id))).status, "RUNNING");
+  });
+
+  await t.test("work waiting on an outside party is not re-selected until it is due", async () => {
+    // Waiting on a resident is not a reason to look at the task every minute.
+    // Without an explicit wake-up time it must stay out of the claim set
+    // entirely, or it spends a claim a tick while nothing about it changes.
+    const park = async (goal, nextAttemptAt) => {
+      const task = await run((s, org) => createTask(s, {
+        organizationId: org, userId: userA, agentId: "maintenance", goal,
+        check: { kind: "evidence", tools: ["get_portfolio_metrics"] },
+      }));
+      assert.equal(await run((s) => claimTask(s, task.id, "worker-one", "QUEUED")), true);
+      const running = await run((s, org) => getTask(s, org, task.id));
+      // Parking releases the lease, and updateTask is lease-fenced, so the
+      // wake-up time has to be set by the same update that parks it.
+      await run((s) => updateTask(s, running, "worker-one", {
+        status: "WAITING_FOR_RESIDENT", nextAttemptAt, releaseLease: true,
+      }));
+      return task;
+    };
+
+    const openEnded = await park("Wait for the resident, with no follow-up set.", null);
+    const due = await park("Wait for the resident, follow-up already due.", new Date(Date.now() - 1000));
+
+    const claimable = await run((s) => claimableTasks(s, 100));
+    const ids = new Set(claimable.map((row) => row.id));
+    assert.equal(ids.has(openEnded.id), false, "an open-ended wait is not runnable work");
+    assert.ok(ids.has(due.id), "a due follow-up makes the wait runnable again");
+
+    assert.equal(
+      await run((s) => claimTask(s, due.id, "worker-two", claimFromState("WAITING_FOR_RESIDENT"))),
+      true,
+      "and it is claimed from the state it is actually in",
+    );
+    assert.equal((await run((s, org) => getTask(s, org, due.id))).status, "RUNNING");
   });
 
   await t.test("a worker whose lease expired cannot write over the worker that replaced it", async () => {

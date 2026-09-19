@@ -211,6 +211,47 @@ async function reconcile(dbSession: DbSession, input: FactInput, now: Date): Pro
   }
 }
 
+/**
+ * Settles a disagreement by keeping one fact and superseding the rest.
+ *
+ * A person choosing between two sources is not a new observation of the world —
+ * the other sources still reported what they reported. Superseding says "this
+ * one stands" without rewriting or deleting what disagreed, which keeps the
+ * trail of why the value is what it is. `reconcile` only looks at live facts,
+ * so the survivor drops back to `none` on the next write.
+ */
+export async function settleFactConflict(dbSession: DbSession, organizationId: string, input: {
+  entityType: string;
+  entityId: string;
+  factType: string;
+  keepFactId: string;
+}): Promise<boolean> {
+  const now = new Date();
+  const live = await dbSession.db
+    .select()
+    .from(operationalFacts)
+    .where(and(
+      eq(operationalFacts.organizationId, organizationId),
+      eq(operationalFacts.entityType, input.entityType),
+      eq(operationalFacts.entityId, input.entityId),
+      eq(operationalFacts.factType, input.factType),
+      or(eq(operationalFacts.conflictState, "none"), eq(operationalFacts.conflictState, "conflicted")),
+    ));
+  if (!live.some((row) => row.id === input.keepFactId)) return false;
+
+  for (const row of live) {
+    const keep = row.id === input.keepFactId;
+    await dbSession.db.update(operationalFacts)
+      .set({
+        conflictState: keep ? "none" : "superseded",
+        supersededBy: keep ? null : input.keepFactId,
+        updatedAt: now,
+      })
+      .where(eq(operationalFacts.id, row.id));
+  }
+  return true;
+}
+
 /** Every live fact for one field, newest sync first, with freshness derived. */
 export async function readFacts(
   dbSession: DbSession,

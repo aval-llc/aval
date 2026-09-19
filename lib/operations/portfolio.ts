@@ -12,7 +12,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { leases, properties, units } from "@/db/postgres/schema";
-import { manualSource, planMerge, recordConflicts, type SourceRef } from "./provenance";
+import { manualSource, planMerge, recordSyncedFacts, type SourceRef } from "./provenance";
 import {
   summarizeOccupancy,
   summarizeRentPosition,
@@ -50,6 +50,13 @@ export interface PropertyInput {
 }
 
 /** Fields a connected source may write. Explicit so adding a column can't silently become syncable — see `planMerge`. */
+/** The subset of an input a source is allowed to state facts about. */
+function pick(input: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of fields) if (input[field] !== undefined) out[field] = input[field];
+  return out;
+}
+
 const PROPERTY_SYNCABLE_FIELDS = [
   "name",
   "addressLine1",
@@ -121,7 +128,15 @@ export async function getProperty(dbSession: DbSession, organizationId: string, 
 export async function upsertPropertyFromSource(dbSession: DbSession, organizationId: string, input: PropertyInput, source: SourceRef) {
   const db = dbSession.db;
   const existing = await findPropertyMatch(dbSession, organizationId, input.name, source);
-  if (!existing) return { property: await createProperty(dbSession, organizationId, input, source), created: true, conflicts: 0 };
+  if (!existing) {
+    const property = await createProperty(dbSession, organizationId, input, source);
+    // The first time a source states a value is as much a fact as the second.
+    // Recording only on the update path would mean a single-provider workspace
+    // never built any provenance at all.
+    await recordSyncedFacts(dbSession, organizationId, "property", property.id,
+      pick(input as unknown as Record<string, unknown>, PROPERTY_SYNCABLE_FIELDS), source);
+    return { property, created: true, conflicts: 0 };
+  }
 
   const plan = planMerge(existing, existing.sourceProvider, input as Partial<typeof existing>, source.sourceProvider, PROPERTY_SYNCABLE_FIELDS);
   if (Object.keys(plan.updates).length > 0) {
@@ -130,7 +145,12 @@ export async function upsertPropertyFromSource(dbSession: DbSession, organizatio
       .set({ ...plan.updates, updatedAt: new Date() })
       .where(and(eq(properties.organizationId, organizationId), eq(properties.id, existing.id)));
   }
-  await recordConflicts(dbSession, organizationId, "property", existing.id, plan.conflicts);
+  // Every synced field becomes a fact carrying its source, authority and
+  // freshness. A disagreement between two systems is then visible as the facts
+  // themselves disagreeing, rather than as a separate record that has to be
+  // kept in step with them.
+  await recordSyncedFacts(dbSession, organizationId, "property", existing.id,
+    pick(input as unknown as Record<string, unknown>, PROPERTY_SYNCABLE_FIELDS), source);
   return { property: { ...existing, ...plan.updates }, created: false, updated: Object.keys(plan.updates).length > 0, conflicts: plan.conflicts.length };
 }
 
@@ -287,7 +307,12 @@ export async function upsertUnitFromSource(dbSession: DbSession, organizationId:
     existing = byNumber ?? null;
   }
 
-  if (!existing) return { unit: await createUnit(dbSession, organizationId, input, source), created: true, conflicts: 0 };
+  if (!existing) {
+    const unit = await createUnit(dbSession, organizationId, input, source);
+    await recordSyncedFacts(dbSession, organizationId, "unit", unit.id,
+      pick(input as unknown as Record<string, unknown>, UNIT_SYNCABLE_FIELDS), source);
+    return { unit, created: true, conflicts: 0 };
+  }
 
   const plan = planMerge(existing, existing.sourceProvider, input as Partial<typeof existing>, source.sourceProvider, UNIT_SYNCABLE_FIELDS);
   if (Object.keys(plan.updates).length > 0) {
@@ -296,7 +321,8 @@ export async function upsertUnitFromSource(dbSession: DbSession, organizationId:
       .set({ ...plan.updates, updatedAt: new Date() })
       .where(and(eq(units.organizationId, organizationId), eq(units.id, existing.id)));
   }
-  await recordConflicts(dbSession, organizationId, "unit", existing.id, plan.conflicts);
+  await recordSyncedFacts(dbSession, organizationId, "unit", existing.id,
+    pick(input as unknown as Record<string, unknown>, UNIT_SYNCABLE_FIELDS), source);
   return { unit: { ...existing, ...plan.updates }, created: false, updated: Object.keys(plan.updates).length > 0, conflicts: plan.conflicts.length };
 }
 

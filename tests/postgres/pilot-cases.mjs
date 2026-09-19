@@ -4,6 +4,9 @@ import { eq, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { withDbSession } from '../../db/postgres/session.ts';
 import { applyImport } from '../../lib/operations/import-apply.ts';
+import { listOpenConflicts, resolveConflict, SYNC_FRESHNESS_POLICY } from '../../lib/operations/provenance.ts';
+import { readFacts, actionableFact, recordFact } from '../../lib/agents/facts.ts';
+import { operationalFacts } from '../../db/postgres/schema.ts';
 import { workOrders, leasingLeads, residents, integrationConnections, conversations, messages, documents, agentTasks } from '../../db/postgres/schema.ts';
 import { syncGmail } from '../../lib/communications/gmail-sync.ts';
 import { createTask } from '../../lib/agents/tasks.ts';
@@ -31,6 +34,65 @@ export async function runPilotCases(t, {session,userA,userB,config,administrator
     assert.equal(order.status,'completed');assert.equal(lead.stage,'contacted');
     assert.equal((await run((s,o)=>applyImport(s,o,changed,source))).unchanged.workOrders,1);
   });
+  await t.test('a real import records provenance, and two sources disagreeing is visible as a conflict',async()=>{
+    // The join this exercises did not exist: operational_facts was fully built
+    // and nothing on the import path ever wrote to it, so a workspace could
+    // sync two systems that disagreed and the fact layer would show nothing.
+    const name=`Provenance ${prefix}`;
+    const first={sourceProvider:`alpha-${prefix}`,sourceConnectionId:null,externalId:null};
+    const second={sourceProvider:`beta-${prefix}`,sourceConnectionId:null,externalId:null};
+    await run((s,o)=>applyImport(s,o,{properties:[{externalId:'pv',name,city:'Berkeley'}]},first));
+    const [property]=await run(s=>s.db.select().from(operationalFacts).where(eq(operationalFacts.factType,'city')).limit(1));
+    assert.ok(property,'the import wrote a fact');
+
+    const entityId=property.entityId;
+    const afterFirst=await run((s,o)=>readFacts(s,o,'property',entityId,'city'));
+    assert.equal(afterFirst.length,1);
+    assert.equal(afterFirst[0].value,'Berkeley');
+    assert.equal(afterFirst[0].sourceType,'provider');
+    assert.equal(afterFirst[0].sourceProvider,first.sourceProvider);
+    assert.equal(afterFirst[0].authoritativeness,'authoritative','a provider is the system of record');
+    assert.ok(afterFirst[0].syncedAt instanceof Date,'when Aval looked is always known');
+    assert.equal(afterFirst[0].stale,false,'a freshly synced value is current');
+    const [stored]=await run(s=>s.db.select().from(operationalFacts).where(eq(operationalFacts.id,afterFirst[0].id)));
+    assert.equal(stored.freshnessPolicy,SYNC_FRESHNESS_POLICY,'the horizon names the rule that produced it');
+    assert.ok(stored.expiresAt,'freshness is a stored horizon, staleness is derived from it');
+    assert.equal(stored.observedAt,null,'an honest null beats stamping now on an unknown observation time');
+
+    // A second system reports a different city for the same property.
+    await run((s,o)=>applyImport(s,o,{properties:[{externalId:'pv2',name,city:'Oakland'}]},second));
+    const disputed=await run((s,o)=>readFacts(s,o,'property',entityId,'city'));
+    assert.equal(disputed.length,2,'each source keeps its own row');
+    assert.ok(disputed.every(f=>f.conflictState==='conflicted'),'both sides are marked, neither is discarded');
+    assert.equal(actionableFact(disputed),null,'an agent gets no quiet answer while sources disagree');
+
+    const conflicts=await run((s,o)=>listOpenConflicts(s,o));
+    const conflict=conflicts.find(c=>c.entityId===entityId&&c.field==='city');
+    assert.ok(conflict,'the disagreement surfaces on the conflict list');
+    assert.deepEqual([conflict.valueA,conflict.valueB].sort(),['Berkeley','Oakland']);
+
+    // A person settles it, and the losing observation is superseded rather than erased.
+    assert.equal(await run((s,o)=>resolveConflict(s,o,conflict.id,'kept_a')),true);
+    const settled=await run((s,o)=>readFacts(s,o,'property',entityId,'city'));
+    assert.equal(settled.length,2,'the trail of what disagreed is kept');
+    assert.equal(settled.filter(f=>f.conflictState==='superseded').length,1);
+    const chosen=actionableFact(settled);
+    assert.ok(chosen,'the settled value is actionable again');
+    assert.equal(chosen.value,conflict.valueA);
+    assert.ok(!(await run((s,o)=>listOpenConflicts(s,o))).some(c=>c.id===conflict.id));
+  });
+
+  await t.test('a model may not label its own inference authoritative',async()=>{
+    const entityId=`inference-${prefix}`;
+    const inferred=await run((s,o)=>recordFact(s,{organizationId:o,entityType:'property',entityId,factType:'occupancy',
+      value:'0.94',sourceType:'inference',confidence:0.7,syncedAt:new Date()}));
+    assert.equal(inferred.authoritativeness,'inferred','authority comes from the source kind, never the caller');
+    assert.equal(inferred.confidence,0.7,'an inference has to say how sure it is');
+    const human=await run((s,o)=>recordFact(s,{organizationId:o,entityType:'property',entityId,factType:'occupancy',
+      value:'0.88',sourceType:'human',syncedAt:new Date()}));
+    assert.equal(human.authoritativeness,'human_confirmed','a person is not the system of record either');
+  });
+
   await t.test('changed financial data and changed connection ownership roll back the entire batch',async()=>{
     await assert.rejects(run((s,o)=>applyImport(s,o,{residents:[{...batch.residents[0],displayName:'Must rollback'}],glTransactions:[{...batch.glTransactions[0],amountCents:2000}]},source)),/Reconcile/);
     const [resident]=await run(s=>s.db.select().from(residents).where(eq(residents.sourceProvider,source.sourceProvider)));

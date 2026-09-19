@@ -1,0 +1,40 @@
+CREATE TABLE `work_attempts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`task_id` text NOT NULL,
+	`employee_id` text,
+	`attempt_number` integer NOT NULL,
+	`kind` text NOT NULL,
+	`started_at` integer NOT NULL,
+	`ended_at` integer,
+	`objective_snapshot` text,
+	`strategy` text,
+	`actions_json` text DEFAULT '[]' NOT NULL,
+	`tools_json` text DEFAULT '[]' NOT NULL,
+	`delegations_json` text DEFAULT '[]' NOT NULL,
+	`observations` text,
+	`result` text,
+	`outcome` text NOT NULL,
+	`failure_reason` text,
+	`blocker_reason` text,
+	`transient` integer DEFAULT false NOT NULL,
+	`progressed` integer DEFAULT false NOT NULL,
+	`signature` text,
+	`learned` text,
+	`should_change` text,
+	`next_strategy` text,
+	`cost_cents` integer,
+	`tokens_used` integer,
+	`latency_ms` integer,
+	`external_effects_json` text DEFAULT '[]' NOT NULL,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`task_id`) REFERENCES `agent_tasks`(`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "work_attempts_kind" CHECK(kind IN ('execution','verification','check_repair','replan')),
+	CONSTRAINT "work_attempts_outcome" CHECK(outcome IN ('succeeded','failed','inconclusive','blocked')),
+	CONSTRAINT "work_attempts_number_positive" CHECK(attempt_number >= 1)
+);
+--> statement-breakpoint
+CREATE INDEX `work_attempts_task_idx` ON `work_attempts` (`organization_id`,`task_id`,`kind`);--> statement-breakpoint
+CREATE INDEX `work_attempts_signature_idx` ON `work_attempts` (`organization_id`,`task_id`,`signature`);--> statement-breakpoint
+CREATE UNIQUE INDEX `work_attempts_number_uq` ON `work_attempts` (`task_id`,`kind`,`attempt_number`);

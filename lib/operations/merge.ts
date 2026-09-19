@@ -110,8 +110,8 @@ function valuesMatch(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
-/** A field value as the text `operations_conflicts` stores. Dates go in as ISO so a conflict is readable without knowing the column's type. */
-function describeValue(value: unknown): string {
+/** A field value as text. Dates go in as ISO so a disagreement is readable without knowing the column's type. */
+export function describeValue(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   if (value === null || value === undefined) return "";
   return String(value);

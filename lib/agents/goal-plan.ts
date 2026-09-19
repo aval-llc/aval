@@ -6,7 +6,11 @@ import { parseTaskCheck, type TaskCheck } from './checks';
 import { digestPayload } from '@/lib/audit/chain';
 import { getTool } from './registry';
 import { hasPermission, roleForPersona, canOrchestrate } from './permissions';
-export const MAX_PLAN_NODES = 4, MAX_PLAN_REVISIONS = 2, MAX_GOAL_TASKS = 8;
+import { resolveAttemptPolicy } from "./attempt-policy.ts";
+import { loadAttemptPolicies } from "./attempt-policy-store.ts";
+/** Fan-out and total size remain structural caps. How many times a goal may be
+ * rethought is policy — see DEFAULT_ATTEMPT_POLICIES.replan. */
+export const MAX_PLAN_NODES = 4, MAX_GOAL_TASKS = 8;
 type Node = {
     key: string;
     goal: string;
@@ -79,7 +83,13 @@ export async function writeGoalPlan(dbSession: DbSession, org: string, rootId: s
         if (plan && prior?.nodes.some(n => n.status === 'RUNNING' || n.status === 'WAITING_FOR_APPROVAL'))
             throw Error('Wait for running or approval-pending work before replanning.');
         const revision = (plan?.revision ?? 0) + 1;
-        if (revision > MAX_PLAN_REVISIONS)
+        // How many times a goal may be rethought is a property of the work, not
+        // a constant. The default matches the cap this replaced; a workspace can
+        // give slow-moving objectives more room without widening anything else,
+        // because the replan budget is resolved separately from verification
+        // and repair.
+        const replanPolicy = resolveAttemptPolicy('replan', {}, await loadAttemptPolicies(dbSession, org));
+        if (replanPolicy.maxAttempts != null && revision > replanPolicy.maxAttempts)
             throw Error('The goal reached its replan cap. Review the failed checks.');
         const nodes = validatePlanNodes(value, root, prior?.nodes.filter(n => n.status === 'COMPLETED').map(n => n.key));
         if (prior)

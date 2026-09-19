@@ -16,14 +16,15 @@
  * touches storage: writing conflicts, listing them, resolving them.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
-import { operationsConflicts } from "@/db/postgres/schema";
+import { operationalFacts } from "@/db/postgres/schema";
 import { MANUAL_SOURCE, type ConflictEntityType } from "./types";
+import { describeValue } from "./merge";
+import { readFacts, recordFact, settleFactConflict } from "@/lib/agents/facts";
 
 export { planMerge } from "./merge";
 export type { FieldConflict, MergePlan } from "./merge";
-import type { FieldConflict } from "./merge";
 
 /**
  * Records conflicts for one entity, one row per contested field.
@@ -36,48 +37,61 @@ import type { FieldConflict } from "./merge";
  * it was a decision and re-flagging it every night would undo that decision by
  * attrition.
  */
-export async function recordConflicts(dbSession: DbSession,
+/**
+ * How long a synced value is treated as current before it is stale.
+ *
+ * Named rather than inlined so a change of policy is legible in the stored
+ * fact: `operational_facts.freshness_policy` records which rule produced the
+ * horizon, and staleness itself is derived at read time from `expires_at` so it
+ * cannot itself go stale.
+ */
+export const SYNC_FRESHNESS_POLICY = "provider_sync_24h";
+const SYNC_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Records what a source said about an entity's fields, with its provenance.
+ *
+ * This is the join that was missing. `operational_facts` carried source,
+ * authority, observation time, freshness and conflict semantics, and nothing on
+ * the real import path ever wrote to it — so a workspace could sync two systems
+ * that disagreed and the fact layer would show nothing at all.
+ *
+ * Authority is derived from the source kind inside `recordFact`, never supplied
+ * here: a caller cannot label its own value authoritative, and a value entered
+ * by a person is `human_confirmed` rather than `authoritative` because a person
+ * is not the system of record.
+ */
+export async function recordSyncedFacts(dbSession: DbSession,
   organizationId: string,
   entityType: ConflictEntityType,
   entityId: string,
-  conflicts: FieldConflict[]
-): Promise<number> {
-  if (conflicts.length === 0) return 0;
-  const db = dbSession.db;
-  const now = new Date();
+  fields: Record<string, unknown>,
+  source: SourceRef,
+  observedAt: Date | null = null,
+): Promise<void> {
+  const syncedAt = new Date();
+  const expiresAt = new Date(syncedAt.getTime() + SYNC_TTL_MS);
+  const sourceType = source.sourceProvider === MANUAL_SOURCE ? "human" : "provider";
 
-  for (const conflict of conflicts) {
-    await db
-      .insert(operationsConflicts)
-      .values({
-        id: crypto.randomUUID(),
-        organizationId,
-        entityType,
-        entityId,
-        field: conflict.field,
-        valueA: conflict.storedValue,
-        sourceA: conflict.storedSource,
-        valueB: conflict.incomingValue,
-        sourceB: conflict.incomingSource,
-        status: "open",
-        resolution: null,
-        detectedAt: now,
-        resolvedAt: null,
-      })
-      .onConflictDoUpdate({
-        target: [
-          operationsConflicts.organizationId,
-          operationsConflicts.entityType,
-          operationsConflicts.entityId,
-          operationsConflicts.field,
-        ],
-        set: { valueA: conflict.storedValue, valueB: conflict.incomingValue, sourceB: conflict.incomingSource, detectedAt: now },
-        // Only refresh a conflict still open. A resolved one stays resolved.
-        where: eq(operationsConflicts.status, "open"),
-      });
+  for (const [factType, raw] of Object.entries(fields)) {
+    if (raw === null || raw === undefined) continue;
+    await recordFact(dbSession, {
+      organizationId,
+      entityType,
+      entityId,
+      factType,
+      value: describeValue(raw),
+      sourceType,
+      sourceProvider: source.sourceProvider,
+      sourceRecordId: source.externalId ?? null,
+      // Null when the source does not say when it was true. An honest null
+      // beats stamping "now" on something observed days ago.
+      observedAt,
+      syncedAt,
+      expiresAt,
+      freshnessPolicy: SYNC_FRESHNESS_POLICY,
+    });
   }
-
-  return conflicts.length;
 }
 
 export interface ConflictRow {
@@ -95,42 +109,90 @@ export interface ConflictRow {
   resolvedAt: Date | null;
 }
 
-/** Open conflicts for a workspace, newest first. */
+/**
+ * Open conflicts for a workspace, derived from the facts themselves.
+ *
+ * There is no separate conflict table to keep in step any more. A disagreement
+ * is two live facts for one field whose values differ, which `recordFact`
+ * already marks as it writes — so what a person is shown and what an agent is
+ * refused an answer from are the same state, rather than two systems that have
+ * to be kept honest with each other.
+ *
+ * The id is synthetic and stable: it names the field in dispute, so resolving
+ * one is idempotent and a stale page cannot resolve the wrong row.
+ */
 export async function listOpenConflicts(dbSession: DbSession, organizationId: string, limit = 100): Promise<ConflictRow[]> {
-  return dbSession.db
+  const rows = await dbSession.db
     .select()
-    .from(operationsConflicts)
-    .where(and(eq(operationsConflicts.organizationId, organizationId), eq(operationsConflicts.status, "open")))
-    .limit(limit);
+    .from(operationalFacts)
+    .where(and(
+      eq(operationalFacts.organizationId, organizationId),
+      eq(operationalFacts.conflictState, "conflicted"),
+    ))
+    .orderBy(desc(operationalFacts.syncedAt));
+
+  const byField = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const key = conflictKey(row.entityType, row.entityId, row.factType);
+    const group = byField.get(key);
+    if (group) group.push(row); else byField.set(key, [row]);
+  }
+
+  const conflicts: ConflictRow[] = [];
+  for (const [key, group] of byField) {
+    if (group.length < 2) continue;
+    const [a, b] = group;
+    conflicts.push({
+      id: key,
+      entityType: a.entityType,
+      entityId: a.entityId,
+      field: a.factType,
+      valueA: a.value ?? "",
+      sourceA: a.sourceProvider ?? a.sourceType,
+      valueB: b.value ?? "",
+      sourceB: b.sourceProvider ?? b.sourceType,
+      status: "open",
+      resolution: null,
+      detectedAt: a.syncedAt,
+      resolvedAt: null,
+    });
+    if (conflicts.length >= limit) break;
+  }
+  return conflicts;
+}
+
+/** `entityType:entityId:field`, the field a disagreement is about. */
+function conflictKey(entityType: string, entityId: string, field: string): string {
+  return `${entityType}\u0000${entityId}\u0000${field}`;
 }
 
 /**
- * Marks a conflict resolved.
+ * Settles a conflict by keeping one side.
  *
- * Records *which* value was kept rather than only that it was settled, so the
- * trail says what a person decided. Note this does not itself write the chosen
- * value back onto the entity — the caller does that, because only it knows the
- * column's real type, and coercing a text value back into a typed column here
- * is exactly the kind of guess this module exists to avoid.
+ * Recorded by superseding the facts that were not kept rather than by flipping
+ * a status column, so the answer to "why is this value what it is" stays
+ * readable: the losing observations are still there, marked as superseded by
+ * the one that stands. `dismissed` keeps the newest side, which is the
+ * "leave it alone" outcome expressed in the same terms.
  */
 export async function resolveConflict(dbSession: DbSession,
   organizationId: string,
   conflictId: string,
   resolution: "kept_a" | "kept_b" | "dismissed"
 ): Promise<boolean> {
-  const db = dbSession.db;
-  const [existing] = await db
-    .select({ id: operationsConflicts.id })
-    .from(operationsConflicts)
-    .where(and(eq(operationsConflicts.organizationId, organizationId), eq(operationsConflicts.id, conflictId)))
-    .limit(1);
-  if (!existing) return false;
+  const [entityType, entityId, factType] = conflictId.split("\u0000");
+  if (!entityType || !entityId || !factType) return false;
 
-  await db
-    .update(operationsConflicts)
-    .set({ status: "resolved", resolution, resolvedAt: new Date() })
-    .where(and(eq(operationsConflicts.organizationId, organizationId), eq(operationsConflicts.id, conflictId)));
-  return true;
+  const facts = await readFacts(dbSession, organizationId, entityType, entityId, factType);
+  const live = facts.filter((fact) => fact.conflictState === "conflicted");
+  if (live.length < 2) return false;
+
+  // `listOpenConflicts` orders by sync time, and so does `readFacts`, so A and B
+  // mean the same two facts the person was shown.
+  const keep = resolution === "kept_b" ? live[1] : live[0];
+  return settleFactConflict(dbSession, organizationId, {
+    entityType, entityId, factType, keepFactId: keep.id,
+  });
 }
 
 /** The provenance columns every operations entity carries. */

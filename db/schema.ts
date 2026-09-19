@@ -1292,6 +1292,14 @@ export const agentTaskSteps = sqliteTable(
     // insert with the same key is rejected by the database, which is what
     // makes duplicate execution impossible rather than merely unlikely.
     idempotencyKey: text("idempotency_key"),
+    /**
+     * Where an external effect landed, recorded after the provider accepted it.
+     * Verification needs to re-read the exact record the write created, and the
+     * reservation is written before the provider call, so these are filled in
+     * afterwards against the same idempotency key.
+     */
+    sourceProvider: text("source_provider"),
+    externalRecordId: text("external_record_id"),
     error: text("error"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
@@ -1981,5 +1989,129 @@ export const actionEvidence = sqliteTable(
     ),
     check("action_evidence_type", sql`evidence_type IN ('provider_reread','provider_event','human_confirmation','document','aval_native')`),
     check("action_evidence_result", sql`verification_result IN ('confirmed','contradicted','inconclusive')`),
+  ],
+);
+
+/**
+ * Attempt budgets, as configuration rather than as constants in the runtime.
+ *
+ * `kind` keeps the three budgets apart — how long a provider is waited on,
+ * how many times an answer may be repaired, and how many times a goal may be
+ * re-planned are different questions, and one must never become the ceiling on
+ * another. A null selector means "any"; the most specific matching row wins,
+ * and a workspace with no rows at all behaves exactly as the shipped defaults.
+ */
+export const attemptPolicies = sqliteTable(
+  "attempt_policies",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** verification | check_repair | replan */
+    kind: text("kind").notNull(),
+    /** Selectors. Null means "any"; a row applies only where every named selector matches. */
+    provider: text("provider"),
+    toolName: text("tool_name"),
+    workType: text("work_type"),
+    riskClass: text("risk_class"),
+    /** Null caps nothing by count. Legitimate for work that must wait until a person intervenes. */
+    maxAttempts: integer("max_attempts"),
+    /** Null caps nothing by elapsed time. */
+    maxElapsedMs: integer("max_elapsed_ms"),
+    initialDelayMs: integer("initial_delay_ms").notNull().default(0),
+    /** fixed | linear | exponential */
+    backoffStrategy: text("backoff_strategy").notNull().default("fixed"),
+    backoffFactor: real("backoff_factor").notNull().default(2),
+    maxDelayMs: integer("max_delay_ms"),
+    /** human_handoff | replan | fail — what happens when the budget is spent. */
+    onExhausted: text("on_exhausted").notNull().default("human_handoff"),
+    /** human_handoff | replan | fail — what happens when the provider says it did not take hold. */
+    onContradicted: text("on_contradicted").notNull().default("human_handoff"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("attempt_policies_lookup_idx").on(table.organizationId, table.kind, table.enabled),
+    // One row per selector shape per budget, so "most specific wins" never has
+    // two candidates of equal specificity to choose between.
+    uniqueIndex("attempt_policies_selector_uq").on(
+      table.organizationId, table.kind, table.provider, table.toolName, table.workType, table.riskClass,
+    ),
+    check("attempt_policies_kind", sql`kind IN ('verification','check_repair','replan')`),
+    check("attempt_policies_backoff", sql`backoff_strategy IN ('fixed','linear','exponential')`),
+    check("attempt_policies_on_exhausted", sql`on_exhausted IN ('human_handoff','replan','fail')`),
+    check("attempt_policies_on_contradicted", sql`on_contradicted IN ('human_handoff','replan','fail')`),
+    check("attempt_policies_attempts_positive", sql`max_attempts IS NULL OR max_attempts >= 1`),
+    check("attempt_policies_elapsed_positive", sql`max_elapsed_ms IS NULL OR max_elapsed_ms >= 0`),
+    check("attempt_policies_delay_nonnegative", sql`initial_delay_ms >= 0`),
+    check("attempt_policies_factor_positive", sql`backoff_factor > 0`),
+  ],
+);
+
+/**
+ * What was tried, and what was learned from it.
+ *
+ * A replan that cannot see the previous attempt can only guess, and guessing
+ * produces the loop this table exists to break: strategy A, fail, replan,
+ * strategy A. Each row is one attempt at the objective — an execution, a
+ * verification sweep, a repair, or a replan — with enough structure for the
+ * next planning pass to choose differently on purpose.
+ *
+ * `signature` is what makes repetition detectable: a digest of the tool, its
+ * canonical arguments and the failure. Two attempts with the same signature
+ * tried the same thing and got the same answer. `transient` is what keeps a
+ * legitimate retry — a rate limit, a provider that has not caught up — from
+ * being mistaken for a loop.
+ */
+export const workAttempts = sqliteTable(
+  "work_attempts",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    taskId: text("task_id").notNull().references(() => agentTasks.id),
+    /** The employee that made the attempt. Null until employees exist as records. */
+    employeeId: text("employee_id"),
+    attemptNumber: integer("attempt_number").notNull(),
+    /** execution | verification | check_repair | replan */
+    kind: text("kind").notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+    /** The objective as it stood for this attempt, so a later change of goal stays legible. */
+    objectiveSnapshot: text("objective_snapshot"),
+    strategy: text("strategy"),
+    actionsJson: text("actions_json").notNull().default("[]"),
+    toolsJson: text("tools_json").notNull().default("[]"),
+    delegationsJson: text("delegations_json").notNull().default("[]"),
+    observations: text("observations"),
+    result: text("result"),
+    /** succeeded | failed | inconclusive | blocked */
+    outcome: text("outcome").notNull(),
+    failureReason: text("failure_reason"),
+    blockerReason: text("blocker_reason"),
+    /** The failure had a cause expected to pass, which is the one case where repeating verbatim is correct. */
+    transient: integer("transient", { mode: "boolean" }).notNull().default(false),
+    /** The attempt moved the objective: new evidence, a state change, something learned. */
+    progressed: integer("progressed", { mode: "boolean" }).notNull().default(false),
+    /** Digest of tool + canonical args + failure. Equal signatures mean the same thing was tried. */
+    signature: text("signature"),
+    learned: text("learned"),
+    shouldChange: text("should_change"),
+    nextStrategy: text("next_strategy"),
+    costCents: integer("cost_cents"),
+    tokensUsed: integer("tokens_used"),
+    latencyMs: integer("latency_ms"),
+    externalEffectsJson: text("external_effects_json").notNull().default("[]"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("work_attempts_task_idx").on(table.organizationId, table.taskId, table.kind),
+    index("work_attempts_signature_idx").on(table.organizationId, table.taskId, table.signature),
+    // Attempt numbering is the budget. Making it unique per (task, kind) is what
+    // stops a crash-and-resume from spending the same attempt twice, and what
+    // keeps the three budgets counted separately.
+    uniqueIndex("work_attempts_number_uq").on(table.taskId, table.kind, table.attemptNumber),
+    check("work_attempts_kind", sql`kind IN ('execution','verification','check_repair','replan')`),
+    check("work_attempts_outcome", sql`outcome IN ('succeeded','failed','inconclusive','blocked')`),
+    check("work_attempts_number_positive", sql`attempt_number >= 1`),
   ],
 );

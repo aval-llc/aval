@@ -99,6 +99,10 @@ export interface PendingExecution {
   toolName: string;
   /** The idempotency key the executor reserved. Evidence is keyed on it. */
   actionExecutionId: string;
+  /** Which provider accepted the write, recorded once it had. */
+  sourceProvider: string | null;
+  /** The provider's own id for the record the write created. */
+  externalRecordId: string | null;
 }
 
 /**
@@ -119,6 +123,9 @@ export async function pendingExecutions(
       toolName: agentTaskSteps.toolName,
       policyEffect: agentTaskSteps.policyEffect,
       idempotencyKey: agentTaskSteps.idempotencyKey,
+      stepIndex: agentTaskSteps.stepIndex,
+      sourceProvider: agentTaskSteps.sourceProvider,
+      externalRecordId: agentTaskSteps.externalRecordId,
     })
     .from(agentTaskSteps)
     .where(and(
@@ -127,12 +134,31 @@ export async function pendingExecutions(
       isNull(agentTaskSteps.error),
     ));
 
+  // Where each effect landed, appended after the provider accepted it. Joined
+  // by (tool, step) because that is the pair the reservation's idempotency key
+  // is derived from, and because the step log is append-only — the reference
+  // cannot be written back onto the reservation row itself.
+  const references = new Map<string, { sourceProvider: string | null; externalRecordId: string | null }>();
+  for (const row of rows) {
+    if (row.kind !== "external_reference" || !row.toolName) continue;
+    references.set(`${row.toolName}#${row.stepIndex}`, {
+      sourceProvider: row.sourceProvider,
+      externalRecordId: row.externalRecordId,
+    });
+  }
+
   const out = new Map<string, PendingExecution>();
   for (const row of rows) {
     if (!row.toolName || !row.idempotencyKey) continue;
     if (!EXECUTION_KINDS.has(row.kind) || row.policyEffect !== "allow") continue;
     if (!getTool(row.toolName)?.externalEffect) continue;
-    out.set(row.idempotencyKey, { toolName: row.toolName, actionExecutionId: row.idempotencyKey });
+    const reference = references.get(`${row.toolName}#${row.stepIndex}`);
+    out.set(row.idempotencyKey, {
+      toolName: row.toolName,
+      actionExecutionId: row.idempotencyKey,
+      sourceProvider: reference?.sourceProvider ?? row.sourceProvider ?? null,
+      externalRecordId: reference?.externalRecordId ?? row.externalRecordId ?? null,
+    });
   }
   return [...out.values()];
 }
@@ -143,6 +169,16 @@ export interface VerificationSweep {
   confirmed: string[];
   contradicted: string[];
   unproven: string[];
+  /**
+   * Executions whose verifier ran and could not answer — the provider was
+   * unreachable, rate-limited, or not yet consistent.
+   *
+   * Separate from `unproven` because the distinction decides what happens next:
+   * a provider that could not be asked is a transient condition worth simply
+   * asking again, while a provider that answered and did not have the record is
+   * a reason to change approach. Neither is evidence of failure.
+   */
+  unreachable: string[];
 }
 
 /**
@@ -161,32 +197,42 @@ export async function verifyExternalEffects(
   context: { providerId?: string; externalRecordIdFor?: (execution: PendingExecution) => string | null } = {},
 ): Promise<VerificationSweep> {
   const executions = await pendingExecutions(dbSession, organizationId, taskId);
-  if (executions.length === 0) return { verdict: "none", confirmed: [], contradicted: [], unproven: [] };
+  if (executions.length === 0) return { verdict: "none", confirmed: [], contradicted: [], unproven: [], unreachable: [] };
 
   const confirmed: string[] = [];
   const contradicted: string[] = [];
   const unproven: string[] = [];
+  const unreachable: string[] = [];
 
   for (const execution of executions) {
     let verdict = await executionVerdict(dbSession, organizationId, execution.actionExecutionId);
 
-    if (verdict === "unproven" && context.providerId) {
-      const verifier = providerVerifier(context.providerId, execution.toolName);
-      const externalRecordId = context.externalRecordIdFor?.(execution) ?? null;
+    // The execution knows which provider accepted it and which record it
+    // created, so the sweep no longer depends on a caller guessing. The
+    // `context` overrides remain for callers that are reconciling by hand.
+    const providerId = context.providerId ?? execution.sourceProvider;
+    const externalRecordId = context.externalRecordIdFor?.(execution) ?? execution.externalRecordId;
+
+    if (verdict === "unproven" && providerId) {
+      const verifier = providerVerifier(providerId, execution.toolName);
       if (verifier && externalRecordId) {
         const observed = await verifier(dbSession, {
-          organizationId, providerId: context.providerId,
+          organizationId, providerId,
           toolName: execution.toolName, externalRecordId,
         }).catch(() => null);
+        // A verifier that answered nothing did not say the effect is absent —
+        // it said it could not tell. Recorded as unreachable so the caller can
+        // treat it as the transient condition it is.
+        if (!observed) unreachable.push(execution.actionExecutionId);
         if (observed) {
           await recordEvidence(dbSession, {
             organizationId, taskId,
             actionExecutionId: execution.actionExecutionId,
             toolName: execution.toolName,
-            claim: `${execution.toolName} took effect in ${context.providerId}`,
+            claim: `${execution.toolName} took effect in ${providerId}`,
             expectedState: { exists: true },
             evidenceType: "provider_reread",
-            sourceProvider: context.providerId,
+            sourceProvider: providerId,
             externalRecordId,
             observedState: observed,
             observedAt: new Date(),
@@ -204,5 +250,5 @@ export async function verifyExternalEffects(
   const verdict: ExecutionVerdict = contradicted.length > 0
     ? "contradicted"
     : unproven.length === 0 ? "confirmed" : "unproven";
-  return { verdict, confirmed, contradicted, unproven };
+  return { verdict, confirmed, contradicted, unproven, unreachable };
 }
