@@ -85,7 +85,18 @@ function reset() {
 }
 
 function stop() {
-  if (running()) run("pg_ctl", ["-D", PGDATA, "-m", "fast", "-w", "stop"]);
+  if (!running()) {
+    // Already down, or the cluster on this port is not one this script made.
+    // Either way there is nothing here to stop, and reporting a missing-binary
+    // error for it sends the reader after the wrong problem.
+    process.stdout.write("no disposable cluster running on this port\n");
+    return;
+  }
+  if (!existsSync(PGDATA)) {
+    process.stderr.write(`A server is listening on ${PORT} but was not started by this script; leaving it alone.\n`);
+    process.exit(1);
+  }
+  run("pg_ctl", ["-D", PGDATA, "-m", "fast", "-w", "stop"]);
   // Only what this script created.
   rmSync(ROOT, { recursive: true, force: true });
   rmSync(SOCKET, { recursive: true, force: true });
