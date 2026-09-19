@@ -27,7 +27,12 @@ const UNAUTHORIZED = Response.json(
 );
 
 export async function POST(request: Request): Promise<Response> {
-  const expected = runtimeBindings().PMS_SEAT_READER_TOKEN;
+  // Trimmed because the reader trims too, and `wrangler secret put` keeps
+  // whatever it was handed — a piped value with a trailing newline would
+  // otherwise store fine on both Workers and fail only as a 401 nobody can
+  // account for.
+  const configured = runtimeBindings().PMS_SEAT_READER_TOKEN;
+  const expected = typeof configured === "string" ? configured.trim() : configured;
   if (typeof expected !== "string" || expected.length === 0) {
     // Fail closed. An unset token must not read as "no authentication
     // required" on the one route that writes rows on a Worker's say-so.
@@ -37,7 +42,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const presented = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const presented = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ?? "";
   if (!constantTimeEqual(presented, expected)) return UNAUTHORIZED;
 
   const body = (await request.json().catch(() => null)) as {
