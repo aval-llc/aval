@@ -21,8 +21,17 @@ import type { DbSession } from "@/db/postgres/session";
 import { agentTaskSteps } from "@/db/postgres/schema";
 import { getTool } from "./registry.ts";
 
-/** Step kinds that represent a tool actually having run. */
-const EXECUTION_KINDS = new Set(["tool_call", "approval_decided"]);
+/**
+ * Step kinds that mean a provider call was committed to.
+ *
+ * `mutation_reserved` is the important one. The executor writes it, under the
+ * idempotency key, immediately before crossing the provider boundary;
+ * `tool_call` is written afterwards by the runtime. A worker that dies between
+ * the provider accepting a write and the runtime recording it leaves only the
+ * reservation — which is exactly the case where an unconfirmed effect matters
+ * most. Keying on `tool_call` alone would have called that task complete.
+ */
+const EXECUTION_KINDS = new Set(["mutation_reserved", "tool_call", "approval_decided"]);
 
 /**
  * Tool names this task executed that changed something outside Aval and have
