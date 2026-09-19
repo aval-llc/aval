@@ -5,7 +5,7 @@ import { createTask, getTask, type TaskRecord } from './tasks';
 import { parseTaskCheck, type TaskCheck } from './checks';
 import { digestPayload } from '@/lib/audit/chain';
 import { getTool } from './registry';
-import { hasPermission, roleForPersona } from './permissions';
+import { hasPermission, roleForPersona, canOrchestrate } from './permissions';
 export const MAX_PLAN_NODES = 4, MAX_PLAN_REVISIONS = 2, MAX_GOAL_TASKS = 8;
 type Node = {
     key: string;
@@ -37,7 +37,9 @@ export function validatePlanNodes(value: unknown, parent: TaskRecord, completed:
             throw Error('Nested goal planning is not supported.');
         const agentId = typeof n.agentId === 'string' ? n.agentId : parent.agentId;
         const permission = check.kind === 'evidence' ? check.tools.map(t => getTool(t)!.requiredPermission) : [getTool(check.kind === 'delivery' ? (check.operation === 'listing' ? 'publish_listing' : check.operation === 'call' ? 'place_call' : 'send_external_message') : 'record_preference')!.requiredPermission];
-        if (permission.some(p => !hasPermission(roleForPersona(parent.agentId), p) || !hasPermission(roleForPersona(agentId), p)))
+        // The child must hold every permission its node needs. The parent must
+        // hold it or be allowed to route it to that child.
+        if (permission.some(p => (!hasPermission(roleForPersona(parent.agentId), p) && !canOrchestrate(roleForPersona(parent.agentId), p)) || !hasPermission(roleForPersona(agentId), p)))
             throw Error('A planned task requires permissions outside its parent or specialist.');
         keys.add(n.key);
         return { key: n.key, goal: n.goal.trim(), agentId, dependsOn: n.dependsOn as string[], check };

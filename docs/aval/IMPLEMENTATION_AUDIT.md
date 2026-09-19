@@ -413,3 +413,126 @@ already carrying an `arguments` field that was never compared. That strengthens
 the finding: the payload was being *recorded* for the reviewer and *not* used as
 the binding. It also could not have been — the recorded arguments are a redacted
 summary, so a hash must be taken from the raw input separately.
+
+---
+
+# Part II — End-to-end trace of the PMS coordinator
+
+**Date:** 2026-09-18. Code inspection unless stated. Corrections to Part I are
+marked.
+
+## 5. Confirmed findings
+
+### 5.1 How inputs enter Aval — **confirmed**
+
+| Path | Entry | Terminus |
+|---|---|---|
+| Scheduled | `worker/index.ts:67 scheduled()` → `lib/workers/scheduled-sweep.ts` | drives imports, comms polling, `runAgentWorkerBatch`, isolated jobs |
+| Inbound seat mail | `worker/pms-seat-inbound.ts email()` | R2 `unverified/{recipient}/{digest}`; the worker holds no DB |
+| Seat sweep | `worker/pms-seat-reader.ts scheduled()` → `lib/pms/inbound/sweep.ts` | `POST /api/pms/seat/adjudicate` |
+| PMS/accounting sync | `lib/integrations/sync-worker.ts runImportWorker` | `applyImport` → normalized records |
+
+### 5.2 A persistent runtime outside chat exists — **confirmed**
+
+`scheduled-sweep.ts:41` calls `runAgentWorkerBatch(session, bindings, "scheduled")`.
+Durable tasks advance on cron, independent of any open chat. Part I did not
+state this; it is the single most important thing the runtime already has.
+
+### 5.3 Normalized shared state exists — **confirmed**
+
+`properties, units, leases, residents, workOrders, ledgerEntries, vendors`,
+populated by `applyImport` from QuickBooks and Buildium. Inbound seat mail does
+**not** reach these tables; `promoteVerifiedMessage` → `captureNotification`
+records a notification and an extraction verdict only.
+
+### 5.4 Delegation and cancellation are real — **confirmed**
+
+`delegation.ts:48` creates a genuine child task with `parentTaskId`,
+`delegationDepth + 1`, a reserved budget carved from the parent under a
+compare-and-set, and the parent's execution scope copied. `tasks.ts:292
+cascadeCancel` propagates cancellation to children.
+
+### 5.5 **Correction to Part I §2.5** — completion criteria do exist
+
+Part I said there was no per-workflow `CompletionCriterion`. That understated
+it. `lib/agents/checks.ts parseTaskCheck` requires every task to carry a
+machine-checkable completion condition — `evidence` (naming specific read
+tools), `delivery` (operation + accepted/delivered status), `preference`, or
+`plan` — and refuses task creation without one. The §5.7 `Evidence` *record*
+(source, capture time, validity interval, integrity metadata) is still absent,
+and that remains the gap; the criterion mechanism is not.
+
+### 5.6 **Correction to Part I §2.3** — PMS writes reach the durable runtime
+
+Part I's "PMS inbound does not create durable agent work" was correct but
+narrow, and left a misleading impression. The **write** direction is fully
+wired: `lib/agents/registry.ts:176-191` declares nine PMS write tools with risk
+class, required permission, `requiresApproval: true`, `idempotent: true` and
+`maxRetries: 0`; `lib/agents/executor.ts:31` imports `runTool`, which dispatches
+`isPmsWriteTool(name)` → `runPmsWriteTool` at `lib/ask-aval/tools.ts:235`, with
+an idempotency key of `${task.id}:${tool.name}:${digest(canonicalAction(args))}`.
+What was missing was intake, not execution.
+
+### 5.7 The coordinator could not orchestrate anything — **confirmed, now fixed**
+
+The decisive finding. Authority was enforced as *containment*, in two
+independent places:
+
+- `lib/agents/task-boundary.ts` walked **every ancestor** of the executing task
+  and required each to satisfy `hasPermission(roleForPersona(task.agentId),
+  tool.requiredPermission)`.
+- `lib/agents/goal-plan.ts:40` required **both** the parent and the child agent
+  to hold every permission a plan node declared.
+
+`general` holds no `pms.*` write. So a coordinator-owned task could not delegate
+a PMS write to the specialist that owns it — rejected at plan time by the
+first, and at execution time by the second. Since the coordinator is the only
+role that receives events, event-driven PMS work had no path at all. The
+missing `general → brokerage` delegation edge was a symptom, not the cause.
+
+## 6. What was implemented
+
+| Change | File | Purpose |
+|---|---|---|
+| Event intake seam | `lib/agents/intake.ts` | Turns an authorized event into durable coordinator-owned work |
+| Intake rules (storage-free) | `lib/agents/intake-rules.ts` | Trust gate and deterministic id, unit-testable per the `task-state.ts` convention |
+| Orchestration permissions | `lib/agents/permissions.ts` | `ORCHESTRATION_PERMISSIONS` / `canOrchestrate` — route without being able to exercise |
+| Ancestor check | `lib/agents/task-boundary.ts` | A non-executing ancestor may route; the executing task must still hold |
+| Plan-time check | `lib/agents/goal-plan.ts` | Parent may hold **or** route; child must hold |
+| Delegation edge | `lib/agents/delegation-rules.ts` | `general → brokerage`, making `pms.leasing.write` reachable |
+| The join | `app/api/pms/seat/adjudicate/route.ts` | Verified captured message → `intakeEvent` |
+| Adjudication return | `lib/pms/inbound/{sweep,adjudicate}.ts` | Surfaces the resolved `organizationId` |
+
+Design notes:
+
+- **The coordinator gains no write authority.** `hasPermission` is untouched.
+  The leaf check still applies to the task actually calling the tool, so a
+  coordinator that calls a PMS write directly is still refused. Only its
+  presence in a descendant's *ancestry* stops being a block.
+- **Intake work is a `plan` root.** `task-boundary.ts` restricts a plan root to
+  managing its plan, so the coordinator structurally cannot perform operational
+  work itself — it must decompose into checked child tasks owned by specialists.
+- **Dedup is DB-enforced.** The task id is derived from (organization, source,
+  sourceId); `createTask` inserts with `onConflictDoNothing` and re-reads, so a
+  redelivery returns the existing task. Same discipline as `reserveMutation`.
+- **Acceptance is not authority.** `admissible()` refuses any non-verified
+  trust state before a query runs.
+
+## 7. Still unverified
+
+| Claim | Why |
+|---|---|
+| The wired route actually creates work against a real database | Requires Postgres; see §8 |
+| A duplicate delivery produces one task *in the database* | Same |
+| Crash resume, provider-timeout reconciliation, read-only handoff | Same |
+| Child results, external IDs and evidence returning to the parent | Not traced |
+| How normalized state reaches the dashboard | Not traced |
+| Other agents reading PMS-derived state within permissions | Not traced |
+
+## 8. External dependency blocking end-to-end proof
+
+`npm run test:postgres` fails at import with `Set AVAL_TEST_DATABASE_URL to a
+disposable local PostgreSQL database`. Every database-backed proof the brief
+asks for — duplicate event, crash resume, timeout reconciliation, read-only
+handoff, parent-stays-open — requires that. The logic is implemented and
+unit-tested; it is **not** integration-verified.

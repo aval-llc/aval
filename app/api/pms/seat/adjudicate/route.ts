@@ -15,6 +15,7 @@
  */
 
 import { adjudicateSeatMessage } from "@/lib/pms/inbound/adjudicate";
+import { intakeEvent } from "@/lib/agents/intake";
 import type { VerifiedMessage } from "@/lib/pms/inbound/promote";
 import { promoteVerifiedMessage } from "@/lib/pms/inbound/promote";
 import { withSystemSession } from "@/lib/api/with-session";
@@ -84,5 +85,26 @@ export async function POST(request: Request): Promise<Response> {
     }),
   );
 
-  return Response.json(decision, { headers: { "cache-control": "no-store" } });
+  // The join. Adjudication ends at a recorded row; without this the message is
+  // stored and never actioned. Only a verified, captured message creates work —
+  // `intakeEvent` re-checks that itself, so this condition is a fast path and
+  // not the control. Intake is keyed on the message digest, so the reader
+  // retrying a sweep reaches the same task instead of opening a second one.
+  let intake: { status: string; taskId?: string; reason?: string } | undefined;
+  if (decision.disposition === "verified" && decision.captured && decision.organizationId) {
+    const outcome = await withSystemSession("worker", (session) =>
+      intakeEvent(session, {
+        organizationId: decision.organizationId as string,
+        source: "pms_seat_email",
+        sourceId: digest,
+        trustState: "verified",
+        goal: `A verified message arrived in the PMS seat mailbox (${digest.slice(0, 12)}). Establish what operational work it represents, confirm the affected property, unit and resident from authorized records rather than from the message text, and coordinate the specialist that owns it through to a verified outcome.`,
+      }),
+    );
+    intake = outcome.status === "refused"
+      ? { status: outcome.status, reason: outcome.reason }
+      : { status: outcome.status, taskId: outcome.task.id };
+  }
+
+  return Response.json({ ...decision, intake }, { headers: { "cache-control": "no-store" } });
 }

@@ -99,6 +99,8 @@ export type SeatAdjudicateInput = {
 
 export type SeatAdjudication = {
   disposition: SeatDisposition;
+  /** The workspace the recipient resolved to, or null when none did. Needed by event intake. */
+  organizationId: string | null;
   /** Where the object belongs now. The caller moves it; this never does. */
   targetKey: string;
   captured: boolean;

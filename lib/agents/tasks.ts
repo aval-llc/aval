@@ -44,7 +44,12 @@ export {
 
 export interface NewTask {
   id?: string;
-  executionScope?: { source: "inbound"; conversationId: string; messageId?: string; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } };
+  executionScope?:
+    | { source: "inbound"; conversationId: string; messageId?: string; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } }
+    // Work created by `lib/agents/intake.ts` from an authorized external
+    // event. It carries the provenance the coordinator needs and the identity
+    // the intake dedupe is keyed on, so a redelivery reaches the same row.
+    | { source: "pms_event"; origin: string; sourceId: string; trustState: "verified"; providerId?: string };
   organizationId: string;
   userId: string;
   agentId: string;

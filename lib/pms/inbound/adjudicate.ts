@@ -95,5 +95,5 @@ export async function adjudicateSeatMessage(
     receivedAt: input.receivedAt,
   });
 
-  return { disposition: disposition.state, targetKey, captured, extracted, observedAuthservIds: observed };
+  return { disposition: disposition.state, organizationId, targetKey, captured, extracted, observedAuthservIds: observed };
 }
