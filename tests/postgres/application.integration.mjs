@@ -131,6 +131,34 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
       assert.equal(invisible.length, 0, "another organization cannot read the row");
     });
 
+    await t.test("every tenant table the worker can reach has a worker policy", async () => {
+      // Worker policies are generated once, by looping over the tables that
+      // existed when `20260911000200_worker_role.sql` ran. Table *privileges*
+      // carry forward to later tables through ALTER DEFAULT PRIVILEGES; policies
+      // do not, because a policy has to name a table that already exists.
+      //
+      // The failure mode is invisible at migration time and only appears on the
+      // worker path: the cron runtime is `aval_worker`, so a write that succeeds
+      // from a request is refused in the background. Four tables had already
+      // drifted this way before this guard existed.
+      const { rows } = await administrator.query(`
+        SELECT c.relname AS table_name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN information_schema.columns col
+          ON col.table_schema = 'public' AND col.table_name = c.relname
+         AND col.column_name = 'organization_id'
+        WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_policies p
+            WHERE p.schemaname = 'public' AND p.tablename = c.relname
+              AND 'aval_worker' = ANY (p.roles)
+          )
+        ORDER BY c.relname`);
+      assert.deepEqual(rows.map((row) => row.table_name), [],
+        "these tenant tables have RLS but no aval_worker policy, so the background runtime cannot write to them");
+    });
+
     await t.test("planning saves current epoch-millisecond dates", async () => {
       const now = Date.now();
       await session(userA, async (dbSession) => {

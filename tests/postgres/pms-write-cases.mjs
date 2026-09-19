@@ -10,8 +10,8 @@ import { registerWriteAdapter } from "../../lib/pms/flows.ts";
 import { ensurePmsAdaptersRegistered } from "../../lib/pms/register.ts";
 import { unverifiedExternalEffects, verifyExternalEffects } from "../../lib/agents/verification.ts";
 import { registerSimulatedProvider } from "../../lib/pms/adapters/simulator.ts";
-import { attemptSpend, recordWorkAttempt } from "../../lib/agents/work-attempts.ts";
-import { budgetExhausted, resolveAttemptPolicy } from "../../lib/agents/attempt-policy.ts";
+import { attemptSignature, attemptSpend, attemptTraces, recordWorkAttempt } from "../../lib/agents/work-attempts.ts";
+import { budgetExhausted, detectStagnation, nextDelayMs, resolveAttemptPolicy } from "../../lib/agents/attempt-policy.ts";
 import { payloadHash } from "../../lib/agents/canonical-payload.ts";
 
 /**
@@ -334,6 +334,60 @@ export async function runPmsWriteCases(t, { session, userA, propertyId, administ
     assert.notEqual(saved.status, "COMPLETED");
     assert.notEqual(saved.status, "FAILED");
     simulator.setReachable(true);
+  });
+
+  await t.test("repeating one failed strategy is caught before the budget is gone", async () => {
+    // The loop the directive rules out: strategy A fails, replan, strategy A.
+    // Detected from what is actually on the record rather than from anything
+    // held in memory, so it survives the restart between attempts.
+    const task = await newTask("stagnant strategy");
+    const signature = await attemptSignature("create_work_order", { unit: "304" }, "provider rejected the payload");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await run((s, org) => recordWorkAttempt(s, {
+        organizationId: org, taskId: task.id, kind: "replan", outcome: "failed",
+        objectiveSnapshot: task.goal, strategy: "raise the same work order again",
+        failureReason: "provider rejected the payload",
+        transient: false, progressed: false, signature,
+      }));
+    }
+    const traces = await run((s, org) => attemptTraces(s, org, task.id, "replan"));
+    const verdict = detectStagnation(traces);
+    assert.equal(verdict.stagnant, true, "three identical non-transient attempts are a loop");
+    assert.equal(verdict.reason, "repeated_strategy");
+    // Caught on attempt three, while the budget still had room — the point is
+    // to stop repeating, not to run out.
+    assert.equal(budgetExhausted(resolveAttemptPolicy("replan", {}, []), { attempts: 3, elapsedMs: 0 }), true);
+  });
+
+  await t.test("a transient failure may repeat the same action, spaced out", async () => {
+    // A rate limit or a provider that has not caught up is the one case where
+    // doing exactly the same thing again is correct, so it must not be read as
+    // a loop — and it must wait longer each time rather than hammering.
+    const task = await newTask("transient retry");
+    const signature = await attemptSignature("create_work_order", { unit: "304" }, "rate limited");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await run((s, org) => recordWorkAttempt(s, {
+        organizationId: org, taskId: task.id, kind: "verification", outcome: "inconclusive",
+        objectiveSnapshot: task.goal, failureReason: "rate limited",
+        transient: true, progressed: false, signature,
+      }));
+    }
+    const traces = await run((s, org) => attemptTraces(s, org, task.id, "verification"));
+    assert.equal(detectStagnation(traces).stagnant, false, "a transient repeat is a retry, not a loop");
+
+    const backoff = resolveAttemptPolicy("verification", { provider: PROVIDER }, [{
+      kind: "verification", provider: PROVIDER, toolName: null, workType: null, riskClass: null,
+      maxAttempts: 6, maxElapsedMs: null, initialDelayMs: 1000, backoffStrategy: "exponential",
+      backoffFactor: 2, maxDelayMs: 5000, onExhausted: "human_handoff", onContradicted: "replan", enabled: true,
+    }]);
+    assert.deepEqual([1, 2, 3, 4].map((n) => nextDelayMs(backoff, n)), [1000, 2000, 4000, 5000],
+      "each retry waits longer, up to the configured ceiling");
+
+    // And the spend is read back from storage, which is what makes it survive
+    // the process exiting between attempts.
+    const spend = await run((s, org) => attemptSpend(s, org, task.id, "verification"));
+    assert.equal(spend.attempts, 3);
+    assert.equal(budgetExhausted(backoff, spend), false, "a transient condition has not used up its allowance");
   });
 
   await t.test("the verification budget is not the employee's replanning budget", async () => {
