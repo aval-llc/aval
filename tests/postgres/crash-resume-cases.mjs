@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { agentTasks, agentTaskSteps, agentApprovals } from "../../db/postgres/schema.ts";
+import { agentTaskSteps, agentApprovals } from "../../db/postgres/schema.ts";
 import { createTask, getTask, claimTask, claimableTasks, updateTask } from "../../lib/agents/tasks.ts";
 import { executeApprovedTool } from "../../lib/agents/executor.ts";
 import { requestApproval } from "../../lib/agents/approvals.ts";

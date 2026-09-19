@@ -128,7 +128,7 @@ export async function runPmsWriteCases(t, { session, userA, propertyId, administ
     const second = await call();
     assert.equal(calls.length, before + 1, "the second attempt was suppressed by the reservation");
     assert.notEqual(second.result.status, "ok", "a suppressed retry is not reported as a fresh success");
-    const reservations = await run((s, org) => s.db.select({ key: agentTaskSteps.idempotencyKey })
+    const reservations = await run((s) => s.db.select({ key: agentTaskSteps.idempotencyKey })
       .from(agentTaskSteps).where(eq(agentTaskSteps.taskId, task.id)));
     const keys = reservations.map((r) => r.key).filter(Boolean);
     assert.equal(new Set(keys).size, keys.length, "idempotency keys are unique");
