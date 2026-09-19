@@ -14,6 +14,7 @@ import { runPlannerCases } from "./planner-cases.mjs";
 import { runAuthRouteCases } from "./auth-route-cases.mjs";
 import { runPilotCases } from "./pilot-cases.mjs";
 import { runBackupCases } from "./backup-cases.mjs";
+import { runIntakeCases } from "./intake-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
 
 const url = process.env.AVAL_TEST_DATABASE_URL;
@@ -182,6 +183,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runPlannerCases(t, { config, administrator });
     await runAuthRouteCases(t, { config });
     await runAuditCases(t, { config, administrator, userId: userA, invitedUserId: userB, organizationId: personalOrganization(userA) });
+    await runIntakeCases(t, { session, userA, organizationId: personalOrganization(userA) });
     await runBackupCases(t, url);
   } finally {
     if (roleCreated) {
