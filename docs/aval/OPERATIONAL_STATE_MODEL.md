@@ -155,3 +155,78 @@ that produced it.
 
 No change was made to any of these; the directive said establish the read model
 first.
+
+---
+
+# Part II — implemented
+
+**Date:** 2026-09-19. The §3 model is no longer proposed; it is schema.
+
+## 5. `operational_facts`
+
+`supabase/migrations/20260919000200_operational_facts_and_evidence.sql`,
+`db/schema.ts`, `lib/agents/facts.ts`.
+
+Every column §3 asked for exists: `sourceType`, `sourceProvider`,
+`sourceRecordId`, `observedAt`, `syncedAt`, `expiresAt`, `freshnessPolicy`,
+`authoritativeness`, `confidence`, `derivedFromJson`, `conflictState`.
+
+Three decisions worth recording:
+
+- **Authority is derived from the source, never passed in.** `authoritativenessFor`
+  maps `provider`→`authoritative`, `human`→`human_confirmed`,
+  `inference`→`inferred`, `document`→`reported`. A model that could label its
+  own output authoritative would make the distinction decorative. A database
+  CHECK enforces that only an inference carries a confidence.
+- **Staleness is derived at read time**, from `expiresAt`. A stored `stale` flag
+  is itself a fact that goes out of date.
+- **A source never overwrites another source.** The unique index is on
+  (org, entity, field, sourceType, sourceProvider) with `NULLS NOT DISTINCT`, so
+  a re-sync updates its own row and a different system gets its own. When live
+  values disagree both rows are marked `conflicted` and `actionableFact` returns
+  null — a caller may show the disagreement, but nothing gets a quiet answer
+  that hides it.
+
+## 6. `action_evidence`
+
+`lib/agents/evidence.ts`. `PENDING_VERIFICATION` can now end in proof.
+
+`compareStates` is deterministic and distinguishes three outcomes: every
+expected key present and equal is `confirmed`; a present and different value is
+`contradicted`; a missing key is `inconclusive`. Conflating the last two would
+let a truncated read be reported as a failed write.
+
+`executionVerdict` lets `contradicted` outrank `confirmed`, so an optimistic
+earlier read cannot cancel proof of failure. Anything short of a positive
+confirmation is `unproven`, which is what keeps a task out of `COMPLETED`.
+
+The runtime gate now consults evidence before counting another attempt:
+contradicted → `FAILED` with the effect named; confirmed → `COMPLETED`;
+otherwise the existing backoff to `WAITING_FOR_HUMAN`.
+
+Evidence types supported: `provider_reread`, `provider_event`,
+`human_confirmation`, `document`, `aval_native`. A verifier registry
+(`registerVerifier`) re-reads provider state; a verifier that returns null
+leaves the effect unproven, because a provider that is down, rate-limited or
+eventually consistent is not evidence of failure.
+
+## 7. Canonical read model
+
+`lib/agents/read-model.ts` is the single documented source for work, waits,
+approvals, evidence and operational counts. It reads persisted state only — no
+fixture, no transcript, no model call.
+
+`operationalStatus` deliberately returns counts rather than a health score:
+blending "three approvals pending" with "one unproven payment" tells an operator
+nothing about which to open first.
+
+`/api/workspace` is marked `@deprecated` in place and now returns a
+`Deprecation` header. It is retained because onboarding uses the creation date.
+No UI was redesigned.
+
+## 8. Demo-fixture guard
+
+`lib/ask-aval/tools.ts`'s header no longer claims executors read
+`app/data/sample.ts`. `tests/agent-tools-live-data.test.ts` fails if any module
+under `lib/ask-aval`, `lib/operations`, `lib/agents` or `lib/pms` references the
+fixture payload or imports values (as opposed to types) from it.

@@ -49,7 +49,7 @@ import { executeApprovedTool, executeTool, redactArguments } from "./executor.ts
 import { allowedToolNames } from "./policy.ts";
 import { requestApproval, latestApprovalForTask, type ApprovalRecord } from "./approvals.ts";
 import { approvalMatchesToolUse } from "./approval-binding.ts";
-import { unverifiedExternalEffects, verificationAttempts } from "./verification.ts";
+import { unverifiedExternalEffects, verificationAttempts, verifyExternalEffects } from "./verification.ts";
 import { MAX_VERIFICATION_ATTEMPTS, VERIFICATION_BACKOFF_MS } from "./task-state.ts";
 import { payloadHash } from "./canonical-payload.ts";
 import { evidenceNumbersFromTranscript } from "./transcript-evidence.ts";
@@ -331,6 +331,17 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
     // that executed a mutating tool cannot complete on the answer check alone.
     const effects = await unverifiedExternalEffects(dbSession, organizationId, taskId);
     if (effects.length > 0) {
+      // Ask what the evidence already says before counting another attempt. A
+      // webhook or a person may have settled this without Aval asking.
+      const sweep = await verifyExternalEffects(dbSession, organizationId, taskId);
+      if (sweep.verdict === 'contradicted') {
+        audit.push({ kind: 'task_pending_verification', label: 'contradicted', payloadDigest: await digestPayload(sweep.contradicted), count: sweep.contradicted.length });
+        return finish('FAILED', {
+          resultJson: JSON.stringify(answer),
+          error: `Evidence shows ${effects.join(', ')} did not take effect. The work was not completed.`,
+        });
+      }
+      if (sweep.verdict !== 'confirmed') {
       const attempts = await verificationAttempts(dbSession, organizationId, taskId);
       await persistStep(dbSession, {
         taskId, organizationId, stepIndex, kind: 'verification_attempt',
@@ -350,6 +361,10 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
         resultJson: JSON.stringify(answer),
         nextAttemptAt: new Date(Date.now() + VERIFICATION_BACKOFF_MS),
       });
+      }
+      // Every effect is proven. Completion is now a statement about the world,
+      // not about the model's confidence, so the task may close.
+      audit.push({ kind: 'task_pending_verification', label: 'confirmed', payloadDigest: await digestPayload(sweep.confirmed), count: sweep.confirmed.length });
     }
 
     audit.push({ kind: 'task_completed', label: task.agentId, payloadDigest: await digestPayload(answer), count: stepIndex });

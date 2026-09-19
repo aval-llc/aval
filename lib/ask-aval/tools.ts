@@ -7,12 +7,18 @@ import { HARNESS_TOOLS, runHarnessTool } from '@/lib/agents/harness-tools';
  * number itself — every figure in its final answer must trace back to a
  * tool result (enforced by the faithfulness gate in handler.ts).
  *
- * This app runs on a single static sample-data snapshot (app/data/sample.ts),
- * not a live per-tenant database yet, so every executor below reads that
- * snapshot rather than querying tables that don't exist. Anywhere the
- * snapshot genuinely doesn't have what a tool's shape implies (a numeric
- * days-past-due figure, a real dollar-scale time series for NOI), the
- * executor says so in a `note` field instead of inventing a plausible value.
+ * Every executor below reads the tenant's own database. Operations tools query
+ * the normalized tables (`properties`, `units`, `leases`, `residents`,
+ * `work_orders`, `ledger_entries`, `vendors`); metric tools read
+ * `portfolio_snapshots` and `funnel_snapshots` through
+ * `lib/ask-aval/portfolio-data.ts`. Every read is organization-scoped by the
+ * session, and RLS enforces that independently of this file.
+ *
+ * `app/data/sample.ts` is demo content for the marketing surface and the
+ * source of the shared `derive*Pct` helpers. It is NOT a fallback for these
+ * executors: a tool with no data says so in a `note` field rather than
+ * borrowing a plausible figure from the fixture. `tests/agent-tools-live-data.test.ts`
+ * fails if that ever stops being true.
  */
 
 import type { ToolSchema } from "./model-types";

@@ -1867,3 +1867,131 @@ export const pmsSeatMessages = pgTable(
     index("pms_seat_messages_digest_idx").on(table.digest),
   ],
 );
+
+/**
+ * One observed fact about one operational entity, with where it came from and
+ * how far to trust it.
+ *
+ * The operational tables (`properties`, `residents`, `workOrders`,
+ * `ledgerEntries`) already record `sourceProvider`, `sourceConnectionId` and
+ * `externalId`, which answers "which system did this row come from". They do
+ * not answer the questions an agent has to ask before acting: when did the
+ * provider consider this true, when did we last look, is it still fresh, is it
+ * authoritative or something a model inferred, and does another system
+ * disagree.
+ *
+ * A fact is never overwritten by a different source. A second source writes a
+ * second row, and the two are marked `conflicted` — `operations_conflicts`
+ * remains the surface a person resolves them on. Collapsing them would be the
+ * silent overwrite the design exists to prevent.
+ */
+export const operationalFacts = pgTable(
+  "operational_facts",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** property | unit | resident | lease | work_order | vendor | account */
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    /** The field or claim this fact is about, as a stable path: `balance_cents`, `status`, `lease.end_date`. */
+    factType: text("fact_type").notNull(),
+    /** Scalar rendering, for the common case where the value fits in one column. */
+    value: text("value"),
+    /** Pointer for a value too large or too structured to inline. Exactly one of `value`/`valueRef` is set. */
+    valueRef: text("value_ref"),
+    /** provider | aval_native | human | document | inference */
+    sourceType: text("source_type").notNull(),
+    sourceProvider: text("source_provider"),
+    sourceRecordId: text("source_record_id"),
+    /** When the source considered this true. Null when the provider offers no effective time — an honest null, never a fabricated one. */
+    observedAt: timestamp("observed_at", { withTimezone: true, mode: "date" }),
+    /** When Aval last read it. Always known, because Aval did the reading. */
+    syncedAt: timestamp("synced_at", { withTimezone: true, mode: "date" }).notNull(),
+    /** Freshness horizon. Staleness is `now() > expiresAt`, derived rather than stored, so it cannot itself go stale. */
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    /** Named policy the horizon came from, so a change of policy is legible. */
+    freshnessPolicy: text("freshness_policy"),
+    /** authoritative | reported | inferred | human_confirmed */
+    authoritativeness: text("authoritativeness").notNull(),
+    /** Only meaningful for `inference`; null elsewhere rather than a misleading 1.0. */
+    confidence: doublePrecision("confidence"),
+    /** Evidence or fact ids this was derived from, as JSON. */
+    derivedFromJson: jsonText("derived_from_json").notNull().default("[]"),
+    /** none | conflicted | superseded */
+    conflictState: text("conflict_state").notNull().default("none"),
+    /** The fact that replaced this one, when superseded. */
+    supersededBy: text("superseded_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (table) => [
+    index("operational_facts_entity_idx").on(table.organizationId, table.entityType, table.entityId, table.factType),
+    index("operational_facts_conflict_idx").on(table.organizationId, table.conflictState),
+    // One live fact per (entity, field, source). A re-sync from the same source
+    // updates its own row; a different source gets its own, which is what makes
+    // a disagreement visible instead of destructive.
+    uniqueIndex("operational_facts_source_uq").on(
+      table.organizationId, table.entityType, table.entityId, table.factType, table.sourceType, table.sourceProvider,
+    ),
+    check("operational_facts_source_type", sql`source_type IN ('provider','aval_native','human','document','inference')`),
+    check("operational_facts_authority", sql`authoritativeness IN ('authoritative','reported','inferred','human_confirmed')`),
+    check("operational_facts_conflict_state", sql`conflict_state IN ('none','conflicted','superseded')`),
+    check("operational_facts_confidence_range", sql`confidence IS NULL OR (confidence >= 0 AND confidence <= 1)`),
+    // An inference must say how sure it is; anything else must not pretend to.
+    check("operational_facts_confidence_scope", sql`(source_type = 'inference') = (confidence IS NOT NULL)`),
+  ],
+);
+
+/**
+ * What was observed about an action Aval took, and whether it proves the
+ * action's claim.
+ *
+ * A task that caused an external effect holds at `PENDING_VERIFICATION` until
+ * something independent says the effect took hold. Without this table that
+ * state could only ever expire into a human handoff, which is honest but is
+ * not verification. Each row is one observation: a provider re-read, a webhook,
+ * a person confirming, a document, or Aval's own state — compared against the
+ * state the action expected.
+ *
+ * `verificationResult` is the comparison's outcome, not the observation's
+ * quality. An observation that positively shows the action did *not* happen is
+ * `contradicted`, which is a successful verification of a failure.
+ */
+export const actionEvidence = pgTable(
+  "action_evidence",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    taskId: text("task_id").notNull().references(() => agentTasks.id),
+    /** The execution this is evidence about — the idempotency key the executor reserved. */
+    actionExecutionId: text("action_execution_id").notNull(),
+    /** The tool whose effect is being verified. */
+    toolName: text("tool_name").notNull(),
+    /** What Aval claims happened, in one line, for a person reading the trail. */
+    claim: text("claim").notNull(),
+    expectedStateJson: jsonText("expected_state_json").notNull().default("{}"),
+    /** provider_reread | provider_event | human_confirmation | document | aval_native */
+    evidenceType: text("evidence_type").notNull(),
+    sourceProvider: text("source_provider"),
+    externalRecordId: text("external_record_id"),
+    observedStateJson: jsonText("observed_state_json").notNull().default("{}"),
+    /** When the observation was true at its source, where that is knowable. */
+    observedAt: timestamp("observed_at", { withTimezone: true, mode: "date" }),
+    /** confirmed | contradicted | inconclusive */
+    verificationResult: text("verification_result").notNull(),
+    /** Pointer to a stored payload; never the payload itself, which may hold resident data. */
+    payloadRef: text("payload_ref"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (table) => [
+    index("action_evidence_task_idx").on(table.organizationId, table.taskId),
+    index("action_evidence_execution_idx").on(table.actionExecutionId),
+    // A provider can deliver the same webhook twice, and a scheduled re-read can
+    // race one. The same observation of the same execution is one row.
+    uniqueIndex("action_evidence_observation_uq").on(
+      table.actionExecutionId, table.evidenceType, table.externalRecordId, table.verificationResult,
+    ),
+    check("action_evidence_type", sql`evidence_type IN ('provider_reread','provider_event','human_confirmation','document','aval_native')`),
+    check("action_evidence_result", sql`verification_result IN ('confirmed','contradicted','inconclusive')`),
+  ],
+);

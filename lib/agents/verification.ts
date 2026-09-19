@@ -90,3 +90,119 @@ export async function verificationAttempts(
     ));
   return rows.length;
 }
+
+/* ── closing the loop ──────────────────────────────────────────────────────── */
+
+import { executionVerdict, providerVerifier, recordEvidence, type ExecutionVerdict } from "./evidence.ts";
+
+export interface PendingExecution {
+  toolName: string;
+  /** The idempotency key the executor reserved. Evidence is keyed on it. */
+  actionExecutionId: string;
+}
+
+/**
+ * External effects this task caused, each with the execution key evidence is
+ * filed against.
+ *
+ * `unverifiedExternalEffects` answers "did anything leave Aval"; this answers
+ * "which executions, so they can be checked one at a time".
+ */
+export async function pendingExecutions(
+  dbSession: DbSession,
+  organizationId: string,
+  taskId: string,
+): Promise<PendingExecution[]> {
+  const rows = await dbSession.db
+    .select({
+      kind: agentTaskSteps.kind,
+      toolName: agentTaskSteps.toolName,
+      policyEffect: agentTaskSteps.policyEffect,
+      idempotencyKey: agentTaskSteps.idempotencyKey,
+    })
+    .from(agentTaskSteps)
+    .where(and(
+      eq(agentTaskSteps.organizationId, organizationId),
+      eq(agentTaskSteps.taskId, taskId),
+      isNull(agentTaskSteps.error),
+    ));
+
+  const out = new Map<string, PendingExecution>();
+  for (const row of rows) {
+    if (!row.toolName || !row.idempotencyKey) continue;
+    if (!EXECUTION_KINDS.has(row.kind) || row.policyEffect !== "allow") continue;
+    if (!getTool(row.toolName)?.externalEffect) continue;
+    out.set(row.idempotencyKey, { toolName: row.toolName, actionExecutionId: row.idempotencyKey });
+  }
+  return [...out.values()];
+}
+
+export interface VerificationSweep {
+  /** confirmed only when every execution is confirmed. */
+  verdict: ExecutionVerdict | "none";
+  confirmed: string[];
+  contradicted: string[];
+  unproven: string[];
+}
+
+/**
+ * Attempts to prove every external effect this task caused.
+ *
+ * For each execution it first asks what the recorded evidence already says — a
+ * webhook or a human confirmation may have arrived without Aval asking — and
+ * only re-reads the provider when nothing has settled it yet. A provider that
+ * cannot be reached, or that has not caught up, leaves the execution unproven;
+ * that is a state to wait in, not a failure to report.
+ */
+export async function verifyExternalEffects(
+  dbSession: DbSession,
+  organizationId: string,
+  taskId: string,
+  context: { providerId?: string; externalRecordIdFor?: (execution: PendingExecution) => string | null } = {},
+): Promise<VerificationSweep> {
+  const executions = await pendingExecutions(dbSession, organizationId, taskId);
+  if (executions.length === 0) return { verdict: "none", confirmed: [], contradicted: [], unproven: [] };
+
+  const confirmed: string[] = [];
+  const contradicted: string[] = [];
+  const unproven: string[] = [];
+
+  for (const execution of executions) {
+    let verdict = await executionVerdict(dbSession, organizationId, execution.actionExecutionId);
+
+    if (verdict === "unproven" && context.providerId) {
+      const verifier = providerVerifier(context.providerId, execution.toolName);
+      const externalRecordId = context.externalRecordIdFor?.(execution) ?? null;
+      if (verifier && externalRecordId) {
+        const observed = await verifier(dbSession, {
+          organizationId, providerId: context.providerId,
+          toolName: execution.toolName, externalRecordId,
+        }).catch(() => null);
+        if (observed) {
+          await recordEvidence(dbSession, {
+            organizationId, taskId,
+            actionExecutionId: execution.actionExecutionId,
+            toolName: execution.toolName,
+            claim: `${execution.toolName} took effect in ${context.providerId}`,
+            expectedState: { exists: true },
+            evidenceType: "provider_reread",
+            sourceProvider: context.providerId,
+            externalRecordId,
+            observedState: observed,
+            observedAt: new Date(),
+          });
+          verdict = await executionVerdict(dbSession, organizationId, execution.actionExecutionId);
+        }
+      }
+    }
+
+    if (verdict === "confirmed") confirmed.push(execution.actionExecutionId);
+    else if (verdict === "contradicted") contradicted.push(execution.actionExecutionId);
+    else unproven.push(execution.actionExecutionId);
+  }
+
+  const verdict: ExecutionVerdict = contradicted.length > 0
+    ? "contradicted"
+    : unproven.length === 0 ? "confirmed" : "unproven";
+  return { verdict, confirmed, contradicted, unproven };
+}
