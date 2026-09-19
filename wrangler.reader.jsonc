@@ -42,7 +42,7 @@
     // The matching secret is PMS_SEAT_READER_TOKEN, set with
     // `npx wrangler secret put PMS_SEAT_READER_TOKEN --config wrangler.reader.jsonc`
     // and never written here.
-    "PMS_SEAT_ADJUDICATOR_URL": "https://aval.llc"
+    "PMS_SEAT_ADJUDICATOR_URL": "https://app.aval.llc"
   },
 
   "r2_buckets": [
