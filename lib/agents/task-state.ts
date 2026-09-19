@@ -13,6 +13,16 @@ export const TASK_STATES = [
   "RUNNING",
   "WAITING_FOR_TOOL",
   "WAITING_FOR_APPROVAL",
+  // An external effect was accepted but is not yet proven. AVAL_AGENT.md §7.5:
+  // "If an action is accepted but not confirmed, the correct state is
+  // PENDING_VERIFICATION or WAITING_FOR_EXTERNAL, never COMPLETED." Without
+  // this state such work had to be recorded as COMPLETED, which §17.2 lists as
+  // a release blocker, or as FAILED, which is untrue because the write landed.
+  "PENDING_VERIFICATION",
+  // A person owns the next move. Where verification cannot be obtained inside
+  // its budget the work is handed over rather than being forced to a terminal
+  // state that misdescribes what happened.
+  "WAITING_FOR_HUMAN",
   "COMPLETED",
   "FAILED",
   "CANCELLED",
@@ -28,7 +38,20 @@ export const TERMINAL_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["COMP
  * immediately; an expired or decided one resumes. RUNNING is included so an
  * expired worker lease has a real recovery path.
  */
-export const ADVANCEABLE_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["QUEUED", "RUNNING", "WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL"]);
+export const ADVANCEABLE_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["QUEUED", "RUNNING", "WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION"]);
+
+/**
+ * States a worker resumes on a timer rather than on an event. The claim query
+ * already gates on `nextAttemptAt`, so a verification re-check waits for its
+ * own wake-up instead of spinning.
+ */
+export const TIMER_RESUMED_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["PENDING_VERIFICATION"]);
+
+/** How many times verification is attempted before the work is handed to a person. */
+export const MAX_VERIFICATION_ATTEMPTS = 3;
+
+/** How long to wait between verification attempts. */
+export const VERIFICATION_BACKOFF_MS = 5 * 60_000;
 
 /**
  * Legal transitions. Written out rather than inferred so an illegal one is a
@@ -41,9 +64,14 @@ export const ADVANCEABLE_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["Q
  */
 export const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   QUEUED: ["RUNNING", "CANCELLED", "FAILED"],
-  RUNNING: ["WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "COMPLETED", "FAILED", "CANCELLED", "QUEUED"],
+  RUNNING: ["WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION", "WAITING_FOR_HUMAN", "COMPLETED", "FAILED", "CANCELLED", "QUEUED"],
   WAITING_FOR_TOOL: ["RUNNING", "FAILED", "CANCELLED"],
   WAITING_FOR_APPROVAL: ["RUNNING", "CANCELLED", "FAILED"],
+  // Verification either proves the effect, exhausts its budget and becomes a
+  // person's problem, or is cancelled. It never returns to COMPLETED directly
+  // from here without going through a run that evaluated the evidence.
+  PENDING_VERIFICATION: ["RUNNING", "WAITING_FOR_HUMAN", "COMPLETED", "FAILED", "CANCELLED"],
+  WAITING_FOR_HUMAN: ["RUNNING", "CANCELLED", "FAILED"],
   COMPLETED: [],
   FAILED: [],
   CANCELLED: [],

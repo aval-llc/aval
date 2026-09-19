@@ -325,7 +325,7 @@ export async function claimableTasks(dbSession: DbSession, limit = 5): Promise<T
     .from(agentTasks)
     .where(
       and(
-        inArray(agentTasks.status, ["QUEUED", "RUNNING", "WAITING_FOR_TOOL"]),
+        inArray(agentTasks.status, ["QUEUED", "RUNNING", "WAITING_FOR_TOOL", "PENDING_VERIFICATION"]),
         or(isNull(agentTasks.leaseExpiresAt), lt(agentTasks.leaseExpiresAt, now)),
         or(isNull(agentTasks.nextAttemptAt), lte(agentTasks.nextAttemptAt, now)),
       ),

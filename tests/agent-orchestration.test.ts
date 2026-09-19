@@ -107,3 +107,26 @@ test("an event without a stable id is refused rather than deduplicated by guess"
   assert.notEqual(verdict, true);
   assert.match((verdict as { reason: string }).reason, /deduplicated/);
 });
+
+import { getTool } from "../lib/agents/registry.ts";
+
+test("a tool that only changes Aval's own state is not an external effect", () => {
+  // plan_goal mutates — it creates child tasks and reserves an idempotency key
+  // — but nothing leaves Aval, so the write succeeding is the proof. Treating
+  // it as external held every planned task at PENDING_VERIFICATION.
+  assert.equal(getTool("plan_goal")?.mutates, true);
+  assert.notEqual(getTool("plan_goal")?.externalEffect, true);
+});
+
+test("every tool that reaches a provider declares an external effect", () => {
+  for (const name of ["send_external_message", "place_call", "publish_listing", "create_work_order",
+                      "post_payment", "reply_to_inquiry", "dispatch_vendor", "execute_lease"]) {
+    assert.equal(getTool(name)?.externalEffect, true, `${name} must declare externalEffect`);
+  }
+});
+
+test("an external effect always mutates", () => {
+  // The reverse does not hold, which is the entire point of the distinction.
+  assert.ok(getTool("create_work_order")?.mutates);
+  assert.ok(getTool("send_external_message")?.mutates);
+});

@@ -45,6 +45,10 @@ export type AuditEntryKind =
   | "approval_decided"
   | "delegation"
   | "task_completed"
+  // An external effect was accepted but not proven. Recorded because the
+  // difference between "we did it" and "we asked and it was accepted" is
+  // exactly what an audit reader needs to see.
+  | "task_pending_verification"
   | "task_failed"
   | "task_cancelled"
   // workspace membership — who can see this tenant's data, and who can

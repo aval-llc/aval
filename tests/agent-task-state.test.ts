@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ADVANCEABLE_STATES, TASK_STATES, TERMINAL_STATES, TRANSITIONS, canTransition, type TaskState } from "../lib/agents/task-state.ts";
+import { ADVANCEABLE_STATES, MAX_VERIFICATION_ATTEMPTS, TASK_STATES, TERMINAL_STATES, TIMER_RESUMED_STATES, TRANSITIONS, VERIFICATION_BACKOFF_MS, canTransition, type TaskState } from "../lib/agents/task-state.ts";
 import { implementedTools, TOOL_REGISTRY } from "../lib/agents/registry.ts";
 
 test("a terminal task can never move again", () => {
@@ -111,4 +111,62 @@ test("every tool declares a positive timeout and a non-negative retry budget", (
     assert.ok(tool.timeoutMs > 0 && tool.timeoutMs <= 60_000, `"${tool.name}" has an implausible timeout`);
     assert.ok(Number.isInteger(tool.maxRetries) && tool.maxRetries >= 0, `"${tool.name}" has an invalid retry budget`);
   }
+});
+
+/* ── verification states ──────────────────────────────────────────────────── */
+
+test("every non-terminal state can still reach a terminal one", () => {
+  // Adding a state that cannot be finished would strand work, which is worse
+  // than the gap it was added to close.
+  for (const from of TASK_STATES) {
+    if (TERMINAL_STATES.has(from)) continue;
+    const seen = new Set([from]);
+    const queue = [from];
+    let reachesTerminal = false;
+    while (queue.length) {
+      const current = queue.shift() as TaskState;
+      for (const next of TRANSITIONS[current]) {
+        if (TERMINAL_STATES.has(next)) { reachesTerminal = true; break; }
+        if (!seen.has(next)) { seen.add(next); queue.push(next); }
+      }
+      if (reachesTerminal) break;
+    }
+    assert.ok(reachesTerminal, `${from} cannot reach a terminal state`);
+  }
+});
+
+test("an accepted but unproven effect has a state that is neither success nor failure", () => {
+  assert.ok(TASK_STATES.includes("PENDING_VERIFICATION"));
+  assert.equal(TERMINAL_STATES.has("PENDING_VERIFICATION"), false);
+  // Both outcomes stay reachable: proving the effect completes it, exhausting
+  // the budget hands it to a person.
+  assert.ok(canTransition("PENDING_VERIFICATION", "COMPLETED"));
+  assert.ok(canTransition("PENDING_VERIFICATION", "WAITING_FOR_HUMAN"));
+});
+
+test("a running task can hold for verification instead of claiming completion", () => {
+  assert.ok(canTransition("RUNNING", "PENDING_VERIFICATION"));
+  assert.ok(canTransition("RUNNING", "WAITING_FOR_HUMAN"));
+});
+
+test("verification is resumed by the worker rather than needing a chat", () => {
+  assert.ok(ADVANCEABLE_STATES.has("PENDING_VERIFICATION"));
+  assert.ok(TIMER_RESUMED_STATES.has("PENDING_VERIFICATION"));
+});
+
+test("a human handoff is not silently advanced by a timer", () => {
+  // It waits for a person, so nothing should wake it on a schedule.
+  assert.equal(TIMER_RESUMED_STATES.has("WAITING_FOR_HUMAN"), false);
+  assert.equal(TERMINAL_STATES.has("WAITING_FOR_HUMAN"), false);
+});
+
+test("terminal states remain terminal", () => {
+  for (const state of TERMINAL_STATES) {
+    assert.deepEqual(TRANSITIONS[state], [], `${state} must not move`);
+  }
+});
+
+test("the verification budget is bounded", () => {
+  assert.ok(MAX_VERIFICATION_ATTEMPTS >= 1 && MAX_VERIFICATION_ATTEMPTS <= 10);
+  assert.ok(VERIFICATION_BACKOFF_MS > 0);
 });

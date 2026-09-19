@@ -49,6 +49,8 @@ import { executeApprovedTool, executeTool, redactArguments } from "./executor.ts
 import { allowedToolNames } from "./policy.ts";
 import { requestApproval, latestApprovalForTask, type ApprovalRecord } from "./approvals.ts";
 import { approvalMatchesToolUse } from "./approval-binding.ts";
+import { unverifiedExternalEffects, verificationAttempts } from "./verification.ts";
+import { MAX_VERIFICATION_ATTEMPTS, VERIFICATION_BACKOFF_MS } from "./task-state.ts";
 import { payloadHash } from "./canonical-payload.ts";
 import { evidenceNumbersFromTranscript } from "./transcript-evidence.ts";
 import {
@@ -226,7 +228,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
   let inputTokens = 0;
   let outputTokens = 0;
 
-  const finish = async (status: TaskState, extra: { resultJson?: string; error?: string; approvalId?: string } = {}): Promise<AdvanceOutcome> => {
+  const finish = async (status: TaskState, extra: { resultJson?: string; error?: string; approvalId?: string; nextAttemptAt?: Date } = {}): Promise<AdvanceOutcome> => {
     await Promise.all([
       recordUsage(dbSession, { orgId: organizationId, userId: task!.userId }, inputTokens, outputTokens),
       audit.length ? appendAuditEvents(dbSession, organizationId, audit) : Promise.resolve(null),
@@ -238,7 +240,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       tokensUsed: task!.tokensUsed + inputTokens + outputTokens,
       resultJson: extra.resultJson,
       error: extra.error,
-      nextAttemptAt: null,
+      nextAttemptAt: extra.nextAttemptAt ?? null,
       releaseLease: true,
     });
     if (!saved) {
@@ -323,6 +325,33 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       return checkpoint();
     }
     audit.push({ kind: 'verdict', label: 'pass', payloadDigest: await digestPayload([]), count: 0 });
+
+    // The answer is supported. That is not the same claim as "the side effects
+    // this run caused in someone else's system actually took hold", so a task
+    // that executed a mutating tool cannot complete on the answer check alone.
+    const effects = await unverifiedExternalEffects(dbSession, organizationId, taskId);
+    if (effects.length > 0) {
+      const attempts = await verificationAttempts(dbSession, organizationId, taskId);
+      await persistStep(dbSession, {
+        taskId, organizationId, stepIndex, kind: 'verification_attempt',
+        policyEffect: 'allow', resultDigest: await digestPayload(effects),
+      });
+      if (attempts + 1 >= MAX_VERIFICATION_ATTEMPTS) {
+        // Not FAILED: the write landed, and saying otherwise is as untrue as
+        // claiming success. A person reconciles it.
+        audit.push({ kind: 'task_pending_verification', label: 'handoff', payloadDigest: await digestPayload(effects), count: effects.length });
+        return finish('WAITING_FOR_HUMAN', {
+          resultJson: JSON.stringify(answer),
+          error: `Executed ${effects.join(', ')} but could not confirm the effect after ${attempts + 1} attempts. Reconcile against the provider before closing.`,
+        });
+      }
+      audit.push({ kind: 'task_pending_verification', label: 'scheduled', payloadDigest: await digestPayload(effects), count: attempts + 1 });
+      return finish('PENDING_VERIFICATION', {
+        resultJson: JSON.stringify(answer),
+        nextAttemptAt: new Date(Date.now() + VERIFICATION_BACKOFF_MS),
+      });
+    }
+
     audit.push({ kind: 'task_completed', label: task.agentId, payloadDigest: await digestPayload(answer), count: stepIndex });
     return finish('COMPLETED', { resultJson: JSON.stringify(answer) });
   };

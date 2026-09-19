@@ -47,6 +47,17 @@ export interface ToolDescriptor {
   riskLevel: RiskLevel;
   /** True if executing it changes stored state. Drives idempotency and approval defaults. */
   mutates: boolean;
+  /**
+   * True if the change lands in a system Aval does not own.
+   *
+   * Distinct from `mutates`, and the distinction matters: `plan_goal` mutates
+   * (it creates child tasks and reserves an idempotency key) but never leaves
+   * Aval, so its effect is proven by the write succeeding. A PMS work order or
+   * a message to a resident is not — AVAL_AGENT.md §10 separates "the provider
+   * returned 200" from "the business outcome occurred". Only an external
+   * effect holds a task at PENDING_VERIFICATION.
+   */
+  externalEffect?: boolean;
   requiredPermission: Permission;
   /** Wall-clock budget for one execution. Exceeded → the step fails with a timeout, never a hang. */
   timeoutMs: number;
@@ -149,13 +160,13 @@ const DESCRIPTORS: ToolDescriptor[] = [
   // level, a permission and an approval posture already decided.
   { ...READ_DEFAULTS, name: "read_maintenance_context", summary: "Resolve one inbound message to its resident and active lease.", requiredPermission: "maintenance.read" },
   { name: "create_maintenance_work_order", summary: "Create an approved internal work order for a matched inbound request.", riskLevel: "high", mutates: true, requiredPermission: "maintenance.create", timeoutMs: 15_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "send_external_message", summary: "Send a message to a resident or vendor over a real channel.", riskLevel: "high", mutates: true, requiredPermission: "messaging.send.external", timeoutMs: 20_000, maxRetries: 0, idempotent: false, requiresApproval: true, routine: true },
-  { name: "place_call", summary: "Place a call and optionally connect a configured team.", riskLevel: "high", mutates: true, requiredPermission: "messaging.send.external", timeoutMs: 20000, maxRetries: 0, idempotent: false, requiresApproval: true, routine: true },
+  { name: "send_external_message", summary: "Send a message to a resident or vendor over a real channel.", riskLevel: "high", mutates: true, externalEffect: true, requiredPermission: "messaging.send.external", timeoutMs: 20_000, maxRetries: 0, idempotent: false, requiresApproval: true, routine: true },
+  { name: "place_call", summary: "Place a call and optionally connect a configured team.", riskLevel: "high", mutates: true, externalEffect: true, requiredPermission: "messaging.send.external", timeoutMs: 20000, maxRetries: 0, idempotent: false, requiresApproval: true, routine: true },
   { ...READ_DEFAULTS, name: "get_communication_channels", summary: "Connected channels and team routes.", requiredPermission: "portfolio.read" },
   { ...READ_DEFAULTS, name: "list_conversations", summary: "Real workspace conversations.", requiredPermission: "portfolio.read" },
   { ...READ_DEFAULTS, name: "request_execution_plan", summary: "Approve exact actions in a task plan.", requiredPermission: "preferences.write", requiresApproval: true },
   { ...READ_DEFAULTS, name: "get_marketing_channels", summary: "Marketing channel readiness.", requiredPermission: "leasing.read" },
-  { name: "publish_listing", summary: "Publish a unit listing to an external marketplace.", riskLevel: "high", mutates: true, requiredPermission: "listing.publish", timeoutMs: 20_000, maxRetries: 0, idempotent: false, requiresApproval: true },
+  { name: "publish_listing", summary: "Publish a unit listing to an external marketplace.", riskLevel: "high", mutates: true, externalEffect: true, requiredPermission: "listing.publish", timeoutMs: 20_000, maxRetries: 0, idempotent: false, requiresApproval: true },
 
   /* ── PMS writes ──────────────────────────────────────────────────────────
    * Ten tools, one machinery. Whether any of them is offered to the model is
@@ -173,22 +184,22 @@ const DESCRIPTORS: ToolDescriptor[] = [
    * system of record is never routine, because the customer — not Aval — is the
    * party who answers for what appears in their PMS.
    */
-  { name: "create_work_order", summary: "Create a work order in the connected PMS.", riskLevel: "high", mutates: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "update_work_order_status", summary: "Change a work order's status in the connected PMS.", riskLevel: "medium", mutates: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "close_work_order", summary: "Close a work order in the connected PMS.", riskLevel: "medium", mutates: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "dispatch_vendor", summary: "Dispatch a vendor to a work order.", riskLevel: "high", mutates: true, requiredPermission: "vendor.dispatch", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "create_work_order", summary: "Create a work order in the connected PMS.", riskLevel: "high", mutates: true, externalEffect: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "update_work_order_status", summary: "Change a work order's status in the connected PMS.", riskLevel: "medium", mutates: true, externalEffect: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "close_work_order", summary: "Close a work order in the connected PMS.", riskLevel: "medium", mutates: true, externalEffect: true, requiredPermission: "pms.maintenance.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "dispatch_vendor", summary: "Dispatch a vendor to a work order.", riskLevel: "high", mutates: true, externalEffect: true, requiredPermission: "vendor.dispatch", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
   // Arrears: a payment plan is a commitment about someone's housing, and a
   // posting lands in a trust ledger. `critical` puts both behind the elevated
   // approval tier (two distinct approvers) rather than a single sign-off.
-  { name: "create_payment_plan", summary: "Record a payment plan against a delinquent account.", riskLevel: "critical", mutates: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "post_payment", summary: "Post a payment to a resident ledger in the connected PMS.", riskLevel: "critical", mutates: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "create_payment_plan", summary: "Record a payment plan against a delinquent account.", riskLevel: "critical", mutates: true, externalEffect: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "post_payment", summary: "Post a payment to a resident ledger in the connected PMS.", riskLevel: "critical", mutates: true, externalEffect: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
   // Leasing: the two applicant-facing tools are also in
   // MANDATORY_HUMAN_CHECKPOINT, which is enforced independently of this flag so
   // that no future edit here can make them autonomous.
-  { name: "reply_to_inquiry", summary: "Reply to a leasing inquiry through the connected PMS.", riskLevel: "high", mutates: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "book_viewing", summary: "Book a viewing in the connected PMS calendar.", riskLevel: "medium", mutates: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "send_application", summary: "Send a rental application to a prospect.", riskLevel: "high", mutates: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "update_lease_status", summary: "Update a lease's status in the connected PMS.", riskLevel: "high", mutates: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "reply_to_inquiry", summary: "Reply to a leasing inquiry through the connected PMS.", riskLevel: "high", mutates: true, externalEffect: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "book_viewing", summary: "Book a viewing in the connected PMS calendar.", riskLevel: "medium", mutates: true, externalEffect: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "send_application", summary: "Send a rental application to a prospect.", riskLevel: "high", mutates: true, externalEffect: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  { name: "update_lease_status", summary: "Update a lease's status in the connected PMS.", riskLevel: "high", mutates: true, externalEffect: true, requiredPermission: "pms.leasing.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
 
   {
     name: "authorize_vendor_spend",
@@ -204,7 +215,7 @@ const DESCRIPTORS: ToolDescriptor[] = [
     timeoutMs: 30_000, maxRetries: 0, idempotent: false, requiresApproval: true, unimplemented: true,
     financial: { amountField: "amount_cents", currencyField: "currency", accountField: "destination_account_id", allowedCurrencies: ["USD", "MXN"] },
   },
-  { name: "execute_lease", summary: "Countersign and execute a lease.", riskLevel: "critical", mutates: true, requiredPermission: "lease.execute", timeoutMs: 30_000, maxRetries: 0, idempotent: false, requiresApproval: true, unimplemented: true },
+  { name: "execute_lease", summary: "Countersign and execute a lease.", riskLevel: "critical", mutates: true, externalEffect: true, requiredPermission: "lease.execute", timeoutMs: 30_000, maxRetries: 0, idempotent: false, requiresApproval: true, unimplemented: true },
 ];
 
 export const TOOL_REGISTRY: ReadonlyMap<string, ToolDescriptor> = new Map(DESCRIPTORS.map((tool) => [tool.name, tool]));
