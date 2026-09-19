@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /** Copies reviewed Drizzle SQL into Supabase's timestamped migration format. */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { writeMigration } from "./write-migration.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -27,9 +28,15 @@ function placeUniqueIndexesBeforeForeignKeys(sql) {
 }
 
 await mkdir(destination, { recursive: true });
+const outcomes = [];
 for (const [input, output] of files) {
   const sql = await readFile(path.join(source, input), "utf8");
   const postgresSql = placeUniqueIndexesBeforeForeignKeys(sql);
-  await writeFile(path.join(destination, output), `-- Generated from db/postgres/migrations/${input}.\n${postgresSql}`);
+  outcomes.push([output, await writeMigration(
+    path.join(destination, output),
+    `-- Generated from db/postgres/migrations/${input}.\n${postgresSql}`,
+  )]);
 }
-console.log(`Published ${files.length} timestamped Supabase migrations`);
+// Says what happened rather than "published", because "unchanged" is the
+// normal result once a baseline has shipped and is worth seeing.
+console.log(outcomes.map(([file, outcome]) => `${outcome}: ${file}`).join("\n"));
