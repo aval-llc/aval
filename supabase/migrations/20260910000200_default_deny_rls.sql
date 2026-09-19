@@ -194,30 +194,6 @@ CREATE POLICY "agent_checks_delete" ON public."agent_checks"
   FOR DELETE TO aval_app
   USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
 
-ALTER TABLE public."agent_deployments" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."agent_deployments" FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "agent_deployments_select" ON public."agent_deployments";
-CREATE POLICY "agent_deployments_select" ON public."agent_deployments"
-  FOR SELECT TO aval_app
-  USING (aval_private.has_org_access(organization_id));
-
-DROP POLICY IF EXISTS "agent_deployments_insert" ON public."agent_deployments";
-CREATE POLICY "agent_deployments_insert" ON public."agent_deployments"
-  FOR INSERT TO aval_app
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "agent_deployments_update" ON public."agent_deployments";
-CREATE POLICY "agent_deployments_update" ON public."agent_deployments"
-  FOR UPDATE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']))
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "agent_deployments_delete" ON public."agent_deployments";
-CREATE POLICY "agent_deployments_delete" ON public."agent_deployments"
-  FOR DELETE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
 ALTER TABLE public."agent_execution_policies" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."agent_execution_policies" FORCE ROW LEVEL SECURITY;
 
@@ -1058,30 +1034,6 @@ CREATE POLICY "organization_members_delete" ON public."organization_members"
   FOR DELETE TO aval_app
   USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
 
-ALTER TABLE public."organization_seat_slugs" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."organization_seat_slugs" FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "organization_seat_slugs_select" ON public."organization_seat_slugs";
-CREATE POLICY "organization_seat_slugs_select" ON public."organization_seat_slugs"
-  FOR SELECT TO aval_app
-  USING (aval_private.has_org_access(organization_id));
-
-DROP POLICY IF EXISTS "organization_seat_slugs_insert" ON public."organization_seat_slugs";
-CREATE POLICY "organization_seat_slugs_insert" ON public."organization_seat_slugs"
-  FOR INSERT TO aval_app
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "organization_seat_slugs_update" ON public."organization_seat_slugs";
-CREATE POLICY "organization_seat_slugs_update" ON public."organization_seat_slugs"
-  FOR UPDATE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']))
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "organization_seat_slugs_delete" ON public."organization_seat_slugs";
-CREATE POLICY "organization_seat_slugs_delete" ON public."organization_seat_slugs"
-  FOR DELETE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
 ALTER TABLE public."ownership_entities" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."ownership_entities" FORCE ROW LEVEL SECURITY;
 
@@ -1151,126 +1103,6 @@ CREATE POLICY "planning_projects_update" ON public."planning_projects"
 
 DROP POLICY IF EXISTS "planning_projects_delete" ON public."planning_projects";
 CREATE POLICY "planning_projects_delete" ON public."planning_projects"
-  FOR DELETE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-ALTER TABLE public."pms_action_flows" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."pms_action_flows" FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "pms_action_flows_select" ON public."pms_action_flows";
-CREATE POLICY "pms_action_flows_select" ON public."pms_action_flows"
-  FOR SELECT TO aval_app
-  USING (aval_private.has_org_access(organization_id));
-
-DROP POLICY IF EXISTS "pms_action_flows_insert" ON public."pms_action_flows";
-CREATE POLICY "pms_action_flows_insert" ON public."pms_action_flows"
-  FOR INSERT TO aval_app
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_action_flows_update" ON public."pms_action_flows";
-CREATE POLICY "pms_action_flows_update" ON public."pms_action_flows"
-  FOR UPDATE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']))
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_action_flows_delete" ON public."pms_action_flows";
-CREATE POLICY "pms_action_flows_delete" ON public."pms_action_flows"
-  FOR DELETE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-ALTER TABLE public."pms_seat_messages" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."pms_seat_messages" FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "pms_seat_messages_select" ON public."pms_seat_messages";
-CREATE POLICY "pms_seat_messages_select" ON public."pms_seat_messages"
-  FOR SELECT TO aval_app
-  USING (aval_private.has_org_access(organization_id));
-
-DROP POLICY IF EXISTS "pms_seat_messages_insert" ON public."pms_seat_messages";
-CREATE POLICY "pms_seat_messages_insert" ON public."pms_seat_messages"
-  FOR INSERT TO aval_app
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_seat_messages_update" ON public."pms_seat_messages";
-CREATE POLICY "pms_seat_messages_update" ON public."pms_seat_messages"
-  FOR UPDATE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']))
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_seat_messages_delete" ON public."pms_seat_messages";
-CREATE POLICY "pms_seat_messages_delete" ON public."pms_seat_messages"
-  FOR DELETE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-ALTER TABLE public."pms_seat_senders" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."pms_seat_senders" FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "pms_seat_senders_select" ON public."pms_seat_senders";
-CREATE POLICY "pms_seat_senders_select" ON public."pms_seat_senders"
-  FOR SELECT TO aval_app
-  USING (aval_private.has_org_access(organization_id));
-
-DROP POLICY IF EXISTS "pms_seat_senders_insert" ON public."pms_seat_senders";
-CREATE POLICY "pms_seat_senders_insert" ON public."pms_seat_senders"
-  FOR INSERT TO aval_app
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_seat_senders_update" ON public."pms_seat_senders";
-CREATE POLICY "pms_seat_senders_update" ON public."pms_seat_senders"
-  FOR UPDATE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']))
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_seat_senders_delete" ON public."pms_seat_senders";
-CREATE POLICY "pms_seat_senders_delete" ON public."pms_seat_senders"
-  FOR DELETE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-ALTER TABLE public."pms_write_authorizations" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."pms_write_authorizations" FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "pms_write_authorizations_select" ON public."pms_write_authorizations";
-CREATE POLICY "pms_write_authorizations_select" ON public."pms_write_authorizations"
-  FOR SELECT TO aval_app
-  USING (aval_private.has_org_access(organization_id));
-
-DROP POLICY IF EXISTS "pms_write_authorizations_insert" ON public."pms_write_authorizations";
-CREATE POLICY "pms_write_authorizations_insert" ON public."pms_write_authorizations"
-  FOR INSERT TO aval_app
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_write_authorizations_update" ON public."pms_write_authorizations";
-CREATE POLICY "pms_write_authorizations_update" ON public."pms_write_authorizations"
-  FOR UPDATE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']))
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_write_authorizations_delete" ON public."pms_write_authorizations";
-CREATE POLICY "pms_write_authorizations_delete" ON public."pms_write_authorizations"
-  FOR DELETE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-ALTER TABLE public."pms_write_queue" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public."pms_write_queue" FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "pms_write_queue_select" ON public."pms_write_queue";
-CREATE POLICY "pms_write_queue_select" ON public."pms_write_queue"
-  FOR SELECT TO aval_app
-  USING (aval_private.has_org_access(organization_id));
-
-DROP POLICY IF EXISTS "pms_write_queue_insert" ON public."pms_write_queue";
-CREATE POLICY "pms_write_queue_insert" ON public."pms_write_queue"
-  FOR INSERT TO aval_app
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_write_queue_update" ON public."pms_write_queue";
-CREATE POLICY "pms_write_queue_update" ON public."pms_write_queue"
-  FOR UPDATE TO aval_app
-  USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']))
-  WITH CHECK (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
-
-DROP POLICY IF EXISTS "pms_write_queue_delete" ON public."pms_write_queue";
-CREATE POLICY "pms_write_queue_delete" ON public."pms_write_queue"
   FOR DELETE TO aval_app
   USING (aval_private.has_org_role(organization_id, ARRAY['org_admin','regional_manager','property_manager','operator']));
 
