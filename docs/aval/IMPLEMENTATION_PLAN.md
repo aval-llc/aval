@@ -234,3 +234,30 @@ Added with the milestone that makes each reachable, not deferred to the end:
 
 Never using real resident communications, payments, lease changes, or vendor
 commitments as test actions. Fixtures and provider sandboxes only.
+
+---
+
+## Revision — AI-employees directive
+
+M0 and M1 are complete. M2 is complete for the two states the verification loop
+needs (`PENDING_VERIFICATION`, `WAITING_FOR_HUMAN`); `WAITING_FOR_EXTERNAL` and
+`SCHEDULED` remain, and should be added only with their wake-up semantics
+rather than declared.
+
+The PostgreSQL dependency that blocked M0's acceptance is resolved:
+`npm run test:postgres:local`.
+
+### Re-ordered remaining work
+
+| Milestone | Directive | Why here |
+|---|---|---|
+| **M4′** `Evidence` record contract | §10 | The state exists; the normalized record that satisfies a criterion does not. Smallest step that makes verification mean something beyond "an effect happened" |
+| **M5′** Event envelope + transactional outbox | §5.2 | Intake is one producer; the envelope and outbox generalize it. Required before more event sources |
+| **M3′** `WorkItem` / `TaskRun` split | §6 | Employee ownership needs a work object that is not a run |
+| **M9** Employee + responsibility model | §6 | Depends on M3′ |
+| **M10** Expertise registry + legacy persona adapters | §6, §13 | Additive behind flags; personas map to expertise definitions |
+| **M11** Expertise selection and bounded child runs | §8 | Depends on M10 |
+| **M12** Cross-employee collaboration | §9 | Depends on M9, M11 |
+| **M13** Interface: Ask Aval assignment, Your AI Team | §12 | Last; depends on everything above having real state to show |
+
+M9–M13 are the bulk of the directive and are not started.

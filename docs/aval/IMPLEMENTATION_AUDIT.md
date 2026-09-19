@@ -536,3 +536,77 @@ disposable local PostgreSQL database`. Every database-backed proof the brief
 asks for — duplicate event, crash resume, timeout reconciliation, read-only
 handoff, parent-stays-open — requires that. The logic is implemented and
 unit-tested; it is **not** integration-verified.
+
+---
+
+# Part III — AI-employees directive reconciliation
+
+**Date:** 2026-09-18. Against `AVAL_AI_EMPLOYEES_IMPLEMENTATION_DIRECTIVE.md` v1.0.
+
+## 9. Baseline verification (directive §4)
+
+Verified against the actual repository, not the reported summary. Branch
+`feat/aval-agent-architecture`, clean tree, `7d4cea5` present with `ef399d2`
+beneath it. All reported files exist; `canOrchestrate` is referenced at both
+enforcement points (`task-boundary.ts`, `goal-plan.ts`); `intakeEvent` is
+referenced in the adjudicate route. The reported baseline is accurate.
+
+## 10. The PostgreSQL gap is closed (directive §14)
+
+No container runtime is available on this machine (no docker, podman, colima,
+nerdctl). PostgreSQL 16.15 is installed natively via Homebrew, so a cluster was
+provisioned directly instead.
+
+`scripts/test-database.mjs` creates a disposable cluster with its own data
+directory under the OS temp area, its own port (55433), and loopback-only trust
+auth. It never touches an existing cluster, database, or port 5432, and removes
+only what it created. The socket lives on a short path because PostgreSQL
+rejects a socket path over 103 bytes and the data directory path exceeds it.
+
+`npm run test:postgres:local` resets and runs the lane in one command.
+
+**Result: 61 integration tests, 61 pass, 0 fail.** The lane had never run here.
+
+## 11. Verified against a real database
+
+| Directive §15 scenario | Status | Evidence |
+|---|---|---|
+| Verified PMS intake creates durable owned work, wakes runtime without chat | **implemented and tested** | `intake-cases.mjs` — QUEUED, coordinator-owned, plan check |
+| Concurrent duplicate delivery → one work item | **implemented and tested** | Two concurrent `intakeEvent` calls resolve to one row, decided by the primary key |
+| Redelivery → attaches, does not duplicate | **implemented and tested** | `intake-cases.mjs` |
+| Inbound claim does not become authority | **implemented and tested** | unverified/quarantined never reach the database |
+| Tenant boundary on derived identity | **implemented and tested** | derived id is organization-scoped |
+| Accepted but unconfirmed write stays pending | **implemented and tested** | `verification-cases.mjs`, state-machine property tests |
+| Parent cannot complete prematurely | **partial** | Verification gate holds the parent; child-dependency gating not re-verified this pass |
+
+## 12. A defect the integration lane caught
+
+The first `PENDING_VERIFICATION` implementation keyed off `ToolDescriptor.mutates`
+and held **every planned task** at `PENDING_VERIFICATION`. `plan_goal` is
+`mutates: true` — it creates child tasks and reserves an idempotency key — but
+nothing leaves Aval, so the write succeeding is the proof.
+
+Unit tests did not catch this; the planner integration case did, immediately.
+That is the argument for §14 in one example: the guarantee is transactional, so
+only a database can falsify it. `ToolDescriptor.externalEffect` now marks the
+fourteen tools that genuinely reach a provider, and verification keys off that.
+
+## 13. Not implemented from this directive
+
+Stages C, D and E are not started. Nothing in this session created an employee
+model, an expertise registry, routing by expertise, cross-employee
+collaboration, or any interface change.
+
+| Directive area | Status |
+|---|---|
+| §6 Employee / responsibility / expertise contracts | **not started** |
+| §8 Automatic expertise selection | **not started** |
+| §9 Coordination between employees | **not started** |
+| §12 Product interface (Ask Aval, Your AI Team, expertise library) | **not started** |
+| §13 Migration and compatibility (persona → expertise) | **not started** |
+| §5.2 Transactional outbox / event envelope | **not started** |
+| §10 `Evidence` record contract | **not started** — the state exists, the normalized record does not |
+| §5.1 Shared state source ownership and freshness | **not started** |
+
+The eight personas remain the roster. No hardcoded ceiling was removed because
+none was touched.
