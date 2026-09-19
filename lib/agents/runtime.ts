@@ -49,6 +49,7 @@ import { executeApprovedTool, executeTool, redactArguments } from "./executor.ts
 import { allowedToolNames } from "./policy.ts";
 import { requestApproval, latestApprovalForTask, type ApprovalRecord } from "./approvals.ts";
 import { approvalMatchesToolUse } from "./approval-binding.ts";
+import { payloadHash } from "./canonical-payload.ts";
 import { evidenceNumbersFromTranscript } from "./transcript-evidence.ts";
 import {
   appendStep,
@@ -530,7 +531,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
             // Bind the human decision to this exact model proposal. Tool name
             // alone is insufficient because one assistant message may contain
             // two calls to the same financial tool with different arguments.
-            evidence: { toolUseId: use.id, goal: task.goal, agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
+            evidence: { toolUseId: use.id, payloadHash: await payloadHash(use.input), goal: task.goal, agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
             amountCents: typeof use.input.amount_cents === "number" ? use.input.amount_cents : undefined,
             currency: typeof use.input.currency === "string" ? use.input.currency : undefined,
             tier: result.tier,
@@ -647,7 +648,7 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
 
   const results: ContentBlock[] = [];
   for (const use of toolUses) {
-    const isGatedCall = approvalMatchesToolUse(approval.evidenceJson, use, approval.toolName);
+    const isGatedCall = await approvalMatchesToolUse(approval.evidenceJson, use, approval.toolName);
 
     if (isGatedCall && approval.status !== "approved") {
       const refusal = approval.status === "rejected"
