@@ -53,6 +53,14 @@ export interface NewTask {
   organizationId: string;
   userId: string;
   agentId: string;
+  /**
+   * The employee that owns this work.
+   *
+   * Optional while the built-in personas are still addressed by `agentId`.
+   * Where it is set, it is the durable answer to "who is doing this" and
+   * survives every restart — nothing re-derives it.
+   */
+  employeeId?: string | null;
   goal: string;
   check: TaskCheck;
   deadlineAt?: Date;
@@ -63,6 +71,8 @@ export interface NewTask {
 }
 
 export interface TaskRecord {
+  /** The employee that owns this work, where one does. */
+  employeeId: string | null;
   id: string;
   organizationId: string;
   userId: string;
@@ -104,6 +114,7 @@ export async function createTask(dbSession: DbSession, input: NewTask): Promise<
     organizationId: input.organizationId,
     userId: input.userId,
     agentId: input.agentId,
+    employeeId: input.employeeId ?? null,
     goal: input.goal,
     status: "QUEUED" as const,
     transcriptJson: "[]",

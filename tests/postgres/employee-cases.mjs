@@ -7,6 +7,9 @@ import {
   canTransitionEmployee, EmployeeQuotaError, EmployeeHasOpenWorkError, InvalidEmployeeInputError,
 } from "../../lib/agents/employees.ts";
 import { createTask, getTask } from "../../lib/agents/tasks.ts";
+import { assembleToolset } from "../../lib/agents/toolset.ts";
+import { TOOLS } from "../../lib/ask-aval/tools.ts";
+import { getPersona } from "../../lib/ask-aval/personas.ts";
 
 /**
  * AI employees as durable actors.
@@ -172,6 +175,45 @@ export async function runEmployeeCases(t, { session, userA, userB, administrator
     assert.equal(archived.status, "archived");
     await assert.rejects(run((s, org) => updateEmployee(s, org, employee.id, { role: "Rewritten" })), InvalidEmployeeInputError);
     assert.ok(await run((s, org) => getEmployee(s, org, employee.id)), "an archived employee is still part of the record");
+  });
+
+  await t.test("work records its owner at creation and keeps it across a restart", async () => {
+    const employee = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Durable owner", role: "Coordinator", status: "active",
+    }));
+    const task = await run((s, org) => createTask(s, {
+      organizationId: org, userId: userA, agentId: "maintenance", employeeId: employee.id,
+      goal: "Owned from the start",
+      check: { kind: "evidence", tools: ["get_portfolio_metrics"] },
+    }));
+    assert.equal(task.employeeId, employee.id, "ownership is durable from creation");
+
+    // A restart re-reads the row rather than re-deriving who owns it.
+    const reloaded = await run((s, org) => getTask(s, org, task.id));
+    assert.equal(reloaded.employeeId, employee.id);
+    assert.equal(reloaded.goal, task.goal, "and the objective comes back with it");
+  });
+
+  await t.test("an employee's capability grants decide what its work is offered", async () => {
+    // The join that makes scopes mean something: a grant of one capability is a
+    // grant of exactly that one.
+    const narrow = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Narrowly scoped", role: "Reader", status: "active",
+      scopes: [{ kind: "capability", value: "get_portfolio_metrics" }],
+    }));
+    const scopes = await run((s, org) => employeeScopes(s, org, narrow.id));
+    const { tools } = await run((s, org) => assembleToolset(s, {
+      organizationId: org,
+      subject: { organizationId: org, userId: userA, isGuest: false },
+      agentId: "maintenance", persona: getPersona("maintenance"),
+      baseTools: TOOLS, finalToolName: "render_answer",
+      employeeCapabilities: scopes.capability ?? [],
+    }));
+    const offered = new Set(tools.map((tool) => tool.name));
+    assert.ok(offered.has("get_portfolio_metrics"), "the granted capability is offered");
+    assert.ok(offered.has("render_answer"), "and the model can always conclude");
+    assert.equal(offered.has("get_delinquent_accounts"), false, "an ungranted capability is absent");
+    assert.equal(offered.size, 2, "nothing arrived that nobody granted");
   });
 
   await t.test("work is never handed to an employee that cannot run it", async () => {

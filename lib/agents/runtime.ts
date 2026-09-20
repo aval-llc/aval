@@ -63,6 +63,8 @@ import {
 } from "./tasks.ts";
 import { planEvidence } from "./autonomy-storage";
 import { assembleToolset } from "./toolset.ts";
+import { employeeScopes, getEmployee } from "./employees.ts";
+import { selectExpertiseForWork } from "./expertise.ts";
 import { budgetExhausted, detectStagnation, nextDelayMs, resolveAttemptPolicy, type EscalationBehavior } from "./attempt-policy.ts";
 import { loadAttemptPolicies } from "./attempt-policy-store.ts";
 import { attemptSignature, attemptSpend, attemptTraces, recordWorkAttempt } from "./work-attempts.ts";
@@ -167,12 +169,36 @@ export async function advanceTask(dbSession: DbSession,
   // (framing) and the permission envelope (authority). The envelope is the
   // ceiling — a persona listing a tool it has no permission for gets it
   // removed here, not granted.
+  // The employee that owns this work, where one does. Work created before
+  // employees existed, and work still addressed by a built-in persona, has no
+  // owner and is governed exactly as it was.
+  const owner = task.employeeId
+    ? await getEmployee(dbSession, organizationId, task.employeeId)
+    : null;
+
+  // What this employee may reach, and what it knows. Both narrow and neither
+  // widens: an employee with no capability grants is offered nothing, because
+  // absence of a grant is never permission.
+  const scopes = owner ? await employeeScopes(dbSession, organizationId, owner.id) : null;
+  const expertise = owner
+    ? await selectExpertiseForWork(dbSession, organizationId, {
+        taskId, employeeId: owner.id,
+        signals: {
+          objective: task.goal,
+          workType: taskCheckKind(task.checkJson ?? null),
+          domains: scopes?.data_domain ?? [],
+          availableCapabilities: scopes?.capability ?? [],
+        },
+      })
+    : null;
+
   // Persona framing, permission envelope and the PMS capability matrix, in one
   // place shared with the chat and draft paths — see lib/agents/toolset.ts on
   // why there is exactly one of these now.
   const assembled = await assembleToolset(dbSession, {
     organizationId, subject, agentId: task.agentId, persona,
     baseTools: TOOLS, finalToolName: "render_answer",
+    employeeCapabilities: scopes?.capability ?? null,
   });
   let tools: ToolSchema[] = assembled.tools;
   const evidenceCapabilities = tools.flatMap(tool => {
@@ -525,6 +551,14 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
   try {
     try{parseTaskCheck(contract);}catch{return finish('FAILED',{error:'This legacy task needs an explicit completion condition before it can run.'});}
     if(readiness.failure)return finish('FAILED',{error:readiness.failure});
+    // A paused employee stops taking on execution; an archived one has stopped
+    // entirely. Neither is a failure of the work, so it waits for a person
+    // rather than being marked failed for something its owner did.
+    if (owner && owner.status !== 'active') {
+      return finish('WAITING_FOR_HUMAN', {
+        error: `${owner.name} is ${owner.status} and is not running work. Resume the employee, or reassign this work to one that is active.`,
+      });
+    }
     // Answer the proposal the run parked on, before asking the model anything
     // else. Until this happens the transcript ends on an unanswered tool_use,
     // which no provider will accept as a valid conversation.
@@ -850,6 +884,14 @@ async function resumeFromApproval(dbSession: DbSession,
  * a read is idempotent by construction, and a mutating one recomputes the same
  * key and is suppressed as a duplicate rather than executed twice.
  */
+/** The completion contract's kind, for routing. Unparseable is simply unknown. */
+function taskCheckKind(checkJson: string | null): string | null {
+  try {
+    const parsed = JSON.parse(checkJson ?? "{}") as { kind?: unknown };
+    return typeof parsed.kind === "string" ? parsed.kind : null;
+  } catch { return null; }
+}
+
 async function settleDecidedApproval(dbSession: DbSession, input: {
   organizationId: string;
   taskId: string;
