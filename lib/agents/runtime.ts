@@ -37,16 +37,13 @@ import type { AskAvalEnv, ContentBlock, Message, ToolSchema, ToolUseBlock } from
 import { ModelProviderError } from "@/lib/ask-aval/model-types";
 import { callModel } from "@/lib/ask-aval/model-router";
 import { TOOLS, TOOL_SCHEMAS } from "@/lib/ask-aval/tools";
-import { pmsToolAvailability } from "@/lib/pms/assembly.ts";
-import { isPmsWriteTool } from "@/lib/pms/tool-map.ts";
-import { personaTools, resolvePersona } from "@/lib/ask-aval/personas";
+import { resolvePersona } from "@/lib/ask-aval/personas";
 import { withDerivedNumbers, round2 } from "@/lib/ask-aval/faithfulness";
 import { stripDashes } from "@/lib/ask-aval/style";
 import { checkUsageBlocked, recordUsage } from "@/lib/ask-aval/usage";
 import { appendAuditEvents } from "@/lib/audit/log";
 import { digestPayload, type AuditEvent } from "@/lib/audit/chain";
 import { executeApprovedTool, executeTool, redactArguments } from "./executor.ts";
-import { allowedToolNames } from "./policy.ts";
 import { requestApproval, latestApprovalForTask, type ApprovalRecord } from "./approvals.ts";
 import { approvalMatchesToolUse } from "./approval-binding.ts";
 import { pendingExecutions, unverifiedExternalEffects, verifyExternalEffects } from "./verification.ts";
@@ -65,6 +62,7 @@ import {
   type TaskState,
 } from "./tasks.ts";
 import { planEvidence } from "./autonomy-storage";
+import { assembleToolset } from "./toolset.ts";
 import { budgetExhausted, detectStagnation, nextDelayMs, resolveAttemptPolicy, type EscalationBehavior } from "./attempt-policy.ts";
 import { loadAttemptPolicies } from "./attempt-policy-store.ts";
 import { attemptSignature, attemptSpend, attemptTraces, recordWorkAttempt } from "./work-attempts.ts";
@@ -169,20 +167,14 @@ export async function advanceTask(dbSession: DbSession,
   // (framing) and the permission envelope (authority). The envelope is the
   // ceiling — a persona listing a tool it has no permission for gets it
   // removed here, not granted.
-  const permitted = new Set(allowedToolNames(task.agentId, subject));
-  // The third narrowing, and the only one that varies per customer and per
-  // provider: the capability matrix. A PMS write tool is *assembled in* only
-  // when the provider supports and permits the action, the connection grants it,
-  // the workspace enabled it, and Aval has built the path. For an AppFolio org
-  // `create_work_order` is absent from this list, not refused later — a tool
-  // that does not exist cannot be reached by a prompt injection.
-  // Scoped to this agent's deployments: which PMS it works inside and which
-  // workflows it owns there. A workspace with no deployments configured is
-  // unchanged; one with any is governed by them (lib/pms/deployments.ts).
-  const pmsAvailability = await pmsToolAvailability(dbSession, organizationId, task.agentId);
-  let tools: ToolSchema[] = personaTools(TOOLS, persona, "render_answer")
-    .filter((tool) => tool.name === "render_answer" || permitted.has(tool.name))
-    .filter((tool) => !isPmsWriteTool(tool.name) || pmsAvailability.toolNames.has(tool.name));
+  // Persona framing, permission envelope and the PMS capability matrix, in one
+  // place shared with the chat and draft paths — see lib/agents/toolset.ts on
+  // why there is exactly one of these now.
+  const assembled = await assembleToolset(dbSession, {
+    organizationId, subject, agentId: task.agentId, persona,
+    baseTools: TOOLS, finalToolName: "render_answer",
+  });
+  let tools: ToolSchema[] = assembled.tools;
   const evidenceCapabilities = tools.flatMap(tool => {
     const descriptor = getTool(tool.name);
     return descriptor && !descriptor.mutates && !descriptor.unimplemented && descriptor.requiredPermission !== 'tasks.manage'

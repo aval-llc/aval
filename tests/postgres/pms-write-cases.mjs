@@ -10,6 +10,10 @@ import { registerWriteAdapter } from "../../lib/pms/flows.ts";
 import { ensurePmsAdaptersRegistered } from "../../lib/pms/register.ts";
 import { unverifiedExternalEffects, verifyExternalEffects } from "../../lib/agents/verification.ts";
 import { registerSimulatedProvider } from "../../lib/pms/adapters/simulator.ts";
+import { assembleToolset } from "../../lib/agents/toolset.ts";
+import { TOOLS } from "../../lib/ask-aval/tools.ts";
+import { getPersona } from "../../lib/ask-aval/personas.ts";
+import { PMS_WRITE_TOOLS } from "../../lib/pms/tool-map.ts";
 import { attemptSignature, attemptSpend, attemptTraces, recordWorkAttempt } from "../../lib/agents/work-attempts.ts";
 import { budgetExhausted, detectStagnation, nextDelayMs, resolveAttemptPolicy } from "../../lib/agents/attempt-policy.ts";
 import { payloadHash } from "../../lib/agents/canonical-payload.ts";
@@ -334,6 +338,55 @@ export async function runPmsWriteCases(t, { session, userA, propertyId, administ
     assert.notEqual(saved.status, "COMPLETED");
     assert.notEqual(saved.status, "FAILED");
     simulator.setReachable(true);
+  });
+
+  await t.test("a tool the persona may not use is absent, not merely refused", async () => {
+    // The chat path used to offer every schema in the registry, because the
+    // default persona declares no subset and nothing else narrowed it. Those
+    // writes could not execute, but the model was carrying the knowledge that
+    // it must not call them, which is exactly the responsibility the directive
+    // says it must never hold.
+    const general = getPersona("general");
+    const { tools, excluded } = await run((s, org) => assembleToolset(s, {
+      organizationId: org,
+      subject: { organizationId: org, userId: userA, isGuest: false },
+      agentId: "general", persona: general,
+      baseTools: TOOLS, finalToolName: "render_answer",
+    }));
+    const offered = new Set(tools.map((tool) => tool.name));
+    for (const writeTool of Object.keys(PMS_WRITE_TOOLS)) {
+      assert.equal(offered.has(writeTool), false, `${writeTool} must not be offered to general`);
+      assert.ok(excluded[writeTool], `${writeTool} exclusion is on the record`);
+    }
+    assert.ok(offered.has("render_answer"), "the model can always conclude");
+    assert.ok(offered.size > 1, "narrowing is not the same as offering nothing");
+  });
+
+  await t.test("a maintenance persona is offered the write its provider actually supports", async () => {
+    // Same assembler, different envelope: the narrowing is real in both
+    // directions, so this is not merely a blanket refusal.
+    const maintenance = getPersona("maintenance");
+    const { tools } = await run((s, org) => assembleToolset(s, {
+      organizationId: org,
+      subject: { organizationId: org, userId: userA, isGuest: false },
+      agentId: "maintenance", persona: maintenance,
+      baseTools: TOOLS, finalToolName: "render_answer",
+    }));
+    assert.ok(tools.some((tool) => tool.name === "create_work_order"),
+      "the connected, authorized provider action is assembled in");
+  });
+
+  await t.test("an employee granted nothing is offered nothing beyond concluding", async () => {
+    // Absence of a grant is never permission.
+    const maintenance = getPersona("maintenance");
+    const { tools } = await run((s, org) => assembleToolset(s, {
+      organizationId: org,
+      subject: { organizationId: org, userId: userA, isGuest: false },
+      agentId: "maintenance", persona: maintenance,
+      baseTools: TOOLS, finalToolName: "render_answer",
+      employeeCapabilities: [],
+    }));
+    assert.deepEqual(tools.map((tool) => tool.name), ["render_answer"]);
   });
 
   await t.test("repeating one failed strategy is caught before the budget is gone", async () => {
