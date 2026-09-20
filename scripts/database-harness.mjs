@@ -56,7 +56,10 @@ function running() {
   }
 }
 
-function start() {
+// Bringing the cluster up is separate from announcing it: `reset` needs the
+// first without the second, or a cold `reset` prints the URL twice and the
+// caller's `$(...)` captures both lines as one unusable connection string.
+function ensureStarted() {
   mkdirSync(SOCKET, { recursive: true });
   if (!existsSync(PGDATA)) {
     mkdirSync(ROOT, { recursive: true });
@@ -78,11 +81,15 @@ function start() {
   if (psql("postgres", `SELECT 1 FROM pg_database WHERE datname='${DATABASE}'`) !== "1") {
     run("createdb", ["-h", "127.0.0.1", "-p", PORT, "-U", SUPERUSER, DATABASE]);
   }
+}
+
+function start() {
+  ensureStarted();
   process.stdout.write(`${url()}\n`);
 }
 
 function reset() {
-  if (!running()) start();
+  ensureStarted();
   // The suite asserts a fresh database; a previous run's schema fails it.
   psql("postgres", `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DATABASE}' AND pid <> pg_backend_pid()`);
   run("dropdb", ["-h", "127.0.0.1", "-p", PORT, "-U", SUPERUSER, "--if-exists", DATABASE]);
