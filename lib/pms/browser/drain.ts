@@ -35,6 +35,37 @@ import {
   type BrowserContext, type ExecutionResult, type ProviderSessionState, type VerificationResult,
 } from "./adapter.ts";
 import { flowDigest, parseFlowSteps, type FlowStep } from "./steps.ts";
+import { awaitsProvider, needsPerson, recordConnectionHealth, stateForSession, type ConnectionState } from "./health.ts";
+import { appendAuditEvents } from "../../audit/log.ts";
+import type { AuditEntryKind } from "../../audit/chain.ts";
+import { payloadHash } from "../../agents/canonical-payload.ts";
+
+/**
+ * Record one moment of a provider browser execution.
+ *
+ * Never throws. A write that happened and an audit line that did not is bad; a
+ * write refused *because* the audit line failed would be worse, and the chain
+ * verifier already reports gaps. The digest covers the subject, never the
+ * payload itself.
+ */
+async function trail(
+  dbSession: DbSession,
+  organizationId: string,
+  kind: AuditEntryKind,
+  label: string,
+  subject: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await appendAuditEvents(dbSession, organizationId, [{
+      kind,
+      label,
+      payloadDigest: await payloadHash(subject),
+      count: 1,
+    }]);
+  } catch {
+    /* The chain verifier reports gaps; losing a line must not lose a write. */
+  }
+}
 
 /** How long a runner holds a queued write before another may take it. */
 const LEASE_MS = 2 * 60 * 1000;
@@ -64,7 +95,16 @@ export interface DrainOutcome {
   externalId?: string;
   reason?: string;
   session?: ProviderSessionState;
-  /** True when a person has to act before this can progress. */
+  /** What this outcome implies about the connection, for the settings panel. */
+  connection?: ConnectionState;
+  /**
+   * True when a person has to act before this can progress.
+   *
+   * A lapsed session is deliberately *not* one of these: somebody signing back
+   * in resumes the work, so the objective waits for the provider rather than
+   * being handed over. Only the states that do not resolve by waiting — a
+   * refused role, a changed page — reach a person.
+   */
   needsHuman?: boolean;
 }
 
@@ -254,6 +294,10 @@ export async function claimForRunner(
     return { outcome: { ...base, status: "denied", reason: "The flow changed after it was approved, so it was not replayed." } };
   }
 
+  await trail(dbSession, organizationId, "provider_work_claimed", `${claimed.provider}:${claimed.action}`, {
+    queueId: claimed.id, runnerId, flowVersion: flowRow.version,
+  });
+
   return {
     instruction: {
       queueId: claimed.id,
@@ -298,6 +342,7 @@ export async function reportRunnerResult(
     .select({
       id: pmsWriteQueue.id,
       action: pmsWriteQueue.action,
+      provider: pmsWriteQueue.provider,
       attempts: pmsWriteQueue.attempts,
       leasedBy: pmsWriteQueue.leasedBy,
       leaseExpiresAt: pmsWriteQueue.leaseExpiresAt,
@@ -321,23 +366,56 @@ export async function reportRunnerResult(
   const action = row.action as PmsAction;
   const base = { queueId: row.id, action };
 
+  // Every report says something about the session, including the ones that say
+  // it is fine. A connection whose health is only written on failure looks
+  // broken forever after one bad afternoon.
+  const observed = report.kind === "not_ready"
+    ? report.session
+    : report.kind === "duplicate" ? "ACTIVE" as const : report.execution.session;
+  const connection = stateForSession(observed);
+  await recordConnectionHealth(dbSession, organizationId, row.provider, {
+    state: connection,
+    detail: report.kind === "not_ready" ? report.reason : undefined,
+    runnerId,
+    // A completed provider operation, not a successful poll. Finding an
+    // existing record counts: it means the device read the provider.
+    verified: report.kind === "duplicate" || (report.kind === "executed" && report.execution.ok),
+  });
+
   if (report.kind === "not_ready") {
-    const needsHuman = UNREPLAYABLE.has(report.session);
-    await settle(dbSession, organizationId, row.id, needsHuman ? "abandoned" : "pending", report.reason ?? "Not ready.");
+    // Waiting is decided by whether the state resolves on its own. A session
+    // that lapsed comes back when somebody signs in; a refused role does not.
+    const waits = awaitsProvider(connection);
+    await trail(dbSession, organizationId, "provider_session_unavailable", `${row.provider}:${connection}`, {
+      queueId: row.id, runnerId, session: report.session,
+    });
+    if (needsPerson(connection)) {
+      await trail(dbSession, organizationId, "provider_human_handoff", `${row.provider}:${connection}`, {
+        queueId: row.id, runnerId,
+      });
+    }
+    await settle(dbSession, organizationId, row.id, waits ? "pending" : "abandoned", report.reason ?? "Not ready.");
     return {
       ...base,
-      status: needsHuman ? "denied" : "deferred",
+      status: waits ? "deferred" : "denied",
       reason: report.reason,
       session: report.session,
-      needsHuman,
+      connection,
+      // Both are reported. A lapsed session is work that waits *and* a person
+      // who has to sign in; saying only one of those strands the other.
+      needsHuman: needsPerson(connection),
     };
   }
 
   if (report.kind === "duplicate") {
+    await trail(dbSession, organizationId, "provider_duplicate_reconciled", `${row.provider}:${action}`, {
+      queueId: row.id, runnerId, externalId: report.externalId,
+    });
     await settle(dbSession, organizationId, row.id, "done", null);
     return {
       ...base,
       status: "duplicate",
+      connection,
       externalId: report.externalId,
       reason: `The provider already holds this record (matched on ${report.matchedOn.join(", ")}). Nothing was submitted.`,
     };
@@ -345,30 +423,59 @@ export async function reportRunnerResult(
 
   const { execution, verification } = report;
   if (!execution.ok) {
+    await trail(
+      dbSession, organizationId,
+      connection === "UI_CHANGED" ? "provider_flow_broken" : "provider_execution_failed",
+      `${row.provider}:${action}`,
+      { queueId: row.id, runnerId, session: execution.session },
+    );
     const exhausted = row.attempts >= MAX_ATTEMPTS;
     const retryable = execution.retryable === true && !exhausted;
+    // The handoff is its own line wherever it happens, so "who has this now"
+    // can be answered from the chain without reading the failure reasons and
+    // deciding which of them implied a person.
+    if (needsPerson(connection) || !retryable) {
+      await trail(dbSession, organizationId, "provider_human_handoff", `${row.provider}:${action}`, {
+        queueId: row.id, runnerId, session: execution.session,
+      });
+    }
     await settle(dbSession, organizationId, row.id, retryable ? "pending" : "failed", execution.error ?? "The workflow did not complete.");
     return {
       ...base,
       status: retryable ? "deferred" : "failed",
+      connection,
       reason: execution.error,
       session: execution.session,
-      needsHuman: !retryable,
+      // Retryable and needing a person are not opposites. A session that died
+      // part-way through is worth retrying *and* nobody can retry it until the
+      // customer signs in, so both are reported.
+      needsHuman: needsPerson(connection) || !retryable,
     };
   }
 
+  await trail(dbSession, organizationId, "provider_execution_completed", `${row.provider}:${action}`, {
+    queueId: row.id, runnerId, externalId: execution.externalId,
+  });
+
   if (verification.confirmed) {
+    await trail(dbSession, organizationId, "provider_verification_confirmed", `${row.provider}:${action}`, {
+      queueId: row.id, externalId: verification.externalId ?? execution.externalId,
+    });
     await settle(dbSession, organizationId, row.id, "done", null);
-    return { ...base, status: "done", externalId: verification.externalId ?? execution.externalId, session: execution.session };
+    return { ...base, status: "done", externalId: verification.externalId ?? execution.externalId, session: execution.session, connection };
   }
 
   if (verification.pending) {
+    await trail(dbSession, organizationId, "provider_verification_inconclusive", `${row.provider}:${action}`, {
+      queueId: row.id, externalId: execution.externalId,
+    });
     // The write happened. The queue's job is finished and the proof is not, so
     // the row settles and the Work item is the thing that stays unproven.
     await settle(dbSession, organizationId, row.id, "done", null);
     return {
       ...base,
       status: "pending_verification",
+      connection,
       externalId: execution.externalId,
       reason: verification.detail ?? "The provider has not caught up yet.",
       session: execution.session,
@@ -378,12 +485,17 @@ export async function reportRunnerResult(
   // Submitted, and the provider says the record is not there. That is a failure
   // even though the browser reported success, which is the entire reason
   // verification is a separate step.
+  await trail(dbSession, organizationId, "provider_verification_contradicted", `${row.provider}:${action}`, {
+    queueId: row.id, externalId: execution.externalId,
+  });
+  await trail(dbSession, organizationId, "provider_human_handoff", `${row.provider}:${action}`, { queueId: row.id });
   await settle(dbSession, organizationId, row.id, "failed", verification.detail ?? "The record could not be found after the write.");
   return {
     ...base,
     status: "failed",
     reason: verification.detail ?? "The provider does not show the record after the write.",
     session: execution.session,
+    connection,
     needsHuman: true,
   };
 }

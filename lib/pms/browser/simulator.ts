@@ -182,6 +182,18 @@ export class BrowserSimulator implements BrowserProviderAdapter {
     return [...this.records.values()];
   }
 
+  /**
+   * The customer signs in, out of band.
+   *
+   * Modelled as its own event because that is what it is: Aval never performs
+   * this. Somebody goes to the provider's own page, types their own password,
+   * completes their own second factor, and a session exists afterwards that
+   * Aval can operate inside. Nothing in the runtime can cause it.
+   */
+  signIn(): void {
+    this.session = "ACTIVE";
+  }
+
   reset(): void {
     this.records.clear();
     this.session = "NEW";
@@ -351,7 +363,11 @@ export class BrowserSimulator implements BrowserProviderAdapter {
           break;
         }
         case "capture": {
-          if (!page?.captures || !(step.label in page.captures)) {
+          // Through `has`, like every other label. A provider that renamed the
+          // field the identifier is read from has changed the page as surely as
+          // one that renamed a button, and reading nothing while reporting
+          // success is the worse of the two failures.
+          if (!page?.captures || !this.has(Object.keys(page.captures), step.label)) {
             return this.changed(`Nothing labelled "${step.label}" to read.`, observations);
           }
           break;

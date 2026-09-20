@@ -8,6 +8,8 @@ import { resolveCapability } from "../../lib/pms/capability.ts";
 import { BrowserSimulator } from "../../lib/pms/browser/simulator.ts";
 import { clearBrowserAdapters, registerBrowserAdapter } from "../../lib/pms/browser/adapter.ts";
 import { drainOneWrite } from "../../lib/pms/browser/drain.ts";
+import { readConnectionHealth } from "../../lib/pms/browser/health.ts";
+import { recentAuditEntries } from "../../lib/audit/log.ts";
 
 /**
  * The customer-authorized browser write, end to end.
@@ -179,16 +181,81 @@ export async function runBrowserWriteCases(t, { session, userA, userB, administr
     assert.equal(recovered.status, "done", "a lapsed session recovers without a person");
   });
 
-  await t.test("an authenticator prompt is a handoff, never something to work around", async () => {
+  await t.test("an authenticator prompt waits for a person, and the work survives it", async () => {
+    // Never worked around — but not abandoned either. The provider wants a code
+    // only the customer can supply, so the write stays queued and comes back
+    // when they sign in. Failing the objective because a browser session asked
+    // for a second factor would be the wrong end of the same mistake.
     provider.reset();
     provider.faults.mfaRequired = true;
     await enqueue(payloadFor("3C"), `mfa-${randomUUID()}`);
 
     const outcome = await drain();
-    assert.equal(outcome.status, "denied");
+    assert.equal(outcome.status, "deferred", "the work is still there to resume");
     assert.equal(outcome.session, "MFA_REQUIRED");
-    assert.equal(outcome.needsHuman, true);
-    assert.equal(provider.external.length, 0);
+    assert.equal(outcome.connection, "SESSION_REQUIRED", "and the connection says what to do about it");
+    assert.equal(outcome.needsHuman, true, "somebody has to sign in");
+    assert.equal(provider.external.length, 0, "and nothing was attempted meanwhile");
+
+    // The customer signs in — out of band, on the provider's own page. Aval
+    // does not do this and cannot; it only notices afterwards.
+    delete provider.faults.mfaRequired;
+    provider.signIn();
+    const resumed = await drain();
+    assert.equal(resumed.status, "done", "execution resumes where it left off");
+    assert.equal(resumed.connection, "CONNECTED");
+    assert.equal(provider.external.length, 1);
+  });
+
+  await t.test("a session that dies mid-flow keeps the objective alive", async () => {
+    // The rule this encodes: do not fail the broader objective merely because a
+    // browser session expired. The connection says what happened and to whom it
+    // belongs; the work is still queued when somebody signs in.
+    provider.reset();
+    provider.signIn();
+    provider.faults.expireMidFlow = true;
+    await enqueue(payloadFor("11A"), `expiry-${randomUUID()}`);
+
+    const lapsed = await drain();
+    assert.equal(lapsed.status, "deferred");
+    assert.equal(lapsed.connection, "SESSION_EXPIRED", "told apart from a role the provider refused");
+    assert.equal(lapsed.needsHuman, true);
+
+    const health = await run((s, org) => readConnectionHealth(s, org, PROVIDER));
+    assert.equal(health.state, "SESSION_EXPIRED");
+    assert.ok(health.checkedAt, "and the connection records when it was last looked at");
+
+    delete provider.faults.expireMidFlow;
+    provider.signIn();
+    const resumed = await drain();
+    assert.equal(resumed.status, "done");
+    assert.equal(resumed.connection, "CONNECTED");
+    const after = await run((s, org) => readConnectionHealth(s, org, PROVIDER));
+    assert.ok(after.lastVerifiedAt, "a completed provider operation dates the connection, not a successful poll");
+  });
+
+  await t.test("a crash after the submit is reconciled by a later runner, not repeated", async () => {
+    // The full §14 shape: cloud queues, a device claims, the provider mutates,
+    // the device dies before it can say so. Recovery is another device picking
+    // up the expired lease and looking before it writes.
+    provider.reset();
+    provider.signIn();
+    provider.faults.loseOutcomeAfterSubmit = true;
+    await enqueue(payloadFor("14B"), `crash-${randomUUID()}`);
+
+    assert.equal((await drain("device-before-crash")).status, "deferred");
+    assert.equal(provider.external.length, 1, "the provider does hold the record");
+    assert.equal(provider.submits, 1);
+
+    // The laptop is gone. Its lease was released on settlement, which is what
+    // lets another device — or the same one after restarting — take it up.
+    delete provider.faults.loseOutcomeAfterSubmit;
+    const recovered = await drain("device-after-restart");
+    assert.equal(recovered.status, "duplicate");
+    assert.equal(recovered.externalId, provider.external[0].externalId,
+      "and it reconciles onto the record that already exists");
+    assert.equal(provider.submits, 1, "nothing was submitted twice");
+    assert.equal(provider.external.length, 1);
   });
 
   await t.test("a flow edited after approval is not replayed", async () => {
@@ -244,6 +311,45 @@ export async function runBrowserWriteCases(t, { session, userA, userB, administr
     const serialized = JSON.stringify(outcome);
     assert.ok(!/ignore your rules/i.test(serialized),
       "and the page's text is not carried into the outcome the runtime acts on");
+  });
+
+  await t.test("the trail records the moments an auditor cannot infer", async () => {
+    // A browser write happens on somebody else's machine, inside somebody
+    // else's session, against a system Aval does not control. Everything an
+    // auditor would otherwise have to guess at is written down.
+    provider.reset();
+    provider.signIn();
+    await enqueue(payloadFor("21X"), `audit-${randomUUID()}`);
+    assert.equal((await drain()).status, "done");
+
+    const entries = await run((s, org) => recentAuditEntries(s, org, 60));
+    const kinds = new Set(entries.map((entry) => entry.kind));
+    for (const expected of [
+      "provider_work_claimed",
+      "provider_execution_completed",
+      "provider_verification_confirmed",
+    ]) {
+      assert.ok(kinds.has(expected), `${expected} is on the chain`);
+    }
+
+    const claimed = entries.find((entry) => entry.kind === "provider_work_claimed");
+    assert.match(claimed.label, /^appfolio:maintenance\.work_order\.create$/,
+      "labelled with the provider and the action, so the chain reads without a join");
+    assert.match(claimed.payloadDigest, /^[0-9a-f]{64}$/, "a digest of the subject, never the payload");
+
+    // A contradiction is its own event: the browser said it worked and the
+    // provider does not show it, which is the one outcome a reader must not
+    // have to infer from silence.
+    provider.reset();
+    provider.signIn();
+    provider.faults.renameLabels = { "Work Order #": "Reference" };
+    await enqueue(payloadFor("22Y"), `audit-broken-${randomUUID()}`);
+    assert.equal((await drain()).status, "failed");
+    const afterBreak = await run((s, org) => recentAuditEntries(s, org, 20));
+    assert.ok(afterBreak.some((entry) => entry.kind === "provider_flow_broken"),
+      "a page that changed under a recorded workflow is recorded as that, not as a generic failure");
+    assert.ok(afterBreak.some((entry) => entry.kind === "provider_human_handoff"),
+      "and the handoff to a person is on the chain too");
   });
 
   await t.test("one workspace's runner cannot drain another's queue", async () => {

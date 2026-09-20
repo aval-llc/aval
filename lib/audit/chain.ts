@@ -73,7 +73,21 @@ export type AuditEntryKind =
   | "expertise_selected"
   | "expertise_overridden"
   | "toolset_assembled"
-  | "tool_authorization_denied";
+  | "tool_authorization_denied"
+  // Customer-authorized provider execution. A browser write happens on somebody
+  // else's machine, inside somebody else's session, against a system Aval does
+  // not control — which is exactly why the trail has to be legible without it.
+  // Each of these is a moment an auditor would otherwise have to infer.
+  | "provider_work_claimed"
+  | "provider_session_unavailable"
+  | "provider_execution_completed"
+  | "provider_execution_failed"
+  | "provider_verification_confirmed"
+  | "provider_verification_contradicted"
+  | "provider_verification_inconclusive"
+  | "provider_flow_broken"
+  | "provider_duplicate_reconciled"
+  | "provider_human_handoff";
 
 /** One link, before it is chained. */
 export interface AuditEvent {
