@@ -24,7 +24,6 @@ export async function runNoPmsCases(t, { session, userA }) {
   const run = (work) => session(userA, (s) => work(s, s.identity.organizationId));
 
   await t.test("a workspace with no PMS connection still takes in work", async () => {
-    const org = await run((_s, o) => o);
     const connections = await run((s, o) => s.db.select().from(integrationConnections)
       .where(and(eq(integrationConnections.organizationId, o), eq(integrationConnections.category, "property"))));
     // This fixture's workspace may carry a property connection from the PMS
@@ -80,7 +79,7 @@ export async function runNoPmsCases(t, { session, userA }) {
     assert.ok(decision.selected.includes("resident-experience"), "Aval-native expertise applies");
 
     // It waits on the resident, is not polled while it waits, and comes back when due.
-    assert.equal(await run((s, o) => claimTask(s, task.id, "worker-one", "QUEUED")), true);
+    assert.equal(await run((s) => claimTask(s, task.id, "worker-one", "QUEUED")), true);
     const running = await run((s, o) => getTask(s, o, task.id));
     await run((s) => updateTask(s, running, "worker-one", {
       status: "WAITING_FOR_RESIDENT", nextAttemptAt: new Date(Date.now() - 1000), releaseLease: true,

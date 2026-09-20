@@ -32,7 +32,7 @@ import { eq } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { organizations } from "@/db/postgres/schema";
 import { createTask, getTask, type TaskRecord } from "./tasks.ts";
-import { admissible, COORDINATOR_AGENT_ID, coordinatorFor, deterministicTaskId, type IntakeSource, type IntakeTrustState } from "./intake-rules.ts";
+import { admissible, coordinatorFor, deterministicTaskId, type IntakeSource, type IntakeTrustState } from "./intake-rules.ts";
 
 export { COORDINATOR_AGENT_ID, coordinatorFor, deterministicTaskId, admissible, requiresProvider } from "./intake-rules.ts";
 export type { IntakeSource, IntakeTrustState } from "./intake-rules.ts";
