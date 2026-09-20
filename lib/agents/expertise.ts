@@ -12,7 +12,8 @@
 
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
-import { employeeExpertise, expertiseProfiles, expertiseSelections } from "@/db/postgres/schema";
+import { aiEmployees, employeeExpertise, expertiseProfiles, expertiseSelections } from "@/db/postgres/schema";
+import { createEmployee } from "./employees.ts";
 import {
   applyUserSelection,
   routeExpertise,
@@ -178,36 +179,54 @@ export interface EmployeeTemplate {
   role: string;
   objective: string;
   expertise: string[];
+  /**
+   * What a starter employee can reach on day one.
+   *
+   * Reads only. Every one of these is a non-mutating tool, so a seeded
+   * workspace has employees that can answer questions and none that can change
+   * anything until somebody grants it — which is the same rule a hand-made
+   * employee follows, not a special case for the ones Aval ships.
+   */
+  capabilities: string[];
 }
 
 export const STARTER_TEMPLATES: readonly EmployeeTemplate[] = [
   { slug: "financial-analyst", name: "Financial Analyst", role: "Financial Analyst",
     objective: "Keep portfolio economics current and explain what changed and why.",
-    expertise: ["financial-analysis", "portfolio-outlook"] },
+    expertise: ["financial-analysis", "portfolio-outlook"],
+    capabilities: ["get_portfolio_metrics", "get_accounting_breakdown", "get_operating_statement", "get_delinquent_accounts", "get_metric_series"] },
   { slug: "brokerage-leasing", name: "Leasing Manager", role: "Brokerage & Leasing",
     objective: "Move the leasing funnel and keep vacancy falling.",
-    expertise: ["brokerage-leasing", "market-research"] },
+    expertise: ["brokerage-leasing", "market-research"],
+    capabilities: ["get_leasing_funnel", "get_property_breakdown", "get_metric_series", "get_leasing_velocity"] },
   { slug: "real-estate", name: "Real Estate Analyst", role: "Real Estate",
     objective: "Keep the portfolio's composition accurate and current.",
-    expertise: ["real-estate", "portfolio-outlook"] },
+    expertise: ["real-estate", "portfolio-outlook"],
+    capabilities: ["get_portfolio_metrics", "get_property_breakdown"] },
   { slug: "market-research", name: "Market Researcher", role: "Market Research",
     objective: "Position rents against the market with evidence.",
-    expertise: ["market-research"] },
+    expertise: ["market-research"],
+    capabilities: ["get_property_breakdown", "get_metric_series"] },
   { slug: "maintenance", name: "Maintenance Coordinator", role: "Maintenance",
     objective: "Take repairs from report to verified completion.",
-    expertise: ["maintenance", "vendor-coordination", "escalation"] },
+    expertise: ["maintenance", "vendor-coordination", "escalation"],
+    capabilities: ["get_maintenance_performance", "get_portfolio_metrics", "read_maintenance_context"] },
   { slug: "risk-analyst", name: "Risk Analyst", role: "Risk Analyst",
     objective: "Surface exposure before it becomes an incident.",
-    expertise: ["risk-analysis"] },
+    expertise: ["risk-analysis"],
+    capabilities: ["get_portfolio_metrics", "get_delinquent_accounts", "get_metric_series"] },
   { slug: "portfolio-outlook", name: "Portfolio Strategist", role: "Portfolio Outlook",
     objective: "Explain where the portfolio is heading and on what evidence.",
-    expertise: ["portfolio-outlook", "financial-analysis"] },
+    expertise: ["portfolio-outlook", "financial-analysis"],
+    capabilities: ["get_portfolio_metrics", "get_metric_series"] },
   { slug: "lease-review", name: "Lease Reviewer", role: "Lease Review",
     objective: "Keep lease terms, renewals and obligations understood and on time.",
-    expertise: ["lease-review"] },
+    expertise: ["lease-review"],
+    capabilities: ["get_property_breakdown", "read_document", "list_documents"] },
   { slug: "resident-operations", name: "Resident Operations Manager", role: "Resident Operations Manager",
     objective: "Own resident issues end to end until they are verified resolved.",
-    expertise: ["resident-experience", "maintenance", "vendor-coordination", "escalation"] },
+    expertise: ["resident-experience", "maintenance", "vendor-coordination", "escalation"],
+    capabilities: ["read_maintenance_context", "read_conversation", "list_conversations", "get_maintenance_performance"] },
 ];
 
 export interface ExpertiseRecord extends ExpertiseCandidateInput {
@@ -375,4 +394,129 @@ export async function loadExpertiseInstructions(
     ));
   const bySlug = new Map(rows.map((row) => [row.slug, row.instructions]));
   return slugs.map((slug) => bySlug.get(slug)).filter((value): value is string => Boolean(value));
+}
+
+/* ── the workspace's starting team ────────────────────────────────────────── */
+
+/**
+ * Gives a workspace the employees Aval ships with.
+ *
+ * The eight specialists did not become templates that leave a new workspace
+ * empty — they are seeded as ordinary employees, and a customer can rename,
+ * re-scope, pause or archive any of them exactly as they would one they
+ * created. What changed is that the roster is now rows the customer owns rather
+ * than a union type they cannot touch.
+ *
+ * Idempotent, and never re-creates what somebody archived: a workspace that
+ * deliberately got rid of the Market Researcher does not find it back tomorrow.
+ */
+export async function seedWorkspaceEmployees(
+  dbSession: DbSession,
+  organizationId: string,
+  userId: string,
+): Promise<number> {
+  const existing = await dbSession.db
+    .select({ name: aiEmployees.name })
+    .from(aiEmployees)
+    .where(eq(aiEmployees.organizationId, organizationId));
+  // Any employee at all means this workspace has been set up. Seeding again
+  // would fight whatever the customer has since decided.
+  if (existing.length > 0) return 0;
+
+  const catalogue = await listExpertiseCatalogue(dbSession, organizationId);
+  const bySlug = new Map(catalogue.map((record) => [record.slug, record]));
+
+  let created = 0;
+  for (const template of STARTER_TEMPLATES) {
+    const employee = await createEmployee(dbSession, organizationId, userId, {
+      name: template.name,
+      role: template.role,
+      objective: template.objective,
+      status: "active",
+      autonomyMode: "supervised",
+      scopes: template.capabilities.map((value) => ({ kind: "capability" as const, value })),
+    });
+    for (const slug of template.expertise) {
+      const profile = bySlug.get(slug);
+      if (profile) await grantExpertise(dbSession, organizationId, employee.id, profile.id, userId);
+    }
+    created += 1;
+  }
+  return created;
+}
+
+export interface EmployeeAssignment {
+  employeeId: string;
+  name: string;
+  role: string;
+  score: number;
+  matched: string[];
+}
+
+/**
+ * Which employee should take this work.
+ *
+ * The coordinator does not pick by name. It scores every active employee by the
+ * expertise it holds, using the same routing rules that decide which expertise
+ * to load — so "who should do this" and "what does this need" are answered by
+ * one set of signals rather than two that can disagree.
+ *
+ * Returns null when nothing scores, which is a real answer: work nobody is
+ * equipped for should reach a person rather than the nearest employee.
+ */
+export async function assignEmployeeForWork(
+  dbSession: DbSession,
+  organizationId: string,
+  signals: WorkSignals,
+): Promise<EmployeeAssignment | null> {
+  const active = await dbSession.db
+    .select({ id: aiEmployees.id, name: aiEmployees.name, role: aiEmployees.role })
+    .from(aiEmployees)
+    .where(and(eq(aiEmployees.organizationId, organizationId), eq(aiEmployees.status, "active")));
+  if (active.length === 0) return null;
+
+  // One catalogue read and one grants read for the whole workspace. Scoring
+  // each desk through `employeeCandidates` would reload the entire catalogue
+  // once per employee — the same answer at N times the cost, and the roster
+  // has no ceiling any more.
+  const catalogue = await listExpertiseCatalogue(dbSession, organizationId);
+  const grants = await dbSession.db
+    .select({
+      employeeId: employeeExpertise.employeeId,
+      expertiseId: employeeExpertise.expertiseId,
+      pinned: employeeExpertise.pinned,
+    })
+    .from(employeeExpertise)
+    .where(eq(employeeExpertise.organizationId, organizationId));
+  const heldBy = new Map<string, Map<string, boolean>>();
+  for (const grant of grants) {
+    const held = heldBy.get(grant.employeeId) ?? new Map<string, boolean>();
+    held.set(grant.expertiseId, grant.pinned);
+    heldBy.set(grant.employeeId, held);
+  }
+
+  let best: EmployeeAssignment | null = null;
+  for (const employee of active) {
+    const held = heldBy.get(employee.id);
+    if (!held) continue;
+    // Catalogue order is preserved, so this is the same list, in the same
+    // order, that `employeeCandidates` would have returned for this employee.
+    const candidates = catalogue
+      .filter((record) => held.has(record.id))
+      .map((record) => ({ ...record, pinned: held.get(record.id) ?? false }));
+    if (candidates.length === 0) continue;
+    const decision = routeExpertise(candidates, signals);
+    const score = decision.candidates
+      .filter((candidate) => decision.selected.includes(candidate.slug))
+      .reduce((total, candidate) => total + candidate.score, 0);
+    if (score <= 0) continue;
+    const matched = decision.candidates
+      .filter((candidate) => decision.selected.includes(candidate.slug))
+      .flatMap((candidate) => candidate.matched);
+    // Ties break on name, so the same work reaches the same desk twice running.
+    if (!best || score > best.score || (score === best.score && employee.name < best.name)) {
+      best = { employeeId: employee.id, name: employee.name, role: employee.role, score, matched };
+    }
+  }
+  return best;
 }

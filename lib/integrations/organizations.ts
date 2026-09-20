@@ -3,6 +3,7 @@ import { upsertMembership } from "@/lib/organizations/membership";
 import type { DbSession } from "@/db/postgres/session";
 import { organizations } from "@/db/postgres/schema";
 import type { ApiIdentity } from "./session";
+import { seedWorkspaceEmployees } from "@/lib/agents/expertise";
 
 // Split out from session.ts so page-level identity checks do not pull the
 // organization bootstrap path into callers that only need the authenticated
@@ -24,5 +25,10 @@ export async function ensureOrganization(dbSession: DbSession, identity: ApiIden
   await db.insert(organizations).values(organization).onConflictDoNothing();
   // Membership is descriptive; the matching access grant is the authority.
   await upsertMembership(dbSession, { organizationId: identity.organizationId, userId: identity.userId, role: "owner" });
+  // A new workspace starts with the team Aval ships rather than an empty
+  // directory. They are ordinary employees: rename, re-scope, pause or archive
+  // any of them. Seeding is best-effort — a workspace that exists without its
+  // starting team is recoverable, one that could not be created is not.
+  await seedWorkspaceEmployees(dbSession, identity.organizationId, identity.userId).catch(() => 0);
   return organization;
 }

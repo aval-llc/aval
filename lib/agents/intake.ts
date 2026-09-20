@@ -32,6 +32,7 @@ import { eq } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { organizations } from "@/db/postgres/schema";
 import { createTask, getTask, type TaskRecord } from "./tasks.ts";
+import { assignEmployeeForWork } from "./expertise.ts";
 import { admissible, coordinatorFor, deterministicTaskId, type IntakeSource, type IntakeTrustState } from "./intake-rules.ts";
 
 export { COORDINATOR_AGENT_ID, coordinatorFor, deterministicTaskId, admissible, requiresProvider } from "./intake-rules.ts";
@@ -82,7 +83,18 @@ export async function intakeEvent(dbSession: DbSession, event: IntakeEvent): Pro
     return { status: "refused", reason: "No such workspace." };
   }
 
-  const coordinator = coordinatorFor(event.employeeId);
+  // Who should take this. An explicit owner wins; otherwise the coordinator
+  // scores the workspace's employees by the expertise they hold and hands the
+  // work to the best match. Nothing scoring is a real answer — work nobody is
+  // equipped for stays with the coordinator rather than going to whoever is
+  // alphabetically first.
+  const assigned = event.employeeId
+    ? event.employeeId
+    : (await assignEmployeeForWork(dbSession, event.organizationId, {
+        objective: event.goal,
+        workType: event.source,
+      }).catch(() => null))?.employeeId ?? null;
+  const coordinator = coordinatorFor(assigned);
   const id = await deterministicTaskId(event.organizationId, event.source, event.sourceId);
 
   // Read first so a redelivery is reported as an attachment rather than a

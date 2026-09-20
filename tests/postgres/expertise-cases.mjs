@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { expertiseProfiles, expertiseSelections } from "../../db/postgres/schema.ts";
-import { createEmployee } from "../../lib/agents/employees.ts";
+import { createEmployee, listEmployees, setEmployeeStatus } from "../../lib/agents/employees.ts";
 import { createTask } from "../../lib/agents/tasks.ts";
 import {
   SHIPPED_EXPERTISE, STARTER_TEMPLATES, listExpertiseCatalogue,
   grantExpertise, employeeCandidates, selectExpertiseForWork, loadExpertiseInstructions,
+  seedWorkspaceEmployees, assignEmployeeForWork,
 } from "../../lib/agents/expertise.ts";
 
 /**
@@ -16,6 +18,10 @@ import {
  * no way to tell them apart.
  */
 export async function runExpertiseCases(t, { session, userA, userB }) {
+  // A brand-new subject bootstraps its own empty workspace, which is the only
+  // honest place to assert what a workspace starts with.
+  const newcomer = `user_${randomUUID()}`;
+  const fresh = (work) => session(newcomer, (s) => work(s, s.identity.organizationId));
   const run = (work) => session(userA, (s) => work(s, s.identity.organizationId));
   const other = (work) => session(userB, (s) => work(s, s.identity.organizationId));
 
@@ -154,6 +160,62 @@ export async function runExpertiseCases(t, { session, userA, userB }) {
       .where(and(eq(expertiseSelections.organizationId, org), eq(expertiseSelections.taskId, task.id))));
     assert.equal(recorded.decidedBy, "user");
     assert.equal(recorded.overriddenBy, userA);
+  });
+
+  await t.test("a workspace starts with the team Aval ships, as ordinary employees", async () => {
+    // The eight did not become templates that leave a new workspace empty. They
+    // are seeded as employees a customer can rename, re-scope, pause or
+    // archive — the roster is rows the customer owns now, not a union type.
+    const seeded = await fresh((s, org) => seedWorkspaceEmployees(s, org, newcomer));
+    assert.equal(seeded, STARTER_TEMPLATES.length, "every starter role arrives as an employee");
+
+    const team = await fresh((s, org) => listEmployees(s, org, { limit: 100 }));
+    const roles = new Set(team.map((row) => row.role));
+    for (const legacy of ["Financial Analyst", "Maintenance", "Risk Analyst", "Lease Review"]) {
+      assert.ok(roles.has(legacy), `${legacy} is present as an employee`);
+    }
+    assert.ok(team.every((row) => row.status === "active"), "and they are ready to work");
+
+    // Seeding again does not fight what the customer has since decided.
+    assert.equal(await fresh((s, org) => seedWorkspaceEmployees(s, org, newcomer)), 0);
+    const archived = team.find((row) => row.role === "Market Research");
+    await fresh((s, org) => setEmployeeStatus(s, org, archived.id, "archived"));
+    assert.equal(await fresh((s, org) => seedWorkspaceEmployees(s, org, newcomer)), 0,
+      "an employee somebody deliberately archived does not come back tomorrow");
+  });
+
+  await t.test("the coordinator assigns work to the employee equipped for it", async () => {
+    // The master agent does not pick by name. It scores the team by the
+    // expertise each holds, using the same signals that decide which expertise
+    // to load, so "who should do this" and "what does this need" cannot
+    // disagree.
+    const maintenance = await fresh((s, org) => assignEmployeeForWork(s, org, {
+      objective: "A resident reports a leak and the radiator is broken",
+      domains: ["maintenance"],
+    }));
+    assert.ok(maintenance, "somebody is equipped for a repair");
+    assert.match(maintenance.role, /Maintenance|Resident/, `routed to ${maintenance.role}`);
+
+    const financial = await fresh((s, org) => assignEmployeeForWork(s, org, {
+      objective: "Explain the change in NOI and the arrears ledger this quarter",
+      domains: ["financial"],
+    }));
+    assert.ok(financial, "and for a financial question");
+    assert.notEqual(financial.employeeId, maintenance.employeeId, "different work reaches different desks");
+
+    // The same work twice reaches the same desk.
+    const again = await fresh((s, org) => assignEmployeeForWork(s, org, {
+      objective: "A resident reports a leak and the radiator is broken",
+      domains: ["maintenance"],
+    }));
+    assert.equal(again.employeeId, maintenance.employeeId, "assignment is reproducible");
+
+    // Work nobody is equipped for is a real answer, not the nearest employee.
+    assert.equal(
+      await fresh((s, org) => assignEmployeeForWork(s, org, { objective: "zzzz qqqq xxxx" })),
+      null,
+      "nothing scoring means nobody is assigned",
+    );
   });
 
   await t.test("the starter templates are a head start, not a roster", async () => {
