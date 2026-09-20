@@ -25,6 +25,7 @@ import { runEmployeeApiCases } from "./employee-api-cases.mjs";
 import { runFactsEvidenceCases } from "./facts-evidence-cases.mjs";
 import { runReadModelCases } from "./read-model-cases.mjs";
 import { runSeatSenderCases } from "./seat-sender-cases.mjs";
+import { runBrowserWriteCases } from "./browser-write-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
 
 const url = process.env.AVAL_TEST_DATABASE_URL;
@@ -228,6 +229,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runEmployeeCases(t, { session, userA, userB, administrator });
     await runExpertiseCases(t, { session, userA, userB });
     await runSeatSenderCases(t, { session, userA, userB });
+    await runBrowserWriteCases(t, { session, userA, userB, administrator });
     await runNoPmsCases(t, { session, userA });
     await runEmployeeApiCases(t, { session, userA, userB, config });
     await runFactsEvidenceCases(t, { session, userA });

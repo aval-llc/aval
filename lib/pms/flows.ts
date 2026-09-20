@@ -13,6 +13,8 @@ import { and, desc, eq } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { pmsActionFlows } from "@/db/postgres/schema";
 import type { PmsAction } from "./types.ts";
+import { canonicalize } from "../agents/canonical-payload.ts";
+import { flowDigest, parseFlowSteps } from "./browser/steps.ts";
 
 /** An adapter that performs one action against one provider's API. */
 export type WriteAdapter = (dbSession: DbSession, input: {
@@ -138,4 +140,124 @@ export async function learnedFlowActions(dbSession: DbSession, organizationId: s
       ),
     );
   return new Set(rows.map((row) => row.action as PmsAction));
+}
+
+/* ── authoring ────────────────────────────────────────────────────────────── */
+
+/**
+ * Record a workflow for one (provider, action), as a candidate.
+ *
+ * Candidate rather than active, always. A flow drives a customer's own PMS as
+ * their own user, so the act of discovering one and the act of approving it are
+ * deliberately different acts by different people — `activateFlow` is the
+ * second. Nothing here can produce something replayable on its own.
+ *
+ * Versions accumulate rather than overwrite. A provider that changes its UI
+ * gets a new version beside the old one, so a flow that stops working can be
+ * compared against the one that did work rather than being lost to the edit
+ * that replaced it.
+ */
+export async function recordFlow(
+  dbSession: DbSession,
+  organizationId: string,
+  providerId: string,
+  action: PmsAction,
+  steps: unknown,
+  userId: string,
+): Promise<{ id: string; version: number; digest: string }> {
+  const parsed = parseFlowSteps(steps);
+  const digest = await flowDigest(parsed);
+
+  const [latest] = await dbSession.db
+    .select({ version: pmsActionFlows.version })
+    .from(pmsActionFlows)
+    .where(
+      and(
+        eq(pmsActionFlows.organizationId, organizationId),
+        eq(pmsActionFlows.provider, providerId),
+        eq(pmsActionFlows.action, action),
+      ),
+    )
+    .orderBy(desc(pmsActionFlows.version))
+    .limit(1);
+
+  const version = (latest?.version ?? 0) + 1;
+  const id = crypto.randomUUID();
+  const now = new Date();
+
+  await dbSession.db.insert(pmsActionFlows).values({
+    id,
+    organizationId,
+    provider: providerId,
+    action,
+    version,
+    // Stored as the canonical form the digest was taken over, so a row read
+    // back and re-hashed matches rather than differing by key order.
+    stepsJson: canonicalize(parsed),
+    digest,
+    status: "candidate",
+    learnedByUserId: userId,
+    lastReplayAt: null,
+    lastReplayOk: null,
+    consecutiveFailures: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return { id, version, digest };
+}
+
+/**
+ * Approve a candidate flow, retiring whatever it replaces.
+ *
+ * One active version per (provider, action) at a time: `activeFlow` takes the
+ * highest active version, and two active versions would make which one runs a
+ * matter of ordering rather than of somebody's decision.
+ */
+export async function activateFlow(
+  dbSession: DbSession,
+  organizationId: string,
+  flowId: string,
+): Promise<boolean> {
+  const [candidate] = await dbSession.db
+    .select({ provider: pmsActionFlows.provider, action: pmsActionFlows.action, status: pmsActionFlows.status })
+    .from(pmsActionFlows)
+    .where(and(eq(pmsActionFlows.organizationId, organizationId), eq(pmsActionFlows.id, flowId)))
+    .limit(1);
+  if (!candidate || candidate.status === "retired") return false;
+
+  const now = new Date();
+  await dbSession.db
+    .update(pmsActionFlows)
+    .set({ status: "retired", updatedAt: now })
+    .where(
+      and(
+        eq(pmsActionFlows.organizationId, organizationId),
+        eq(pmsActionFlows.provider, candidate.provider),
+        eq(pmsActionFlows.action, candidate.action),
+        eq(pmsActionFlows.status, "active"),
+      ),
+    );
+
+  // Reported from what the database did, not from having asked. An update that
+  // row-level security declined returns no rows, and a caller told "approved"
+  // about a flow that is still a candidate would queue writes against a path
+  // that cannot run.
+  const activated = await dbSession.db
+    .update(pmsActionFlows)
+    .set({ status: "active", updatedAt: now })
+    .where(and(eq(pmsActionFlows.organizationId, organizationId), eq(pmsActionFlows.id, flowId)))
+    .returning({ id: pmsActionFlows.id });
+
+  return activated.length > 0;
+}
+
+/** Take a flow out of service without deleting the record of what it was. */
+export async function retireFlow(dbSession: DbSession, organizationId: string, flowId: string): Promise<boolean> {
+  const updated = await dbSession.db
+    .update(pmsActionFlows)
+    .set({ status: "retired", updatedAt: new Date() })
+    .where(and(eq(pmsActionFlows.organizationId, organizationId), eq(pmsActionFlows.id, flowId)))
+    .returning({ id: pmsActionFlows.id });
+  return updated.length > 0;
 }
