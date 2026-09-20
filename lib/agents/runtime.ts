@@ -63,6 +63,8 @@ import {
 } from "./tasks.ts";
 import { planEvidence } from "./autonomy-storage";
 import { assembleToolset } from "./toolset.ts";
+import { employeeEnvelope } from "./policy.ts";
+import type { Permission } from "./permissions.ts";
 import { employeeScopes, getEmployee } from "./employees.ts";
 import { selectExpertiseForWork } from "./expertise.ts";
 import { budgetExhausted, detectStagnation, nextDelayMs, resolveAttemptPolicy, type EscalationBehavior } from "./attempt-policy.ts";
@@ -180,6 +182,13 @@ export async function advanceTask(dbSession: DbSession,
   // widens: an employee with no capability grants is offered nothing, because
   // absence of a grant is never permission.
   const scopes = owner ? await employeeScopes(dbSession, organizationId, owner.id) : null;
+  // The employee's own authority, derived from what it was granted. Where there
+  // is no owner this stays null and the persona envelope governs exactly as it
+  // did — which is what makes this safe to land before every persona has been
+  // migrated to an employee.
+  const employeePermissions = owner && scopes
+    ? employeeEnvelope(scopes.capability ?? [], { mayCommunicateExternally: owner.mayCommunicateExternally })
+    : null;
   const expertise = owner
     ? await selectExpertiseForWork(dbSession, organizationId, {
         taskId, employeeId: owner.id,
@@ -199,6 +208,7 @@ export async function advanceTask(dbSession: DbSession,
     organizationId, subject, agentId: task.agentId, persona,
     baseTools: TOOLS, finalToolName: "render_answer",
     employeeCapabilities: scopes?.capability ?? null,
+    employeePermissions,
   });
   let tools: ToolSchema[] = assembled.tools;
   const evidenceCapabilities = tools.flatMap(tool => {
@@ -579,6 +589,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
     if (decidedApproval) {
       await settleDecidedApproval(dbSession, {
         organizationId, taskId, task, subject, messages, seenNumbers, audit, approval: decidedApproval,
+        employeePermissions,
       });
       // The approved side effect and its observation must become durable
       // before another model call starts. If the worker dies after execution,
@@ -758,7 +769,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
           toolName: use.name,
           args: use.input,
           subject,
-          context: { personaId: task.agentId, delegationDepth: task.delegationDepth, remainingSteps },
+          context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth, remainingSteps },
           task: { id: taskId, stepIndex },
         });
         audit.push(...outcome.audit);
@@ -915,8 +926,10 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
   seenNumbers: Set<number>;
   audit: AuditEvent[];
   approval: ApprovalRecord;
+  /** The owning employee's authority, so a settled approval is judged by the same envelope. */
+  employeePermissions: readonly Permission[] | null;
 }): Promise<void> {
-  const { organizationId, taskId, task, subject, messages, seenNumbers, audit, approval } = input;
+  const { organizationId, taskId, task, subject, messages, seenNumbers, audit, approval, employeePermissions } = input;
   const last = messages[messages.length - 1];
   if (!last || last.role !== "assistant" || !Array.isArray(last.content)) return;
 
@@ -946,12 +959,12 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
     const outcome = isGatedCall
       ? await executeApprovedTool(dbSession, {
           toolName: use.name, args: use.input, subject,
-          context: { personaId: task.agentId, delegationDepth: task.delegationDepth },
+          context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth },
           task: { id: taskId, stepIndex: approval.stepIndex, approvalId: approval.id, policyVersion: approval.policyVersion },
         })
       : await executeTool(dbSession, {
           toolName: use.name, args: use.input, subject,
-          context: { personaId: task.agentId, delegationDepth: task.delegationDepth },
+          context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth },
           task: { id: taskId, stepIndex: approval.stepIndex },
         });
     audit.push(...outcome.audit);

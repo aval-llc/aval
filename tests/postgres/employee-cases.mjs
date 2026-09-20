@@ -9,6 +9,8 @@ import {
 import { createTask, getTask } from "../../lib/agents/tasks.ts";
 import { assembleToolset } from "../../lib/agents/toolset.ts";
 import { ancestorActors, delegationRefusal } from "../../lib/agents/delegation.ts";
+import { employeeEnvelope, evaluate } from "../../lib/agents/policy.ts";
+import { roleForPersona } from "../../lib/agents/permissions.ts";
 import { TOOLS } from "../../lib/ask-aval/tools.ts";
 import { getPersona } from "../../lib/ask-aval/personas.ts";
 
@@ -276,6 +278,72 @@ export async function runEmployeeCases(t, { session, userA, userB, administrator
     // missing permission.
     const bobScopes = await run((s, org) => employeeScopes(s, org, bob.id));
     assert.deepEqual(bobScopes.delegate_to, [alice.id]);
+  });
+
+  await t.test("a role the code has never heard of holds real authority", async () => {
+    // The point of the whole migration. `roleForPersona` resolves any
+    // unrecognised id to the read-only `custom` envelope, so before employees a
+    // customer-defined actor could only ever read — inventing "Turnover
+    // Coordinator" got you something that could not turn over anything.
+    assert.equal(roleForPersona("Turnover Coordinator"), "custom",
+      "the persona path still collapses an invented role to read-only");
+
+    const turnover = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Authority turnover", role: "Turnover Coordinator", status: "active",
+      scopes: [
+        { kind: "capability", value: "create_work_order" },
+        { kind: "capability", value: "get_portfolio_metrics" },
+      ],
+    }));
+    const scopes = await run((s, org) => employeeScopes(s, org, turnover.id));
+    const envelope = employeeEnvelope(scopes.capability ?? [], {
+      mayCommunicateExternally: turnover.mayCommunicateExternally,
+    });
+    assert.ok(envelope.includes("pms.maintenance.write"),
+      "an employee granted the tool holds the permission that tool needs");
+
+    // And the policy engine honours it where the persona path would not.
+    const asEmployee = evaluate(
+      "create_work_order", { provider: "doorloop" },
+      { organizationId: "org", userId: userA, isGuest: false },
+      { personaId: "Turnover Coordinator", employeePermissions: envelope, delegationDepth: 0 },
+    );
+    // High-risk tools still require a person; what matters is that authority is
+    // no longer the thing refusing it.
+    assert.notEqual(asEmployee.code, "permission_denied",
+      `employee authority should not be the refusal: ${JSON.stringify(asEmployee)}`);
+
+    const asPersona = evaluate(
+      "create_work_order", { provider: "doorloop" },
+      { organizationId: "org", userId: userA, isGuest: false },
+      { personaId: "Turnover Coordinator", delegationDepth: 0 },
+    );
+    assert.equal(asPersona.code, "permission_denied",
+      "the same invented role holds nothing without an employee record");
+  });
+
+  await t.test("an employee cannot hold a permission no granted tool needs", async () => {
+    // The envelope is derived from grants, so there is nowhere to write an
+    // authority that no tool actually uses.
+    const reader = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Reader only", role: "Analyst", status: "active",
+      scopes: [{ kind: "capability", value: "get_portfolio_metrics" }],
+    }));
+    const scopes = await run((s, org) => employeeScopes(s, org, reader.id));
+    const envelope = employeeEnvelope(scopes.capability ?? [], { mayCommunicateExternally: false });
+    assert.deepEqual(envelope, ["portfolio.read"], "exactly what the one granted tool requires");
+    assert.ok(!envelope.includes("pms.maintenance.write"));
+  });
+
+  await t.test("external contact is a separate decision from holding the tool", async () => {
+    // "May use the messaging tool" and "may contact a resident on the
+    // workspace's behalf" are different grants, and conflating them is how an
+    // employee ends up emailing people because somebody wanted it to read a
+    // thread.
+    const granted = ["send_external_message"];
+    assert.deepEqual(employeeEnvelope(granted, { mayCommunicateExternally: false }), [],
+      "the capability alone does not authorize contacting anyone");
+    assert.deepEqual(employeeEnvelope(granted, { mayCommunicateExternally: true }), ["messaging.send.external"]);
   });
 
   await t.test("work is never handed to an employee that cannot run it", async () => {

@@ -45,6 +45,8 @@ export interface ToolsetRequest {
   employeeCapabilities?: readonly string[] | null;
   /** Capabilities the loaded expertise needs. Narrows further, never widens. */
   expertiseCapabilities?: readonly string[] | null;
+  /** The owning employee's authority, used in place of the persona envelope. */
+  employeePermissions?: readonly import("./permissions.ts").Permission[] | null;
 }
 
 export interface AssembledToolset {
@@ -73,7 +75,7 @@ export async function assembleToolset(
 
   // 2. Authority: the permission envelope. A persona listing a tool it has no
   //    permission for loses it here rather than being granted it.
-  const permitted = new Set(allowedToolNames(request.agentId, request.subject));
+  const permitted = new Set(allowedToolNames(request.agentId, request.subject, request.employeePermissions));
 
   // 3. Provider capability: which PMS writes this workspace can actually reach,
   //    for this agent's deployments. Fail-closed on error, inside that module.
