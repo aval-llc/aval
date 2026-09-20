@@ -111,6 +111,14 @@ export class EmployeeQuotaError extends Error {
   }
 }
 
+/** A workspace already has an employee by this name. */
+export class DuplicateEmployeeNameError extends Error {
+  constructor(readonly name: string) {
+    super(`This workspace already has an employee called ${name}.`);
+    this.name = "DuplicateEmployeeNameError";
+  }
+}
+
 /** Archiving an employee that still owns live Work would orphan it. */
 export class EmployeeHasOpenWorkError extends Error {
   constructor(readonly openWork: number) {
@@ -176,6 +184,18 @@ export async function createEmployee(
   if (limit !== null && (await employeeCount(dbSession, organizationId)) >= limit) {
     throw new EmployeeQuotaError(limit);
   }
+
+  // Checked before inserting rather than caught afterwards. A failed insert
+  // aborts the surrounding transaction, so a route that caught the unique
+  // violation and returned a tidy 409 could not then commit its own response —
+  // the caller would see a 500 for an ordinary naming collision. The unique
+  // index remains the authority for two concurrent creates.
+  const [taken] = await dbSession.db
+    .select({ id: aiEmployees.id })
+    .from(aiEmployees)
+    .where(and(eq(aiEmployees.organizationId, organizationId), eq(aiEmployees.name, name)))
+    .limit(1);
+  if (taken) throw new DuplicateEmployeeNameError(name);
 
   const now = new Date();
   const row = {

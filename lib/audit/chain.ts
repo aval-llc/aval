@@ -57,7 +57,23 @@ export type AuditEntryKind =
   | "membership_changed"
   | "invitation_issued"
   | "invitation_accepted"
-  | "invitation_revoked";
+  | "invitation_revoked"
+  // AI employees — who was created, what they were allowed to do, and which
+  // expertise was loaded for a piece of work. An employee is an actor in this
+  // workspace, so the record of what it was permitted to become belongs beside
+  // the record of what it did.
+  | "employee_created"
+  | "employee_updated"
+  | "employee_activated"
+  | "employee_paused"
+  | "employee_archived"
+  | "employee_scope_granted"
+  | "employee_scope_revoked"
+  | "employee_assigned_to_work"
+  | "expertise_selected"
+  | "expertise_overridden"
+  | "toolset_assembled"
+  | "tool_authorization_denied";
 
 /** One link, before it is chained. */
 export interface AuditEvent {
