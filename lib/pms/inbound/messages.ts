@@ -12,10 +12,11 @@
  * re-run rather than something needing a cursor to protect.
  */
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { pmsSeatMessages } from "@/db/postgres/schema";
 import type { SeatDisposition } from "./disposition.ts";
+import { senderDomainRejection } from "./sender-domain.ts";
 
 export interface SeatMessageRecord {
   digest: string;
@@ -24,6 +25,8 @@ export interface SeatMessageRecord {
   disposition: SeatDisposition;
   /** Only ever an authenticated domain. Null is the signal not to name a sender. */
   domain: string | null;
+  /** Only ever an authenticated mailbox, under the same rule as `domain`. */
+  address: string | null;
   method: string | null;
   providerId: string | null;
   /** Triage text. May carry sender-influenced content — never rendered to an operator. */
@@ -60,6 +63,7 @@ export async function recordSeatMessage(dbSession: DbSession, record: SeatMessag
     organizationId: record.organizationId,
     disposition: record.disposition,
     authenticatedDomain: record.domain,
+    authenticatedAddress: record.address,
     method: record.method,
     providerId: record.providerId,
     reason: record.reason,
@@ -78,6 +82,7 @@ export async function recordSeatMessage(dbSession: DbSession, record: SeatMessag
         organizationId: values.organizationId,
         disposition: values.disposition,
         authenticatedDomain: values.authenticatedDomain,
+        authenticatedAddress: values.authenticatedAddress,
         method: values.method,
         providerId: values.providerId,
         reason: values.reason,
@@ -93,6 +98,25 @@ export interface HeldSender {
   domain: string;
   /** dmarc | dkim, so the panel can say how it was established. */
   method: string | null;
+  /**
+   * The exact mailboxes seen under this domain, where one authenticated.
+   *
+   * What makes adjudication narrow. A person looking at held mail from
+   * `gmail.com` is offered `john@gmail.com` — the sender who actually wrote —
+   * rather than a domain button that would admit every Gmail account there is.
+   * Empty when nothing authenticated a mailbox, in which case the domain is all
+   * anyone can honestly act on.
+   */
+  addresses: string[];
+  /**
+   * Whether the domain itself may be allowlisted.
+   *
+   * False for a consumer mailbox provider, and a surface must not offer the
+   * domain in that case — approving what arrived is a decision about one
+   * sender, and `allowSender` would refuse it anyway. Saying so here means the
+   * refusal is not discovered by an operator pressing a button that fails.
+   */
+  domainAllowlistable: boolean;
   messages: number;
   firstSeen: Date;
   lastSeen: Date;
@@ -118,7 +142,7 @@ export async function seatReview(dbSession: DbSession, organizationId: string): 
     .select({
       domain: pmsSeatMessages.authenticatedDomain,
       method: sql<string | null>`max(${pmsSeatMessages.method})`,
-      messages: sql<number>`count(dbSession, *)`,
+      messages: sql<number>`count(*)`,
       firstSeen: sql<number>`min(${pmsSeatMessages.receivedAt})`,
       lastSeen: sql<number>`max(${pmsSeatMessages.receivedAt})`,
     })
@@ -130,11 +154,36 @@ export async function seatReview(dbSession: DbSession, organizationId: string): 
       ),
     )
     .groupBy(pmsSeatMessages.authenticatedDomain)
-    .orderBy(desc(sql`count(dbSession, *)`));
+    .orderBy(desc(sql`count(*)`));
+
+  // The mailboxes behind those held domains, so adjudication can be about one
+  // sender. Only rows where a mailbox actually authenticated appear: the column
+  // is null otherwise, by the same rule that keeps a claimed domain out.
+  const mailboxRows = await dbSession.db
+    .selectDistinct({
+      domain: pmsSeatMessages.authenticatedDomain,
+      address: pmsSeatMessages.authenticatedAddress,
+    })
+    .from(pmsSeatMessages)
+    .where(
+      and(
+        eq(pmsSeatMessages.organizationId, organizationId),
+        eq(pmsSeatMessages.disposition, "held"),
+        isNotNull(pmsSeatMessages.authenticatedAddress),
+      ),
+    );
+
+  const mailboxes = new Map<string, string[]>();
+  for (const row of mailboxRows) {
+    if (!row.domain || !row.address) continue;
+    const held = mailboxes.get(row.domain) ?? [];
+    held.push(row.address);
+    mailboxes.set(row.domain, held);
+  }
 
   const [unauthenticated] = await dbSession.db
     .select({
-      messages: sql<number>`count(dbSession, *)`,
+      messages: sql<number>`count(*)`,
       lastSeen: sql<number | null>`max(${pmsSeatMessages.receivedAt})`,
     })
     .from(pmsSeatMessages)
@@ -146,7 +195,7 @@ export async function seatReview(dbSession: DbSession, organizationId: string): 
     );
 
   const [verified] = await dbSession.db
-    .select({ messages: sql<number>`count(dbSession, *)` })
+    .select({ messages: sql<number>`count(*)` })
     .from(pmsSeatMessages)
     .where(
       and(
@@ -164,6 +213,8 @@ export async function seatReview(dbSession: DbSession, organizationId: string): 
       .map((row) => ({
         domain: row.domain,
         method: row.method,
+        addresses: (mailboxes.get(row.domain) ?? []).slice().sort(),
+        domainAllowlistable: senderDomainRejection(row.domain) === null,
         messages: Number(row.messages),
         firstSeen: new Date(Number(row.firstSeen)),
         lastSeen: new Date(Number(row.lastSeen)),
@@ -187,7 +238,7 @@ export async function seatReview(dbSession: DbSession, organizationId: string): 
  */
 export async function seatMessageCounts(dbSession: DbSession, organizationId: string): Promise<Record<string, number>> {
   const rows = await dbSession.db
-    .select({ disposition: pmsSeatMessages.disposition, messages: sql<number>`count(dbSession, *)` })
+    .select({ disposition: pmsSeatMessages.disposition, messages: sql<number>`count(*)` })
     .from(pmsSeatMessages)
     .where(eq(pmsSeatMessages.organizationId, organizationId))
     .groupBy(pmsSeatMessages.disposition);

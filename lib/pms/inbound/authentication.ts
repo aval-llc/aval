@@ -164,6 +164,100 @@ export function authenticatedDomain(auth: AuthenticationResults | null): Authent
   return null;
 }
 
+export interface AuthenticatedAddress {
+  /** The full mailbox, lowercased: `john@gmail.com`. */
+  address: string;
+  domain: string;
+}
+
+/**
+ * The exact mailbox a message authenticated as, when that claim is sound.
+ *
+ * `authenticatedDomain` answers "which domain", which is all a domain grant
+ * needs. An address grant needs more, because the whole point of one is that
+ * approving `john@gmail.com` must not approve `attacker@gmail.com` — and on a
+ * consumer mailbox provider those two differ only in the local part.
+ *
+ * Three conditions, and each rules out a way the local part could be attacker
+ * chosen:
+ *
+ *   - **DMARC passed.** Without it the From domain is not authenticated at all.
+ *   - **DKIM passed, by a domain aligned with the From domain.** DMARC alignment
+ *     can be satisfied by SPF alone, and SPF authenticates the envelope sender.
+ *     A message can be SPF-aligned for `gmail.com` while carrying any From local
+ *     part at all, so DMARC on its own is not enough to trust a mailbox. A DKIM
+ *     signature by the From domain is, because the signature covers the header.
+ *   - **Exactly one `From:`, whose domain is the authenticated one.** Two From
+ *     headers is ambiguous — clients differ on which they display — and that
+ *     disagreement is the spoof.
+ *
+ * The residual assumption, stated rather than left to be rediscovered: this
+ * holds because a DKIM signature made for DMARC alignment covers the `From`
+ * header. RFC 6376 does not *require* `from` in `h=`, but DMARC evaluation
+ * treats a signature that omits it as non aligned, and `Authentication-Results`
+ * gives us no way to read `h=` back. A signer that both omitted `From` and was
+ * still reported aligned would break this; no deployed one does.
+ *
+ * Subdomain alignment is accepted in both directions, which is DMARC's relaxed
+ * mode: `mail.example.com` signing for `example.com`, and the reverse.
+ */
+export function authenticatedAddress(
+  auth: AuthenticationResults | null,
+  raw: string,
+): AuthenticatedAddress | null {
+  const authenticated = authenticatedDomain(auth);
+  if (!auth || !authenticated || authenticated.method !== "dmarc") return null;
+
+  const signing = domainOf(auth.properties.get("header.d"));
+  if (auth.results.get("dkim") !== "pass" || !signing) return null;
+  if (!domainMatches(authenticated.domain, signing) && !domainMatches(signing, authenticated.domain)) {
+    return null;
+  }
+
+  const address = soleFromAddress(raw);
+  if (!address) return null;
+  // Exact, not `domainMatches`: a grant to one mailbox says nothing about a
+  // subdomain, and subdomains are where a lookalike local part would hide.
+  if (address.slice(address.lastIndexOf("@") + 1) !== authenticated.domain) return null;
+
+  return { address, domain: authenticated.domain };
+}
+
+/**
+ * The single mailbox in the `From:` header, or nothing.
+ *
+ * Fails closed on everything ambiguous — no From, several From headers, a group
+ * or a list, an unterminated angle bracket. Every one of those falls back to the
+ * domain and review tiers, which is the right place for a message nobody can
+ * read one sender out of.
+ */
+function soleFromAddress(raw: string): string | undefined {
+  const from = headerLines(raw).filter((line) => /^from\s*:/i.test(line));
+  if (from.length !== 1) return undefined;
+
+  let value = stripComments(from[0].replace(/^from\s*:/i, "")).trim();
+  // A quoted display name may legally contain a comma or an angle bracket, so
+  // it goes before either is treated as structure.
+  const bare = value.replace(/"(?:[^"\\]|\\.)*"/g, "");
+  if (bare.includes(",")) return undefined;
+
+  const angle = bare.lastIndexOf("<");
+  if (angle >= 0) {
+    const source = value.lastIndexOf("<");
+    const close = value.indexOf(">", source);
+    if (close < 0) return undefined;
+    value = value.slice(source + 1, close);
+  } else if (value !== bare) {
+    // A display name with no angle brackets is not a parsable mailbox.
+    return undefined;
+  }
+
+  value = value.trim().toLowerCase().replace(/\.$/, "");
+  return /^[^\s@"'<>,;]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(value)
+    ? value
+    : undefined;
+}
+
 /**
  * Every authserv-id present on the message, in the order the headers appear.
  *

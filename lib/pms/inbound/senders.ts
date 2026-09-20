@@ -18,9 +18,10 @@
 
 import { and, eq } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
-import { pmsSeatSenders } from "@/db/postgres/schema";
+import { pmsSeatSenderAddresses, pmsSeatSenders } from "@/db/postgres/schema";
 import { isPmsProvider } from "../providers/index.ts";
 import {
+  authenticatedAddress,
   authenticatedDomain,
   type AuthenticationResults,
   domainMatches,
@@ -28,8 +29,11 @@ import {
   verifySender,
 } from "./authentication.ts";
 import {
+  describeSenderAddressRejection,
   describeSenderDomainRejection,
+  normalizeSenderAddress,
   normalizeSenderDomain,
+  senderAddressRejection,
   senderDomainRejection,
 } from "./sender-domain.ts";
 
@@ -42,6 +46,10 @@ export interface SeatSender {
 
 export type AllowResult =
   | { ok: true; sender: SeatSender; replacedProviderId: string | null }
+  | { ok: false; reason: string };
+
+export type AllowAddressResult =
+  | { ok: true; sender: SeatSenderAddress; replacedProviderId: string | null }
   | { ok: false; reason: string };
 
 /** Every sender this workspace allows, current first by recency of the grant. */
@@ -96,7 +104,7 @@ export async function allowSender(
     return { ok: false, reason: "Unknown system. Pick the PMS this domain sends from." };
   }
 
-  const rejection = senderDomainRejection(normalized, providerId);
+  const rejection = senderDomainRejection(normalized);
   if (rejection) return { ok: false, reason: describeSenderDomainRejection(rejection) };
 
   const [existing] = await dbSession.db
@@ -144,6 +152,141 @@ export async function revokeSender(dbSession: DbSession, organizationId: string,
   return deleted.length > 0;
 }
 
+/* ── approved mailboxes ───────────────────────────────────────────────────── */
+
+export interface SeatSenderAddress {
+  address: string;
+  providerId: string;
+  addedBy: string;
+  addedAt: Date;
+}
+
+/** Every mailbox this workspace approved, most recent grant first. */
+export async function readSeatAddressAllowlist(
+  dbSession: DbSession,
+  organizationId: string,
+): Promise<SeatSenderAddress[]> {
+  const rows = await dbSession.db
+    .select()
+    .from(pmsSeatSenderAddresses)
+    .where(eq(pmsSeatSenderAddresses.organizationId, organizationId));
+
+  return rows
+    .map((row) => ({
+      address: row.address,
+      providerId: row.providerId,
+      addedBy: row.addedBy,
+      addedAt: row.addedAt,
+    }))
+    .sort((a, b) => b.addedAt.getTime() - a.addedAt.getTime());
+}
+
+/**
+ * Approve one mailbox to write to this workspace's seat.
+ *
+ * The narrow grant, and the only way a consumer mailbox provider is ever
+ * trusted. `senderAddressRejection` permits `john@gmail.com` where
+ * `senderDomainRejection` refuses `gmail.com`, and that asymmetry is the
+ * design rather than an oversight: one names a person, the other names a
+ * population.
+ *
+ * Approving a mailbox never widens into its domain. Nothing here writes to
+ * `pms_seat_senders`, and `resolveSeatSender` matches an approved address
+ * exactly — so `john@gmail.com` being approved leaves `attacker@gmail.com`
+ * exactly as untrusted as it was.
+ */
+export async function allowSenderAddress(
+  dbSession: DbSession,
+  organizationId: string,
+  address: string,
+  providerId: string,
+  userId: string,
+): Promise<AllowAddressResult> {
+  const normalized = normalizeSenderAddress(address);
+
+  if (!isPmsProvider(providerId)) {
+    return { ok: false, reason: "Unknown system. Pick the PMS this sender writes on behalf of." };
+  }
+
+  const rejection = senderAddressRejection(normalized);
+  if (rejection) return { ok: false, reason: describeSenderAddressRejection(rejection) };
+
+  const [existing] = await dbSession.db
+    .select({ providerId: pmsSeatSenderAddresses.providerId })
+    .from(pmsSeatSenderAddresses)
+    .where(and(
+      eq(pmsSeatSenderAddresses.organizationId, organizationId),
+      eq(pmsSeatSenderAddresses.address, normalized),
+    ))
+    .limit(1);
+
+  const addedAt = new Date();
+  const sender: SeatSenderAddress = { address: normalized, providerId, addedBy: userId, addedAt };
+
+  if (existing) {
+    if (existing.providerId === providerId) return { ok: true, sender, replacedProviderId: null };
+    await dbSession.db
+      .update(pmsSeatSenderAddresses)
+      .set({ providerId, addedBy: userId, addedAt })
+      .where(and(
+        eq(pmsSeatSenderAddresses.organizationId, organizationId),
+        eq(pmsSeatSenderAddresses.address, normalized),
+      ));
+    return { ok: true, sender, replacedProviderId: existing.providerId };
+  }
+
+  await dbSession.db.insert(pmsSeatSenderAddresses).values({
+    organizationId,
+    address: normalized,
+    providerId,
+    addedBy: userId,
+    addedAt,
+  });
+
+  return { ok: true, sender, replacedProviderId: null };
+}
+
+/** Stop reading mail from a mailbox. Returns false when it was not approved. */
+export async function revokeSenderAddress(
+  dbSession: DbSession,
+  organizationId: string,
+  address: string,
+): Promise<boolean> {
+  const normalized = normalizeSenderAddress(address);
+  const deleted = await dbSession.db
+    .delete(pmsSeatSenderAddresses)
+    .where(and(
+      eq(pmsSeatSenderAddresses.organizationId, organizationId),
+      eq(pmsSeatSenderAddresses.address, normalized),
+    ))
+    .returning({ address: pmsSeatSenderAddresses.address });
+  return deleted.length > 0;
+}
+
+/**
+ * How much a message's sender was trusted, and by which rung.
+ *
+ * Ordered, and the order is the policy: a narrower grant is always preferred to
+ * a wider one, and nothing falls *upward* into a broader trust than the one
+ * that actually matched.
+ */
+export type SenderTrustTier =
+  /**
+   * A mailbox this workspace connected and authenticated itself.
+   *
+   * The strongest rung, and **nothing produces it yet** — Aval has no connected
+   * mailbox integration. It is named here because the ladder's order is the
+   * decision, and a rung added later must slot in above the others rather than
+   * be argued about again.
+   */
+  | "connected_mailbox"
+  /** An exact mailbox the workspace approved. */
+  | "approved_address"
+  /** A domain the workspace approved, which it must control. */
+  | "approved_domain"
+  /** Nothing matched. The message waits for a person. */
+  | "review";
+
 export interface SeatSenderResolution {
   verdict: SenderVerdict;
   /**
@@ -152,22 +295,73 @@ export interface SeatSenderResolution {
    * body is the one thing in this path a sender fully controls.
    */
   providerId?: string;
+  /** Which rung of the trust ladder decided this. */
+  tier: SenderTrustTier;
 }
 
 /**
- * The join: does this message pass, and whose system is it from?
+ * The join: does this message pass, whose system is it from, and on what basis?
  *
- * Both answers come from the same allowlist row, which is what keeps them from
+ * Trust is tried in one fixed order, narrowest first:
+ *
+ *   1. **A connected authenticated mailbox.** No producer yet; see
+ *      `SenderTrustTier`.
+ *   2. **An exact approved sender address.** Requires `authenticatedAddress`,
+ *      which is strictly stronger than an authenticated domain — see its own
+ *      documentation for why DMARC alone is not enough to trust a local part.
+ *   3. **An approved organization-controlled domain.** The existing allowlist.
+ *      A consumer mailbox domain can never reach this rung, because
+ *      `senderDomainRejection` refuses to store one.
+ *   4. **Review.** Nothing matched, so a person decides.
+ *
+ * The order matters in one direction only: a message may be trusted by a
+ * *narrower* rung than the broadest one it would satisfy, never a wider one.
+ * A workspace that approved `john@gmail.com` and nothing else resolves John at
+ * rung 2 and everybody else at rung 4 — there is no rung 3 for `gmail.com` to
+ * reach, which is what keeps one approval from becoming a population's.
+ *
+ * Both answers on a pass come from the same row, which is what keeps them from
  * disagreeing. A verified message whose provider could not be determined is
- * returned unverified rather than passed to a default parser — a message that
- * authenticated against a row we then cannot find is a bug in this function,
- * and guessing a provider would hide it behind mail that parses slightly wrong.
+ * returned unverified rather than passed to a default parser.
  */
 export async function resolveSeatSender(
   dbSession: DbSession,
   organizationId: string,
   auth: AuthenticationResults | null,
+  raw: string,
 ): Promise<SeatSenderResolution> {
+  // Rung 2. Deliberately independent of the domain allowlist: a workspace whose
+  // only grant is a mailbox has an empty domain list, and `verifySender`
+  // refuses an empty list before it reads a header. Asking it first would mean
+  // an approved mailbox could never verify.
+  const mailbox = authenticatedAddress(auth, raw);
+  if (mailbox) {
+    const [approved] = await dbSession.db
+      .select({ providerId: pmsSeatSenderAddresses.providerId })
+      .from(pmsSeatSenderAddresses)
+      .where(and(
+        eq(pmsSeatSenderAddresses.organizationId, organizationId),
+        // Exact. No `domainMatches` here, and no subdomain latitude: the whole
+        // value of this rung is that it grants one mailbox.
+        eq(pmsSeatSenderAddresses.address, mailbox.address),
+      ))
+      .limit(1);
+
+    if (approved) {
+      return {
+        verdict: {
+          verified: true,
+          domain: mailbox.domain,
+          method: "dmarc",
+          reason: `${mailbox.address} is an approved sender for this workspace, DMARC-authenticated and DKIM-signed by ${mailbox.domain}.`,
+        },
+        providerId: approved.providerId,
+        tier: "approved_address",
+      };
+    }
+  }
+
+  // Rung 3.
   const allowlist = await readSeatAllowlist(dbSession, organizationId);
   const verdict = verifySender(auth, allowlist.map((sender) => sender.domain));
 
@@ -178,11 +372,11 @@ export async function resolveSeatSender(
     // is the right rule and also the state a workspace is in at first contact.
     const authenticated = verdict.domain ? null : authenticatedDomain(auth);
     return authenticated
-      ? { verdict: { ...verdict, domain: authenticated.domain, method: authenticated.method } }
-      : { verdict };
+      ? { verdict: { ...verdict, domain: authenticated.domain, method: authenticated.method }, tier: "review" }
+      : { verdict, tier: "review" };
   }
 
-  if (!verdict.domain) return { verdict };
+  if (!verdict.domain) return { verdict, tier: "review" };
 
   const matched = allowlist.find((sender) => domainMatches(verdict.domain as string, sender.domain));
   if (!matched) {
@@ -192,8 +386,9 @@ export async function resolveSeatSender(
         domain: verdict.domain,
         reason: `${verdict.domain} authenticated but could not be matched to an allowed sender for this workspace.`,
       },
+      tier: "review",
     };
   }
 
-  return { verdict, providerId: matched.providerId };
+  return { verdict, providerId: matched.providerId, tier: "approved_domain" };
 }

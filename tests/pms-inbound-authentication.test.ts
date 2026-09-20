@@ -138,3 +138,101 @@ test("dkim=pass/policy-style results parse to their bare result", () => {
   const raw = message(`Authentication-Results: ${CF}; dkim=pass/1024 header.d=appfolio.com\r\n`);
   assert.equal(parseAuthenticationResults(raw, CF)?.results.get("dkim"), "pass");
 });
+
+/* ── the exact mailbox ────────────────────────────────────────────────────── */
+
+/**
+ * `authenticatedAddress` is the stronger claim: not "this domain sent it" but
+ * "this mailbox sent it". It is what a grant to one sender is checked against,
+ * so these are written the same way as the rest of this file — mostly messages
+ * that must NOT yield an address.
+ */
+
+/** A message as Cloudflare Email Routing would deliver it. */
+function delivered({
+  dmarc = "pass",
+  dkim = "pass",
+  from = "gmail.com",
+  signedBy = from,
+  mailbox = `john@${from}`,
+  extraHeaders = "",
+}: {
+  dmarc?: string;
+  dkim?: string;
+  from?: string;
+  signedBy?: string;
+  mailbox?: string;
+  extraHeaders?: string;
+}): string {
+  return message(
+    `Authentication-Results: ${CF}; dkim=${dkim} header.d=${signedBy}; `
+    + `spf=pass smtp.mailfrom=bounce.${from}; dmarc=${dmarc} header.from=${from}\r\n`
+    + `From: ${mailbox}\r\n`
+    + extraHeaders
+    + "Subject: Notice",
+  );
+}
+
+test("a DMARC pass with an aligned DKIM signature establishes the mailbox", async () => {
+  const { authenticatedAddress } = await import("../lib/pms/inbound/authentication.ts");
+  const raw = delivered({});
+  const found = authenticatedAddress(parseAuthenticationResults(raw, CF), raw);
+  assert.deepEqual(found, { address: "john@gmail.com", domain: "gmail.com" });
+});
+
+test("a display name and relaxed subdomain alignment are still one mailbox", async () => {
+  const { authenticatedAddress } = await import("../lib/pms/inbound/authentication.ts");
+  const raw = delivered({
+    from: "appfolio.com",
+    signedBy: "mail.appfolio.com",
+    mailbox: '"Doe, John" <Notices@AppFolio.com>',
+  });
+  const found = authenticatedAddress(parseAuthenticationResults(raw, CF), raw);
+  assert.equal(found?.address, "notices@appfolio.com");
+});
+
+test("DMARC alone does not establish a mailbox, because SPF can satisfy it", async () => {
+  const { authenticatedAddress } = await import("../lib/pms/inbound/authentication.ts");
+  // The case this rule exists for. DMARC can pass on an aligned SPF result,
+  // which authenticates the envelope and says nothing whatever about the From
+  // local part — so the domain is established and the mailbox is not.
+  const raw = delivered({ dkim: "none" });
+  const auth = parseAuthenticationResults(raw, CF);
+  assert.equal(authenticatedAddress(auth, raw), null);
+  // The domain still is, which is what keeps a real PMS working.
+  const { authenticatedDomain } = await import("../lib/pms/inbound/authentication.ts");
+  assert.equal(authenticatedDomain(auth)?.domain, "gmail.com");
+});
+
+test("a DKIM signature by an unrelated domain does not establish the mailbox", async () => {
+  const { authenticatedAddress } = await import("../lib/pms/inbound/authentication.ts");
+  // A forwarder or a bulk sender signing for itself. The signature is real and
+  // it covers somebody else's header.
+  const raw = delivered({ from: "gmail.com", signedBy: "bulk-sender.example" });
+  assert.equal(authenticatedAddress(parseAuthenticationResults(raw, CF), raw), null);
+});
+
+test("a From the DMARC result does not cover is refused", async () => {
+  const { authenticatedAddress } = await import("../lib/pms/inbound/authentication.ts");
+  // `header.from` says gmail.com; the actual From header says something else.
+  const raw = delivered({ from: "gmail.com", mailbox: "john@evil.example" });
+  assert.equal(authenticatedAddress(parseAuthenticationResults(raw, CF), raw), null);
+});
+
+test("two From headers establish nothing, because clients disagree on which they show", async () => {
+  const { authenticatedAddress } = await import("../lib/pms/inbound/authentication.ts");
+  const raw = delivered({ extraHeaders: "From: attacker@gmail.com\r\n" });
+  assert.equal(authenticatedAddress(parseAuthenticationResults(raw, CF), raw), null);
+});
+
+test("a list of senders is not a single authenticated mailbox", async () => {
+  const { authenticatedAddress } = await import("../lib/pms/inbound/authentication.ts");
+  const raw = delivered({ mailbox: "john@gmail.com, attacker@gmail.com" });
+  assert.equal(authenticatedAddress(parseAuthenticationResults(raw, CF), raw), null);
+});
+
+test("a failing DMARC establishes no mailbox however well signed", async () => {
+  const { authenticatedAddress } = await import("../lib/pms/inbound/authentication.ts");
+  const raw = delivered({ dmarc: "fail" });
+  assert.equal(authenticatedAddress(parseAuthenticationResults(raw, CF), raw), null);
+});

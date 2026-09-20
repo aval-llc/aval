@@ -89,39 +89,38 @@ export function normalizeSenderDomain(input: string): string {
 }
 
 /**
- * Providers for which a consumer mailbox domain is nonetheless allowed.
+ * Whether a consumer mailbox domain may be allowlisted. It may not — for any
+ * provider, including `generic_email`.
  *
- * TODO(decision): **empty is the open policy question on this module, and empty
- * is the closed default** — chosen so no permissive gap exists while the call is
- * open. Adding `generic_email` here is the only change the decision needs.
+ * This was the open question on this module and it is now decided closed. The
+ * case for an exemption was the smallest customer: a two-person management
+ * company whose "PMS" is a person forwarding notices from Gmail. The case
+ * against is that `gmail.com` on an allowlist is not a party, it is a
+ * population — every Gmail user on earth may then write into that workspace's
+ * agent context, DMARC-clean, with no forgery involved, and the operator who
+ * ticked the box will not have read it that way.
  *
- * The case for adding it is the smallest customer: a two-person management
- * company whose "PMS" is a person forwarding notices from a Gmail account,
- * connected as `generic_email`. Under the closed rule that workspace cannot use
- * the seat at all, so the universality the seat exists for stops exactly where
- * the customer is smallest.
+ * The small customer is served instead by granting the *mailbox*, not the
+ * domain: see `senderAddressRejection` and the trust ladder in `senders.ts`.
+ * An exact-address grant gives that workspace exactly the one person who
+ * forwards its notices, and gives no one else anything.
  *
- * The case against is that `gmail.com` on an allowlist is not a party, it is a
- * population: every Gmail user on earth may then write into that workspace's
- * agent context, DMARC-clean, with no forgery involved. The operator who ticked
- * the box will not have read it that way.
- *
- * A named PMS never belongs here — AppFolio does not send from Gmail, so such a
- * row is a mistake or an impersonation either way.
+ * A named PMS never belonged here either — AppFolio does not send from Gmail,
+ * so such a row is a mistake or an impersonation either way.
  */
-const PUBLIC_MAILBOX_EXEMPT: ReadonlySet<string> = new Set<string>();
-
-/** Whether a consumer mailbox domain may be allowlisted, and for which provider. */
-export function publicMailboxRejection(
-  domain: string,
-  providerId: string,
-): SenderDomainRejection | null {
-  if (!PUBLIC_MAILBOX.has(domain)) return null;
-  return PUBLIC_MAILBOX_EXEMPT.has(providerId) ? null : "public_mailbox";
+export function publicMailboxRejection(domain: string): SenderDomainRejection | null {
+  return PUBLIC_MAILBOX.has(domain) ? "public_mailbox" : null;
 }
 
-/** Why a domain cannot be allowlisted for this provider, or null if it can. */
-export function senderDomainRejection(domain: string, providerId: string): SenderDomainRejection | null {
+/**
+ * The rejections that are about the *name*, shared by domain and address grants.
+ *
+ * Everything here disqualifies a name whatever kind of grant it is attached to:
+ * `john@co.uk` is as meaningless as `co.uk`. The one rule not in here is the
+ * consumer mailbox, which is exactly the rule that differs between the two —
+ * see `senderAddressRejection`.
+ */
+function domainStructureRejection(domain: string): SenderDomainRejection | null {
   if (!DOMAIN.test(domain)) return "shape";
 
   // The seat's own domain. Mail that authenticates as aval.llc is either our own
@@ -137,7 +136,65 @@ export function senderDomainRejection(domain: string, providerId: string): Sende
     return "public_suffix";
   }
 
-  return publicMailboxRejection(domain, providerId);
+  return null;
+}
+
+/** Why a domain cannot be allowlisted, or null if it can. */
+export function senderDomainRejection(domain: string): SenderDomainRejection | null {
+  return domainStructureRejection(domain) ?? publicMailboxRejection(domain);
+}
+
+/* ── exact mailbox grants ─────────────────────────────────────────────────── */
+
+export type SenderAddressRejection = SenderDomainRejection | "address_shape";
+
+/**
+ * What an operator typed, reduced to the mailbox they meant.
+ *
+ * Same forgiveness as `normalizeSenderDomain` and for the same reason — people
+ * paste `mailto:` links and `Jane Doe <jane@example.com>` out of a mail client.
+ * What it will not do is guess: a value with no `@` stays as typed and is
+ * rejected by shape rather than being turned into something plausible.
+ */
+export function normalizeSenderAddress(input: string): string {
+  let value = input.trim().toLowerCase();
+  value = value.replace(/^mailto:/, "");
+  const angle = value.lastIndexOf("<");
+  if (angle >= 0) {
+    const close = value.indexOf(">", angle);
+    value = close < 0 ? value.slice(angle + 1) : value.slice(angle + 1, close);
+  }
+  return value.trim().replace(/\.$/, "");
+}
+
+/**
+ * Why a mailbox cannot be allowlisted, or null if it can.
+ *
+ * Deliberately **more permissive than `senderDomainRejection` in exactly one
+ * way**: a consumer mailbox domain is allowed here. That is the whole design.
+ * `gmail.com` as a domain grants a population; `john@gmail.com` grants one
+ * mailbox, and nothing about that grant reaches `attacker@gmail.com`.
+ *
+ * Every other rule still applies, because they are about the name rather than
+ * the breadth of the grant: `jane@co.uk` names no organization, and
+ * `someone@aval.llc` is the seat's own domain.
+ */
+export function senderAddressRejection(address: string): SenderAddressRejection | null {
+  const at = address.lastIndexOf("@");
+  // A local part, an `@`, and no whitespace or routing punctuation. The shape
+  // an operator can type wrong, not a general RFC 5322 parser.
+  if (at < 1 || at === address.length - 1) return "address_shape";
+  if (/[\s"'<>,;]/.test(address)) return "address_shape";
+  if (address.indexOf("@") !== at) return "address_shape";
+
+  return domainStructureRejection(address.slice(at + 1));
+}
+
+/** Words for an address rejection. */
+export function describeSenderAddressRejection(rejection: SenderAddressRejection): string {
+  return rejection === "address_shape"
+    ? "Enter a full email address, like notices@example.com."
+    : describeSenderDomainRejection(rejection);
 }
 
 /**
@@ -169,7 +226,6 @@ export function describeSenderDomainRejection(rejection: SenderDomainRejection):
  */
 export function suggestedSenderDomains(
   descriptorDomains: readonly string[] | undefined,
-  providerId: string,
   already: readonly string[],
 ): string[] {
   const held = new Set(already.map((domain) => normalizeSenderDomain(domain)));
@@ -178,7 +234,7 @@ export function suggestedSenderDomains(
   for (const raw of descriptorDomains ?? []) {
     const domain = normalizeSenderDomain(raw);
     if (held.has(domain) || seen.has(domain)) continue;
-    if (senderDomainRejection(domain, providerId)) continue;
+    if (senderDomainRejection(domain)) continue;
     seen.add(domain);
     out.push(domain);
   }

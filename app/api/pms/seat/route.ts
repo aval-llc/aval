@@ -29,7 +29,10 @@ import { pmsProvider } from "@/lib/pms/providers/index.ts";
 import { seatReview } from "@/lib/pms/inbound/messages.ts";
 import { claimSeatSlug, seatAddressesFor } from "@/lib/pms/inbound/seats.ts";
 import { suggestedSenderDomains } from "@/lib/pms/inbound/sender-domain.ts";
-import { allowSender, readSeatAllowlist, revokeSender } from "@/lib/pms/inbound/senders.ts";
+import {
+  allowSender, allowSenderAddress, readSeatAddressAllowlist, readSeatAllowlist,
+  revokeSender, revokeSenderAddress,
+} from "@/lib/pms/inbound/senders.ts";
 import type { DbSession } from "@/db/postgres/session";
 import { withApiSession } from "@/lib/api/with-session";
 
@@ -58,9 +61,10 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
 
   try {
     await ensureOrganization(dbSession, identity);
-    const [addresses, allowlist, review, choices, role] = await Promise.all([
+    const [addresses, allowlist, addressAllowlist, review, choices, role] = await Promise.all([
       seatAddressesFor(dbSession, identity.organizationId),
       readSeatAllowlist(dbSession, identity.organizationId),
+      readSeatAddressAllowlist(dbSession, identity.organizationId),
       seatReview(dbSession, identity.organizationId),
       providerChoices(dbSession, identity.organizationId),
       roleFor(dbSession, identity.userId, identity.organizationId).catch(() => null),
@@ -80,17 +84,28 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
         displayName: pmsProvider(sender.providerId)?.displayName ?? sender.providerId,
         addedAt: sender.addedAt.toISOString(),
       })),
+      // The narrow grants, listed apart from the domains. One is a party and the
+      // other is a person, and a panel that merged them would invite an
+      // operator to read a mailbox as though it covered its domain.
+      addressAllowlist: addressAllowlist.map((sender) => ({
+        address: sender.address,
+        providerId: sender.providerId,
+        displayName: pmsProvider(sender.providerId)?.displayName ?? sender.providerId,
+        addedAt: sender.addedAt.toISOString(),
+      })),
       providers: choices.map((choice) => ({
         id: choice.id,
         displayName: choice.displayName,
         // Researched, not observed. The component says so, because a customer
         // ticking a suggestion is the one confirming it.
-        suggestions: suggestedSenderDomains(choice.senderDomains, choice.id, held),
+        suggestions: suggestedSenderDomains(choice.senderDomains, held),
       })),
       review: {
         held: review.held.map((sender) => ({
           domain: sender.domain,
           method: sender.method,
+          addresses: sender.addresses,
+          domainAllowlistable: sender.domainAllowlistable,
           messages: sender.messages,
           firstSeen: sender.firstSeen.toISOString(),
           lastSeen: sender.lastSeen.toISOString(),
@@ -110,6 +125,7 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
       address: null,
       addresses: [],
       allowlist: [],
+      addressAllowlist: [],
       providers: [],
       review: { held: [], unauthenticated: { messages: 0, lastSeen: null }, verified: 0 },
       canEdit: false,
@@ -175,6 +191,29 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
     const domain = typeof payload.domain === "string" ? payload.domain : "";
     const revoked = await revokeSender(dbSession, identity.organizationId, domain);
     return Response.json({ domain, revoked });
+  }
+
+  // Approving one mailbox. Separate from `allow` rather than a flag on it,
+  // because the two grants are refused under different rules: this is the only
+  // path by which a consumer mailbox provider is ever trusted, and it trusts
+  // exactly one sender there. Nothing here writes to the domain allowlist.
+  if (intent === "allow_address") {
+    const address = typeof payload.address === "string" ? payload.address : "";
+    const providerId = typeof payload.providerId === "string" ? payload.providerId : "";
+    const allowed = await allowSenderAddress(dbSession, identity.organizationId, address, providerId, identity.userId);
+    if (!allowed.ok) return Response.json({ error: allowed.reason }, { status: 422 });
+    return Response.json({
+      address: allowed.sender.address,
+      providerId: allowed.sender.providerId,
+      replacedProviderId: allowed.replacedProviderId,
+      pendingSweep: true,
+    });
+  }
+
+  if (intent === "revoke_address") {
+    const address = typeof payload.address === "string" ? payload.address : "";
+    const revoked = await revokeSenderAddress(dbSession, identity.organizationId, address);
+    return Response.json({ address, revoked });
   }
 
   return Response.json({ error: "Unknown intent" }, { status: 400 });

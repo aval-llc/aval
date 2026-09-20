@@ -7,7 +7,7 @@
  * never touches the bucket. See `app/api/pms/seat/adjudicate/route.ts`.
  */
 
-import { observedAuthservIds, parseAuthenticationResults, type SenderVerdict } from "./authentication.ts";
+import { authenticatedAddress, observedAuthservIds, parseAuthenticationResults, type SenderVerdict } from "./authentication.ts";
 import { disposeMessage, dispositionKey } from "./disposition.ts";
 import { recordSeatMessage } from "./messages.ts";
 import { promoteVerifiedMessage, type PromotionOutcome } from "./promote.ts";
@@ -47,14 +47,21 @@ export async function adjudicateSeatMessage(
   const organizationId = recipient ? await organizationForRecipient(dbSession, recipient) : null;
   const auth = parseAuthenticationResults(raw, authservId);
 
+  // `raw` is passed because the exact-mailbox rung reads the `From:` header;
+  // the authenticated *domain* is in Authentication-Results, but the mailbox
+  // is not, and a grant to one sender cannot be checked without it.
   const resolution = organizationId
-    ? await resolveSeatSender(dbSession, organizationId, auth)
-    : { verdict: NO_WORKSPACE, providerId: undefined };
+    ? await resolveSeatSender(dbSession, organizationId, auth, raw)
+    : { verdict: NO_WORKSPACE, providerId: undefined, tier: "review" as const };
 
   const disposition = disposeMessage({
     organizationId,
     verdict: resolution.verdict,
     providerId: resolution.providerId,
+    // Recomputed rather than taken from the resolution, which only carries a
+    // mailbox when one was *approved*. A held message's sender is precisely the
+    // one nobody has approved yet, and that is the sender a person needs named.
+    address: authenticatedAddress(auth, raw)?.address ?? null,
   });
 
   const targetKey = dispositionKey(disposition, digest);
@@ -85,6 +92,7 @@ export async function adjudicateSeatMessage(
     organizationId,
     disposition: disposition.state,
     domain: disposition.domain,
+    address: disposition.address,
     method: disposition.method,
     providerId: disposition.providerId,
     reason,

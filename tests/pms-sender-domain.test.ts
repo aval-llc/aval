@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  describeSenderAddressRejection,
   describeSenderDomainRejection,
+  normalizeSenderAddress,
   normalizeSenderDomain,
   publicMailboxRejection,
+  senderAddressRejection,
   senderDomainRejection,
   suggestedSenderDomains,
 } from "../lib/pms/inbound/sender-domain.ts";
@@ -38,45 +41,45 @@ test("a wildcard is stripped, not honoured as syntax", () => {
 });
 
 test("a researched vendor domain is allowed", () => {
-  assert.equal(senderDomainRejection("appfolio.com", "appfolio"), null);
-  assert.equal(senderDomainRejection("mail.appfolio.com", "appfolio"), null);
-  assert.equal(senderDomainRejection("example.co.uk", "yardi"), null);
+  assert.equal(senderDomainRejection("appfolio.com"), null);
+  assert.equal(senderDomainRejection("mail.appfolio.com"), null);
+  assert.equal(senderDomainRejection("example.co.uk"), null);
 });
 
 test("something that is not a domain is refused rather than guessed at", () => {
-  assert.equal(senderDomainRejection("com", "appfolio"), "shape");
-  assert.equal(senderDomainRejection("localhost", "appfolio"), "shape");
-  assert.equal(senderDomainRejection("10.0.0.1", "appfolio"), "shape");
-  assert.equal(senderDomainRejection("-appfolio.com", "appfolio"), "shape");
-  assert.equal(senderDomainRejection("appfolio.c", "appfolio"), "shape");
-  assert.equal(senderDomainRejection("", "appfolio"), "shape");
+  assert.equal(senderDomainRejection("com"), "shape");
+  assert.equal(senderDomainRejection("localhost"), "shape");
+  assert.equal(senderDomainRejection("10.0.0.1"), "shape");
+  assert.equal(senderDomainRejection("-appfolio.com"), "shape");
+  assert.equal(senderDomainRejection("appfolio.c"), "shape");
+  assert.equal(senderDomainRejection(""), "shape");
 });
 
 test("Aval's own domain cannot be allowed as a sender", () => {
   // Mail authenticating as aval.llc is our own forwarding or something imitating
   // it. Neither is a PMS reporting a work order, and allowing it would make a
   // seat trust its own bounces.
-  assert.equal(senderDomainRejection("aval.llc", "generic_email"), "seat_domain");
-  assert.equal(senderDomainRejection("mail.aval.llc", "generic_email"), "seat_domain");
+  assert.equal(senderDomainRejection("aval.llc"), "seat_domain");
+  assert.equal(senderDomainRejection("mail.aval.llc"), "seat_domain");
 });
 
 test("an entry one label short of a domain is refused", () => {
   // `co.uk` would cover every organization in the UK. This is the mistake that
   // happens when someone types a vendor's domain from memory.
-  assert.equal(senderDomainRejection("co.uk", "yardi"), "public_suffix");
-  assert.equal(senderDomainRejection("com.au", "yardi"), "public_suffix");
+  assert.equal(senderDomainRejection("co.uk"), "public_suffix");
+  assert.equal(senderDomainRejection("com.au"), "public_suffix");
   // Not a public suffix, just short — a real company can own this.
-  assert.equal(senderDomainRejection("co.com", "yardi"), null);
+  assert.equal(senderDomainRejection("co.com"), null);
 });
 
 test("a shared consumer mail domain is refused, because it grants a population", () => {
   // Nobody forges anything here: the sender really is gmail.com. That is the
   // problem — so is everyone else.
-  assert.equal(senderDomainRejection("gmail.com", "generic_email"), "public_mailbox");
-  assert.equal(senderDomainRejection("outlook.com", "appfolio"), "public_mailbox");
-  assert.equal(publicMailboxRejection("proton.me", "generic_email"), "public_mailbox");
+  assert.equal(senderDomainRejection("gmail.com"), "public_mailbox");
+  assert.equal(senderDomainRejection("outlook.com"), "public_mailbox");
+  assert.equal(publicMailboxRejection("proton.me"), "public_mailbox");
   // A subdomain of one is not the shared domain and is not treated as it.
-  assert.equal(senderDomainRejection("notices.gmail.com", "generic_email"), null);
+  assert.equal(senderDomainRejection("notices.gmail.com"), null);
 });
 
 test("every rejection says what to do instead", () => {
@@ -90,30 +93,80 @@ test("every rejection says what to do instead", () => {
 test("suggestions are filtered by the same rules as typed input", () => {
   // A descriptor is researched, not observed. A suggestion that an operator
   // could not have typed must not get in through a checkbox instead.
-  assert.deepEqual(suggestedSenderDomains(["appfolio.com", "com", "gmail.com"], "appfolio", []), [
+  assert.deepEqual(suggestedSenderDomains(["appfolio.com", "com", "gmail.com"], []), [
     "appfolio.com",
   ]);
 });
 
 test("suggestions drop what the workspace already allows, and never duplicate", () => {
-  assert.deepEqual(suggestedSenderDomains(["appfolio.com"], "appfolio", ["appfolio.com"]), []);
-  assert.deepEqual(suggestedSenderDomains(["APPFOLIO.com", "appfolio.com"], "appfolio", []), [
+  assert.deepEqual(suggestedSenderDomains(["appfolio.com"], ["appfolio.com"]), []);
+  assert.deepEqual(suggestedSenderDomains(["APPFOLIO.com", "appfolio.com"], []), [
     "appfolio.com",
   ]);
-  assert.deepEqual(suggestedSenderDomains(undefined, "generic_email", []), []);
+  assert.deepEqual(suggestedSenderDomains(undefined, []), []);
 });
 
-test(
-  "a generic_email workspace may allow a consumer mailbox domain",
-  { todo: "policy decision open — see publicMailboxRejection in lib/pms/inbound/sender-domain.ts" },
-  () => {
-    // The smallest customer: a two-person management company whose PMS is a
-    // person forwarding notices from Gmail, connected as `generic_email`. The
-    // closed default shuts them out of the seat entirely. This test states the
-    // open question and fails against the current rule on purpose — it is a
-    // visible gap, not a passing suite.
-    assert.equal(senderDomainRejection("gmail.com", "generic_email"), null);
-    // Even if exempted there, a named PMS has no business sending from Gmail.
-    assert.equal(senderDomainRejection("gmail.com", "appfolio"), "public_mailbox");
-  },
-);
+test("no provider may allowlist a consumer mailbox domain, generic_email included", () => {
+  // This was the open policy question on the module and it is decided closed.
+  // The smallest customer — a two-person company whose "PMS" is a person
+  // forwarding notices from Gmail — is served by granting that person's
+  // mailbox, not the domain they happen to use. See the address tests below.
+  for (const provider of ["generic_email", "appfolio", "yardi"]) {
+    assert.equal(
+      senderDomainRejection("gmail.com"), "public_mailbox",
+      `${provider} must not be able to allowlist an entire consumer mail domain`,
+    );
+  }
+  assert.equal(publicMailboxRejection("icloud.com"), "public_mailbox");
+  assert.equal(publicMailboxRejection("outlook.com"), "public_mailbox");
+  assert.equal(publicMailboxRejection("yahoo.com"), "public_mailbox");
+});
+
+test("an address is reduced to the mailbox the operator meant", () => {
+  assert.equal(normalizeSenderAddress("  Notices@AppFolio.com "), "notices@appfolio.com");
+  assert.equal(normalizeSenderAddress("mailto:notices@appfolio.com"), "notices@appfolio.com");
+  assert.equal(normalizeSenderAddress("Jane Doe <jane@example.com>"), "jane@example.com");
+  assert.equal(normalizeSenderAddress("jane@example.com."), "jane@example.com");
+  // No `@` is not guessed into something plausible; it stays wrong and is
+  // rejected by shape.
+  assert.equal(normalizeSenderAddress("example.com"), "example.com");
+  assert.equal(senderAddressRejection(normalizeSenderAddress("example.com")), "address_shape");
+});
+
+test("a mailbox may be allowed where its domain may not", () => {
+  // The single rule that differs between a domain grant and an address grant.
+  // `gmail.com` grants a population; `john@gmail.com` grants one mailbox.
+  assert.equal(senderDomainRejection("gmail.com"), "public_mailbox");
+  assert.equal(senderAddressRejection("john@gmail.com"), null);
+  assert.equal(senderAddressRejection("john@icloud.com"), null);
+  assert.equal(senderAddressRejection("notices@appfolio.com"), null);
+});
+
+test("every other rule still applies to a mailbox, because they are about the name", () => {
+  // A name that identifies no organization identifies none with an `@` in front
+  // of it either.
+  assert.equal(senderAddressRejection("jane@co.uk"), "public_suffix");
+  assert.equal(senderAddressRejection("someone@aval.llc"), "seat_domain");
+  assert.equal(senderAddressRejection("someone@mail.aval.llc"), "seat_domain");
+  assert.equal(senderAddressRejection("jane@localhost"), "shape");
+  assert.equal(senderAddressRejection("jane@10.0.0.1"), "shape");
+});
+
+test("a mailbox that is not one mailbox is refused", () => {
+  assert.equal(senderAddressRejection("@example.com"), "address_shape");
+  assert.equal(senderAddressRejection("jane@"), "address_shape");
+  assert.equal(senderAddressRejection("jane"), "address_shape");
+  assert.equal(senderAddressRejection("jane@a@example.com"), "address_shape");
+  assert.equal(senderAddressRejection("jane doe@example.com"), "address_shape");
+  // A list, or anything carrying address syntax, is not a single grant.
+  assert.equal(senderAddressRejection("jane@example.com,bob@example.com"), "address_shape");
+  assert.equal(senderAddressRejection("<jane@example.com>"), "address_shape");
+});
+
+test("an address rejection tells the operator what to do", () => {
+  const shape = describeSenderAddressRejection("address_shape");
+  assert.ok(shape.includes("@"), "it should show the shape it wants");
+  // The shared codes keep the domain wording rather than inventing a second
+  // vocabulary for the same rule.
+  assert.equal(describeSenderAddressRejection("seat_domain"), describeSenderDomainRejection("seat_domain"));
+});

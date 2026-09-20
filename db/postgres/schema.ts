@@ -1812,6 +1812,40 @@ export const pmsSeatSenders = pgTable(
 );
 
 /**
+ * The per-workspace *mailbox* allowlist — one approved sender, not a domain.
+ *
+ * Separate from `pms_seat_senders` because it is a different grant with
+ * different rules, and a nullable `address` column on one table would have made
+ * every read decide which kind of row it was holding.
+ *
+ * This exists for the two cases a domain grant cannot serve without
+ * overreaching. A two-person company whose "PMS" is a person forwarding notices
+ * from Gmail: `gmail.com` as a domain grants every Gmail user on earth, while
+ * `john@gmail.com` grants John. And a message a human adjudicated: approving
+ * what arrived must approve *that sender*, never the population behind them.
+ *
+ * Deletable for the same reason as the domain list — consent has to be
+ * revocable and immediate.
+ */
+export const pmsSeatSenderAddresses = pgTable(
+  "pms_seat_sender_addresses",
+  {
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** Normalized by `sender-domain.ts`: lowercase, no display name, no angle brackets. */
+    address: text("address").notNull(),
+    /** A provider id from lib/pms/providers. Verified mail from here is read as this system. */
+    providerId: text("provider_id").notNull(),
+    /** Who allowed it. This is a consent record, so the approver is part of it. */
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_seat_sender_addresses_uq").on(table.organizationId, table.address),
+    index("pms_seat_sender_addresses_org_idx").on(table.organizationId),
+  ],
+);
+
+/**
  * One row per message the seat has processed — the reader's ledger.
  *
  * Written by `aval-pms-seat-reader` (worker/pms-seat-reader.ts), which is the
@@ -1864,6 +1898,18 @@ export const pmsSeatMessages = pgTable(
     disposition: text("disposition").notNull(),
     /** Set only when authentication established it. Null is the signal not to name a sender. */
     authenticatedDomain: text("authenticated_domain"),
+    /**
+     * The exact mailbox, set only when it authenticated — a strictly stronger
+     * condition than the domain, requiring DMARC *and* an aligned DKIM
+     * signature (`authenticatedAddress`). Null under the same rule as the
+     * domain: a sender-chosen `From` is never stored where a review screen
+     * could put it next to a button that grants access.
+     *
+     * It is here so a person adjudicating held mail can approve *that sender*
+     * rather than the domain behind them, which for a consumer mailbox
+     * provider is the difference between one person and a population.
+     */
+    authenticatedAddress: text("authenticated_address"),
     /** dmarc | dkim, whichever established the domain. */
     method: text("method"),
     /** The provider from the matching allowlist row, so the parser is chosen by consent. */

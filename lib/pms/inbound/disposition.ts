@@ -35,6 +35,12 @@ export interface DispositionInput {
   verdict: SenderVerdict;
   /** From the matching allowlist row, present only on a pass. */
   providerId?: string;
+  /**
+   * The exact mailbox, when one authenticated. Subject to the same rule as the
+   * domain — the caller passes it only from `authenticatedAddress`, never from
+   * a `From` header it read itself.
+   */
+  address?: string | null;
 }
 
 export interface MessageDisposition {
@@ -49,6 +55,8 @@ export interface MessageDisposition {
   reprocess: boolean;
   /** Recorded only when authentication established it. See the note above. */
   domain: string | null;
+  /** The authenticated mailbox, under the same rule as `domain`. */
+  address: string | null;
   providerId: string | null;
   method: string | null;
 }
@@ -66,7 +74,7 @@ export const UNVERIFIED_PREFIX = "unverified";
 export const REPROCESS_PREFIXES: readonly string[] = ["held"];
 
 export function disposeMessage(input: DispositionInput): MessageDisposition {
-  const { organizationId, verdict, providerId } = input;
+  const { organizationId, verdict, providerId, address } = input;
 
   if (organizationId === null) {
     // Mail to an address that was never issued. The Worker stores it because it
@@ -77,6 +85,7 @@ export function disposeMessage(input: DispositionInput): MessageDisposition {
       destination: "rejected/unassigned",
       reprocess: false,
       domain: null,
+      address: null,
       providerId: null,
       method: null,
     };
@@ -88,6 +97,7 @@ export function disposeMessage(input: DispositionInput): MessageDisposition {
       destination: `verified/${organizationId}`,
       reprocess: false,
       domain: verdict.domain,
+      address: address ?? null,
       providerId,
       method: verdict.method ?? null,
     };
@@ -101,6 +111,9 @@ export function disposeMessage(input: DispositionInput): MessageDisposition {
       destination: `held/${organizationId}`,
       reprocess: true,
       domain: verdict.domain,
+      // The point of carrying it this far: a held message is the one an
+      // operator acts on, and approving the mailbox is the narrow act.
+      address: address ?? null,
       providerId: null,
       method: verdict.method ?? null,
     };
@@ -111,6 +124,7 @@ export function disposeMessage(input: DispositionInput): MessageDisposition {
     destination: `rejected/${organizationId}`,
     reprocess: false,
     domain: null,
+    address: null,
     providerId: null,
     method: null,
   };
