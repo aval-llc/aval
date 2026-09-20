@@ -42,6 +42,7 @@ import { ModuleTour } from "@/app/components/module-tour";
 import { useOnboarding } from "@/app/components/preference-context";
 import { IndependenceControls } from "@/app/components/independence-controls";
 import { OnboardingBoundary } from "@/app/components/onboarding";
+import { EmployeeDirectory } from "@/app/components/employee-directory";
 
 type View = "calendar" | "projects" | "teams" | "overview" | "tasks" | "reviewCenter" | "inbox" | "properties" | "leasing" | "maintenance" | "accounting" | "infrastructure" | "connections" | "documents" | "setup" | "settings";
 type IconComponent = ComponentType<{ width?: number; height?: number; className?: string }>;
@@ -448,7 +449,6 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
   const t = useTranslations();
   const { notify } = useExperience();
   const [selected, setSelected] = useState<PersonaId>("general");
-  const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [taught, setTaught] = useState<TaughtPreference[]>([]);
   const [options, setOptions] = useState<PreferenceOption[]>([]);
@@ -480,20 +480,6 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
   const reachable = useMemo(() => new Set(access ?? DATA_SOURCE_NODES.map((node) => node.tool)), [access]);
   const taughtByTopic = useMemo(() => new Map(taught.map((row) => [row.topic, row])), [taught]);
 
-  async function choose(next: PersonaId) {
-    if (next === selected) return;
-    const previous = selected;
-    setSelected(next);
-    setSaving(true);
-    try {
-      const response = await fetch("/api/agents/default", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personaId: next }) });
-      if (!response.ok) throw new Error(String(response.status));
-      notify(t("SetupView.savedTitle"), t("SetupView.savedDetail", { agent: t(PERSONA_PRESETS[next].labelKey) }));
-    } catch {
-      setSelected(previous);
-      notify(t("SetupView.saveFailedTitle"), t("SetupView.saveFailedDetail"));
-    } finally { setSaving(false); }
-  }
 
   async function teach(topic: string, statement: string) {
     setBusyTopic(topic);
@@ -583,7 +569,7 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
         <div className="setup-rails" aria-hidden="true"/>
 
         <div className="setup-center">
-          <div className={`setup-agent-node${saving ? " is-saving" : ""}`}>
+          <div className="setup-agent-node">
             <AvalAgentAvatar personaId={preset.id} shape={preset.shape} theme={preset.theme} icon={preset.icon} size={56} label={t(preset.labelKey)}/>
             <strong>{t(preset.labelKey)}</strong>
             <small>{t("SetupView.workspaceDefault")}</small>
@@ -604,28 +590,10 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
       <p className="empty-copy">{t("SetupView.connectSourcesNote")}</p>
     </section>
 
-    <section className="panel" data-reveal>
-      <div className="panel-heading">
-        <div><p className="eyebrow">{t("SetupView.swapAgent")}</p><h2>{t("SetupView.chooseTheCenterAgent")}</h2></div>
-        {saving && <span className="quiet-label">{t("SetupView.saving")}</span>}
-      </div>
-      <div className="setup-agent-grid">
-        {PERSONA_IDS.map((id) => {
-          const option = PERSONA_PRESETS[id];
-          const optionAccess = PERSONA_TOOL_ACCESS[id];
-          const isSelected = id === selected;
-          return <button type="button" className={`setup-agent-card${isSelected ? " is-selected" : ""}`} key={id} onClick={() => choose(id)} disabled={saving || !loaded} aria-pressed={isSelected}>
-            <AvalAgentAvatar personaId={option.id} shape={option.shape} theme={option.theme} icon={option.icon} size={38} selected={isSelected} interactive/>
-            <span className="setup-agent-copy">
-              <strong>{t(option.labelKey)}</strong>
-              <small>{optionAccess === null ? t("SetupView.allSources") : t("SetupView.sourcesOfTotal", { count: optionAccess.length, total: DATA_SOURCE_NODES.length })}</small>
-            </span>
-            {isSelected && <Check width={16} height={16}/>}
-          </button>;
-        })}
-      </div>
-      <p className="empty-copy">{t("SetupView.swapExplainer")}</p>
-    </section>
+    {/* The employee directory, rendered from rows. What stood here was a grid
+        over PERSONA_IDS — a fixed eight cards that no customer could add to,
+        and one of which could never be saved. */}
+    <EmployeeDirectory/>
 
     {(<section className="panel" data-reveal>
       <div className="panel-heading">
