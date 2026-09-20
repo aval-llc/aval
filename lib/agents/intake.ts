@@ -32,9 +32,9 @@ import { eq } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { organizations } from "@/db/postgres/schema";
 import { createTask, getTask, type TaskRecord } from "./tasks.ts";
-import { admissible, COORDINATOR_AGENT_ID, deterministicTaskId, type IntakeSource, type IntakeTrustState } from "./intake-rules.ts";
+import { admissible, COORDINATOR_AGENT_ID, coordinatorFor, deterministicTaskId, type IntakeSource, type IntakeTrustState } from "./intake-rules.ts";
 
-export { COORDINATOR_AGENT_ID, deterministicTaskId, admissible } from "./intake-rules.ts";
+export { COORDINATOR_AGENT_ID, coordinatorFor, deterministicTaskId, admissible, requiresProvider } from "./intake-rules.ts";
 export type { IntakeSource, IntakeTrustState } from "./intake-rules.ts";
 
 export interface IntakeEvent {
@@ -47,6 +47,13 @@ export interface IntakeEvent {
   goal: string;
   /** Optional provider context, retained on the task's execution scope for the coordinator to read. */
   providerId?: string;
+  /**
+   * The employee that should own this work.
+   *
+   * Optional: a workspace with no employees yet is unchanged, and the built-in
+   * coordinator takes it as before.
+   */
+  employeeId?: string | null;
 }
 
 export type IntakeOutcome =
@@ -75,6 +82,7 @@ export async function intakeEvent(dbSession: DbSession, event: IntakeEvent): Pro
     return { status: "refused", reason: "No such workspace." };
   }
 
+  const coordinator = coordinatorFor(event.employeeId);
   const id = await deterministicTaskId(event.organizationId, event.source, event.sourceId);
 
   // Read first so a redelivery is reported as an attachment rather than a
@@ -90,7 +98,8 @@ export async function intakeEvent(dbSession: DbSession, event: IntakeEvent): Pro
     // started. Policy re-reads this on every step, so the coordinator carries
     // the owner's authority and no more.
     userId: organization.ownerUserId,
-    agentId: COORDINATOR_AGENT_ID,
+    agentId: coordinator.agentId,
+    employeeId: coordinator.employeeId,
     goal: event.goal,
     // A plan root. `task-boundary.ts` restricts a plan root to managing its
     // plan, so the coordinator cannot perform operational work itself: it must

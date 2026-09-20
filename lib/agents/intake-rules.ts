@@ -16,7 +16,47 @@
  */
 export const COORDINATOR_AGENT_ID = "general";
 
-export type IntakeSource = "pms_seat_email" | "pms_notification" | "pms_sync" | "schedule";
+/**
+ * Who owns work that no person started.
+ *
+ * An employee where the workspace has one that should take it, and the
+ * built-in coordinator otherwise. The fallback is what keeps a workspace that
+ * has not created any employees working exactly as it did.
+ */
+export function coordinatorFor(employeeId: string | null | undefined): { agentId: string; employeeId: string | null } {
+  return { agentId: COORDINATOR_AGENT_ID, employeeId: employeeId ?? null };
+}
+
+/**
+ * Where work can come from.
+ *
+ * Three of the original four named a PMS, which made a PMS a precondition for
+ * event-driven work existing at all. That is backwards: the employee lives in
+ * Aval and a PMS is one of the things it can reach, so a workspace with no PMS
+ * connected must still be able to receive an email, read a document, or be
+ * asked to do something, and have durable Work come of it.
+ *
+ * The PMS-specific values remain because existing callers name them and their
+ * provenance is worth keeping — `pms_seat_email` says more than `email` does.
+ */
+export type IntakeSource =
+  | "pms_seat_email"
+  | "pms_notification"
+  | "pms_sync"
+  | "schedule"
+  /** Mail reaching the workspace by any route that is not a PMS seat. */
+  | "email"
+  /** A document arriving or being uploaded. */
+  | "document"
+  /** A person asking for something directly. */
+  | "manual"
+  /** Another system calling Aval. */
+  | "api";
+
+/** Whether this kind of event needs a PMS to exist. Nothing else may assume one. */
+export function requiresProvider(source: IntakeSource): boolean {
+  return source === "pms_seat_email" || source === "pms_notification" || source === "pms_sync";
+}
 
 export type IntakeTrustState = "verified" | "unverified" | "quarantined";
 
