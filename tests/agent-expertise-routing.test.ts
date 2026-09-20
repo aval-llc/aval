@@ -105,6 +105,7 @@ test("the same catalogue and the same work select the same expertise", () => {
 test("the decision records what was considered and why, not just what won", () => {
   const decision = routeExpertise(CATALOGUE, { objective: "a leak", domains: ["maintenance"] });
   const maintenance = decision.candidates.find((candidate) => candidate.slug === "maintenance");
+  assert.ok(maintenance, "maintenance was considered");
   assert.ok(maintenance.matched.some((reason) => reason.includes("leak")), "the reason is legible");
   assert.equal(decision.decidedBy, "deterministic");
   assert.equal(decision.candidates.length, CATALOGUE.length, "every candidate is on the record");
