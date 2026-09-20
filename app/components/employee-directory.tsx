@@ -142,77 +142,87 @@ export function EmployeeDirectory() {
         <h2>{t("Employees.title")}</h2>
       </div>
       <button className="pill-button" onClick={() => setCreating((open) => !open)} disabled={busy !== null}>
-        <Plus width={16} height={16}/>{t("Employees.create")}
+        <Plus width={15} height={15}/>{t("Employees.create")}
       </button>
     </div>
 
-    {/* A count, and a ceiling only where one is configured. */}
-    <p className="quiet-label">
-      {directory?.limit == null
-        ? t("Employees.countUnlimited", { count: directory?.total ?? 0 })
-        : t("Employees.countOfLimit", { count: directory?.total ?? 0, limit: directory.limit })}
-    </p>
+    <div className="employee-toolbar">
+      <label className="employee-search">
+        <Search width={14} height={14}/>
+        <input placeholder={t("Employees.searchPlaceholder")} value={search} aria-label={t("Employees.searchPlaceholder")}
+          onChange={(event) => { setOffset(0); setSearch(event.target.value); }}/>
+      </label>
+      {/* A ceiling is shown only where one is configured, rather than invented. */}
+      <span className="employee-count">
+        {directory?.limit == null
+          ? t("Employees.countUnlimited", { count: directory?.total ?? 0 })
+          : t("Employees.countOfLimit", { count: directory?.total ?? 0, limit: directory.limit })}
+      </span>
+    </div>
 
-    {creating && <div className="teach-box">
-      <div className="teach-input-row">
-        <input className="teach-input" placeholder={t("Employees.namePlaceholder")} value={draft.name}
+    {creating && <div className="employee-form">
+      <div className="employee-form-row">
+        <input placeholder={t("Employees.namePlaceholder")} value={draft.name} aria-label={t("Employees.namePlaceholder")}
           onChange={(event) => setDraft({ ...draft, name: event.target.value })}/>
-        <input className="teach-input" placeholder={t("Employees.rolePlaceholder")} value={draft.role}
+        <input placeholder={t("Employees.rolePlaceholder")} value={draft.role} aria-label={t("Employees.rolePlaceholder")}
           onChange={(event) => setDraft({ ...draft, role: event.target.value })}/>
       </div>
-      <div className="teach-input-row">
-        <input className="teach-input" placeholder={t("Employees.objectivePlaceholder")} value={draft.objective}
-          onChange={(event) => setDraft({ ...draft, objective: event.target.value })}/>
-        <button className="pill-button" onClick={() => void create()} disabled={busy !== null || !draft.name.trim() || !draft.role.trim()}>
-          {t("Employees.createConfirm")}
-        </button>
-      </div>
-      {/* Templates are a starting point, never the roster. */}
-      {(directory?.templates ?? []).length > 0 && <p className="empty-copy">
-        {t("Employees.templateHint")}{" "}
-        {(directory?.templates ?? []).slice(0, 6).map((template) => <button key={template.slug} className="ghost-chip" type="button"
+      <input placeholder={t("Employees.objectivePlaceholder")} value={draft.objective} aria-label={t("Employees.objectivePlaceholder")}
+        onChange={(event) => setDraft({ ...draft, objective: event.target.value })}/>
+
+      {/* Templates fill the form. They are a head start, never the roster. */}
+      {(directory?.templates ?? []).length > 0 && <div className="employee-templates">
+        <span>{t("Employees.templateHint")}</span>
+        {(directory?.templates ?? []).slice(0, 6).map((template) => <button key={template.slug} type="button" className="employee-template-chip"
           onClick={() => setDraft({ name: template.name, role: template.role, objective: template.objective })}>
           {template.role}
         </button>)}
-      </p>}
-      <p className="empty-copy">{t("Employees.grantsNothing")}</p>
+      </div>}
+
+      <div className="employee-form-actions">
+        <p className="employee-form-note">{t("Employees.grantsNothing")}</p>
+        <button className="primary-button" onClick={() => void create()}
+          disabled={busy !== null || !draft.name.trim() || !draft.role.trim()}>
+          {t("Employees.createConfirm")}
+        </button>
+      </div>
     </div>}
 
-    <div className="teach-input-row">
-      <span className="quiet-label"><Search width={14} height={14}/></span>
-      <input className="teach-input" placeholder={t("Employees.searchPlaceholder")} value={search}
-        onChange={(event) => { setOffset(0); setSearch(event.target.value); }}/>
-    </div>
-
-    {error && <p className="empty-copy" role="alert">{error}</p>}
+    {error && <p className="employee-error" role="alert">{error}</p>}
 
     {employees.length === 0
       ? <p className="empty-copy">{t("Employees.none")}</p>
-      : <div className="setup-agent-grid">
-          {employees.map((employee) => <div key={employee.id} className="setup-agent-card" aria-label={employee.name}>
-            <span className="setup-agent-copy">
-              <strong>{employee.name}</strong>
-              <small>{employee.role}</small>
-              <small className="quiet-label">{t(`Employees.status_${employee.status}`)}</small>
-            </span>
-            <span className="header-actions">
-              {actionsFor(employee.status).map((action) => <button key={action} type="button" className="icon-button"
-                aria-label={t(`Employees.action_${action}`)} title={t(`Employees.action_${action}`)}
-                disabled={busy !== null} onClick={() => void act(employee.id, action)}>
-                {action === "pause" ? <Pause width={16} height={16}/>
-                  : action === "archive" ? <Archive width={16} height={16}/>
-                  : action === "activate" ? <Check width={16} height={16}/>
-                  : <Play width={16} height={16}/>}
-              </button>)}
-            </span>
-          </div>)}
+      : <div className="employee-grid">
+          {employees.map((employee) => <article key={employee.id} className="employee-card">
+            <div className="employee-card-head">
+              <span className="employee-identity">
+                <strong>{employee.name}</strong>
+                <small>{employee.role}</small>
+              </span>
+              <span className={`employee-status is-${employee.status}`}>{t(`Employees.status_${employee.status}`)}</span>
+            </div>
+            {employee.objective && <p className="employee-objective">{employee.objective}</p>}
+            <div className="employee-card-foot">
+              <small className="employee-count">{t(`Employees.autonomy_${employee.autonomyMode}`)}</small>
+              <span className="employee-actions">
+                {actionsFor(employee.status).map((action) => <button key={action} type="button" className="icon-button"
+                  aria-label={t(`Employees.action_${action}`)} title={t(`Employees.action_${action}`)}
+                  disabled={busy !== null} onClick={() => void act(employee.id, action)}>
+                  {action === "pause" ? <Pause width={15} height={15}/>
+                    : action === "archive" ? <Archive width={15} height={15}/>
+                    : action === "activate" ? <Check width={15} height={15}/>
+                    : <Play width={15} height={15}/>}
+                </button>)}
+              </span>
+            </div>
+          </article>)}
         </div>}
 
-    {pages > 1 && <div className="header-actions">
+    {pages > 1 && <div className="employee-pager">
       <button className="pill-button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
         {t("Employees.previous")}
       </button>
-      <span className="quiet-label">{t("Employees.pageOf", { page, pages })}</span>
+      <span className="employee-count">{t("Employees.pageOf", { page, pages })}</span>
       <button className="pill-button" disabled={page >= pages} onClick={() => setOffset(offset + PAGE_SIZE)}>
         {t("Employees.next")}
       </button>

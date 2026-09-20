@@ -1849,3 +1849,45 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
   .pms-row { grid-template-columns:10px 1fr; }
   .pms-state-label, .pms-reason { grid-column:2; }
 }
+
+/* ── AI employee directory ─────────────────────────────────────────────────
+   Its own styles rather than borrowing the teach box, which is built for one
+   long text row and stretched every control to full width when reused here. */
+.employee-toolbar { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.employee-search { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.employee-search > svg { flex-shrink: 0; color: var(--quiet); }
+.employee-search input { flex: 1 1 auto; min-width: 0; border: 0; background: none; outline: none; font: inherit; font-size: 12px; color: var(--ink); }
+.employee-count { font-size: 11px; color: var(--quiet); white-space: nowrap; }
+
+.employee-form { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-soft); display: grid; gap: 10px; }
+/* Name and role sit side by side and collapse to one column on a narrow pane. */
+.employee-form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.employee-form input { width: 100%; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: inherit; font-size: 12px; color: var(--ink); }
+.employee-form input:focus { outline: none; border-color: var(--line-strong); }
+.employee-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.employee-form-note { font-size: 10px; color: var(--quiet); margin: 0; }
+
+/* Chips ran together into one unreadable string without an explicit gap. */
+.employee-templates { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.employee-templates > span { font-size: 10px; color: var(--quiet); }
+.employee-template-chip { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 10px; color: var(--ink); cursor: pointer; transition: border-color .18s var(--ease-snap), background .18s var(--ease-snap); }
+.employee-template-chip:hover { border-color: var(--line-strong); background: var(--surface-soft); }
+
+.employee-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 9px; }
+.employee-card { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); min-width: 0; }
+.employee-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+.employee-identity { min-width: 0; display: grid; gap: 2px; }
+.employee-identity strong { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.employee-identity small { font-size: 10px; color: var(--quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.employee-objective { font-size: 10px; color: var(--quiet); margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.employee-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.employee-actions { display: flex; align-items: center; gap: 4px; }
+
+/* Status reads at a glance, so a paused employee is obvious in a long list. */
+.employee-status { padding: 3px 9px; border-radius: 999px; font-size: 9px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--line); color: var(--quiet); background: var(--surface); }
+.employee-status.is-active { border-color: color-mix(in srgb, var(--ink) 30%, transparent); color: var(--ink); }
+.employee-status.is-paused { opacity: .75; }
+.employee-status.is-archived { opacity: .5; }
+
+.employee-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; }
+.employee-error { margin-top: 10px; font-size: 11px; color: var(--danger, #b4232b); }
