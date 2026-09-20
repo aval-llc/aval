@@ -2220,3 +2220,121 @@ export const aiEmployeeScopes = sqliteTable(
     check("ai_employee_scopes_value_present", sql`length(trim(value)) > 0`),
   ],
 );
+
+/**
+ * Expertise: what an employee knows how to do, separately from who it is.
+ *
+ * The eight specialists conflated these. "Maintenance" was simultaneously an
+ * identity, a permission envelope, a prompt fragment and a tool subset, which
+ * is why handling a recurring HVAC complaint that also needs vendor
+ * coordination and escalation meant either one over-broad agent or four
+ * separate bots.
+ *
+ * An employee is the persistent worker; expertise is loaded for the work in
+ * front of it. Only the routing metadata here is ever held in memory at once —
+ * the instructions are read for the profiles actually selected, so a catalogue
+ * of two hundred costs nothing to carry.
+ */
+export const expertiseProfiles = sqliteTable(
+  "expertise_profiles",
+  {
+    id: text("id").primaryKey(),
+    /** Null for the profiles Aval ships; set for one a workspace authored. */
+    organizationId: text("organization_id").references(() => organizations.id),
+    /** Stable handle: `resident-experience`, `vendor-coordination`. */
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    /* ── routing metadata: small, always loadable ─────────────────────────── */
+    /** Capability tags this expertise answers to, as a JSON string array. */
+    capabilityTagsJson: text("capability_tags_json").notNull().default("[]"),
+    /** Business domains it belongs to, as a JSON string array. */
+    domainsJson: text("domains_json").notNull().default("[]"),
+    /** Words and work types that suggest it, as a JSON string array. */
+    routingSignalsJson: text("routing_signals_json").notNull().default("[]"),
+    /** Tools it cannot work without, as a JSON string array. Absence of one excludes it. */
+    requiredCapabilitiesJson: text("required_capabilities_json").notNull().default("[]"),
+    /* ── the body: read only once selected ───────────────────────────────── */
+    instructions: text("instructions").notNull().default(""),
+    /** Ceiling this expertise refuses to act above, whatever the employee allows. */
+    riskCeiling: text("risk_ceiling").notNull().default("low"),
+    version: integer("version").notNull().default(1),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("expertise_profiles_lookup_idx").on(table.organizationId, table.enabled),
+    // A workspace may shadow a shipped profile with its own of the same slug;
+    // it may not have two of its own.
+    uniqueIndex("expertise_profiles_slug_uq").on(table.organizationId, table.slug),
+    check("expertise_profiles_risk", sql`risk_ceiling IN ('low','medium','high','critical')`),
+    // Valid in both dialects: GLOB is SQLite-only and would not survive the
+    // Postgres generator, which copies these predicates through verbatim.
+    check("expertise_profiles_slug_shape", sql`slug = lower(slug) AND length(slug) BETWEEN 2 AND 64`),
+  ],
+);
+
+/**
+ * Which expertise an employee is permitted to load.
+ *
+ * Permission, not preference: selection chooses from this set and never outside
+ * it, so an employee cannot acquire a competence at runtime by being asked
+ * nicely. An employee with no rows may load nothing, which makes a new employee
+ * inert until somebody decides what it should know.
+ */
+export const employeeExpertise = sqliteTable(
+  "employee_expertise",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    employeeId: text("employee_id").notNull().references(() => aiEmployees.id),
+    expertiseId: text("expertise_id").notNull().references(() => expertiseProfiles.id),
+    /** Pinned expertise is always loaded, whatever the work looks like. */
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    grantedBy: text("granted_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("employee_expertise_lookup_idx").on(table.employeeId),
+    uniqueIndex("employee_expertise_uq").on(table.employeeId, table.expertiseId),
+  ],
+);
+
+/**
+ * Why a particular expertise was loaded for a particular piece of work.
+ *
+ * A routing decision that cannot be inspected is indistinguishable from a
+ * guess. Each row records what was considered, what was chosen, on what
+ * signals, by which model, and whether a person overrode it — so "why did Maya
+ * treat this as an escalation" has an answer that does not require rerunning
+ * anything.
+ */
+export const expertiseSelections = sqliteTable(
+  "expertise_selections",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    taskId: text("task_id").notNull().references(() => agentTasks.id),
+    employeeId: text("employee_id"),
+    /** Every profile considered, with its score, as JSON. */
+    candidatesJson: text("candidates_json").notNull().default("[]"),
+    /** The slugs actually loaded, as a JSON string array. */
+    selectedJson: text("selected_json").notNull().default("[]"),
+    /** The signals that decided it, as JSON. */
+    signalsJson: text("signals_json").notNull().default("{}"),
+    /** deterministic | model | user — how the choice was reached. */
+    decidedBy: text("decided_by").notNull(),
+    modelProvider: text("model_provider"),
+    modelName: text("model_name"),
+    confidence: real("confidence"),
+    /** Set when a person's explicit choice replaced what routing proposed. */
+    overriddenBy: text("overridden_by"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("expertise_selections_task_idx").on(table.organizationId, table.taskId),
+    check("expertise_selections_decided_by", sql`decided_by IN ('deterministic','model','user')`),
+    check("expertise_selections_confidence", sql`confidence IS NULL OR (confidence >= 0 AND confidence <= 1)`),
+  ],
+);
