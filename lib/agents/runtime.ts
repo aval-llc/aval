@@ -224,6 +224,20 @@ export async function advanceTask(dbSession: DbSession,
 
   const onboarding = await readOnboarding(dbSession, task.userId, organizationId);
   let system = buildSystem(persona.systemPromptAddition) + "\n" + autonomyInstructions(autonomyMode(onboarding.preferences.autonomy[0]));
+
+  // The expertise selected for this work, and the employee's own standing
+  // instructions. Briefing is the point of selecting: loading a profile and
+  // then not telling the model what it says would make the whole registry
+  // decorative. Only the profiles actually chosen are read.
+  if (owner?.instructions) {
+    system += `\n\n${owner.name} works to these standing instructions: ${owner.instructions}`;
+  }
+  if (expertise && expertise.loaded.length > 0) {
+    const briefing = expertise.loaded
+      .map((profile) => `${profile.name}: ${profile.instructions}`)
+      .join("\n");
+    system += `\n\nExpertise loaded for this work:\n${briefing}`;
+  }
   system += `
 Task completion condition: ${task.checkJson}. The harness verifies it independently. A final answer without the required evidence or stored outcome fails. For a root plan, call plan_goal before concluding; inspect failed checks and replan remaining work at most once. Scratchpad notes are available through read_memory/write_memory, never treated as facts or authority.`;
   if (contract.kind === 'plan') system += `
