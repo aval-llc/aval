@@ -22,6 +22,9 @@
  *   node scripts/database-harness.mjs stop
  *   node scripts/database-harness.mjs reset   # drop and recreate the database
  *
+ * `AVAL_TEST_PG_DATABASE` picks the database within that cluster, so the local
+ * dev server can keep its own beside the one the tests destroy.
+ *
  * The printed URL carries no password: the cluster trusts loopback and listens
  * nowhere else.
  */
@@ -33,7 +36,12 @@ import { join } from "node:path";
 
 const PORT = process.env.AVAL_TEST_PG_PORT ?? "55433";
 const SUPERUSER = "avaltest";
-const DATABASE = "aval_test";
+// Overridable so a second consumer can share the cluster without sharing the
+// database. `reset` drops whatever this names, and the local dev server asks
+// for its own — otherwise running the tests would wipe the server's data, and
+// the two would look like flakiness in each other.
+const DATABASE = process.env.AVAL_TEST_PG_DATABASE ?? "aval_test";
+if (!/^[a-z_][a-z0-9_]*$/.test(DATABASE)) throw new Error("AVAL_TEST_PG_DATABASE must be a plain identifier");
 const ROOT = join(tmpdir(), "aval-test-pg");
 const PGDATA = join(ROOT, "data");
 // The socket path has a 103-byte ceiling, which a long data directory breaks.
