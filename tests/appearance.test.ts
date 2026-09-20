@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { avatarSources, CHARACTER_IDS, DEFAULT_APPEARANCE, parseAppearance, PORTRAIT_IDS } from "../lib/appearance.ts";
+import { avatarSources, currentAvatar, defaultAgentAvatar, CHARACTER_IDS, DEFAULT_APPEARANCE, parseAppearance, PORTRAIT_IDS } from "../lib/appearance.ts";
 
 test("appearance rejects unsafe assets, invalid modes, and malformed stored records", () => {
   for (const value of [null, {}, { ...DEFAULT_APPEARANCE, motion: "fast" }, { ...DEFAULT_APPEARANCE, agents: [] },
@@ -43,4 +43,31 @@ test('chat backgrounds are allowlisted and old appearance records keep their def
   for (const value of [0, 20, 55, 100]) assert.equal(parseAppearance({ ...DEFAULT_APPEARANCE, chatWindowTransparency: value })?.chatWindowTransparency, value);
   for (const value of [-1, 101, 20.5, '20', null, NaN, Infinity]) assert.equal(parseAppearance({ ...DEFAULT_APPEARANCE, chatWindowTransparency: value }), null);
   assert.equal(parseAppearance(DEFAULT_APPEARANCE)?.chatWindowTransparency, undefined);
+});
+
+
+test("retired originals migrate to human portraits while the Aval mark stays unchanged", () => {
+  assert.deepEqual(CHARACTER_IDS, ["general"]);
+  for (const id of ["financial", "brokerage", "real-estate", "market-research", "maintenance", "risk-analyst", "portfolio-outlook", "lease-review"]) {
+    const old = { kind: "character" as const, id, background: "mint" as const };
+    const migrated = currentAvatar(old);
+    assert.equal(migrated.kind, "portrait");
+    assert.equal(migrated.background, "mint");
+    assert.ok(avatarSources(old).animated.startsWith("/avatars/"));
+    const parsed = parseAppearance({ ...DEFAULT_APPEARANCE, agents: { employee_123: old } });
+    assert.deepEqual(parsed?.agents.employee_123, migrated);
+  }
+  assert.deepEqual(defaultAgentAvatar("general"), {kind:"character",id:"general",background:"paper"});
+  assert.equal(defaultAgentAvatar("any_custom_employee").kind, "portrait");
+  assert.deepEqual(defaultAgentAvatar("any_custom_employee"), defaultAgentAvatar("any_custom_employee"));
+});
+
+test("portrait library includes all 24 personality animations alongside existing portraits", () => {
+  assert.equal(PORTRAIT_IDS.length, 48);
+  assert.equal(PORTRAIT_IDS.filter(id => id.startsWith("personality-")).length, 24);
+  assert.equal(new Set(PORTRAIT_IDS).size, 48);
+  for (const id of PORTRAIT_IDS.filter(id => id.startsWith("personality-"))) {
+    const avatar = {kind:"portrait" as const,id,background:"sky" as const};
+    assert.deepEqual(parseAppearance({...DEFAULT_APPEARANCE,agents:{new_employee:avatar}})?.agents.new_employee, avatar);
+  }
 });

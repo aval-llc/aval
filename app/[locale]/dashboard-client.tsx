@@ -543,6 +543,7 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
       actions={<button className="soft-button" onClick={openConnections}><NetworkLeft width={17} height={17}/>{t("SetupView.connectASource")}</button>}
     />
 
+    <EmployeeDirectory/>
     <IndependenceControls/>
     <section className="panel setup-panel" data-reveal>
       <div className="panel-heading">
@@ -593,9 +594,7 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
     {/* The employee directory, rendered from rows. What stood here was a grid
         over PERSONA_IDS — a fixed eight cards that no customer could add to,
         and one of which could never be saved. */}
-    <EmployeeDirectory/>
-
-    {(<section className="panel" data-reveal>
+    {(<section className="panel memory-panel" data-reveal>
       <div className="panel-heading">
         <div><p className="eyebrow">{t("SetupView.memory")}</p><h2>{t("SetupView.whatAvalRemembers")}</h2></div>
         <span className="quiet-label">{t("SetupView.appliesEverywhere")}</span>
@@ -621,7 +620,7 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
           ? <p className="teach-hint is-warning">{t("SetupView.noMatchHint")}</p>
           : <p className="teach-hint">{t("SetupView.teachHint")}</p>}
 
-        {suggestions.length > 0 && <div className="teach-suggestions">
+        {suggestions.length > 0 && <details className="teach-suggestions"><summary>{t("SetupView.notSureWhatToTeach")}</summary>
           <div className="teach-suggestions-head">
             <span>{t("SetupView.notSureWhatToTeach")}</span>
             <button type="button" className="text-button" onClick={() => setSuggestionSeed((seed) => seed + 1)}>
@@ -637,7 +636,7 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
               </button>
             ))}
           </div>
-        </div>}
+        </details>}
       </div>
 
       <div className="memory-grid">
@@ -678,7 +677,7 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
         })}
       </div>
 
-      <p className="empty-copy">{t("SetupView.memoryExplainer")}</p>
+      <details className="memory-explainer"><summary>{t("AgentLibrary.aboutMemory")}</summary><p>{t("SetupView.memoryExplainer")}</p></details>
     </section>)}
 
 

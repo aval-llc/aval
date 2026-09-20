@@ -1,21 +1,16 @@
 "use client";
 
-/**
- * The AI employee directory.
- *
- * Every card here comes from a row. There is no list of roles in this file, no
- * slot count, and nothing that knows about eight of anything — which is the
- * whole point: a workspace that invents "Turnover Coordinator" sees it rendered
- * by the same code that renders the ones Aval ships, because to this component
- * they are the same thing.
- *
- * Paged from the start rather than when it becomes a problem. A hundred
- * employees is an ordinary number for a directory, not an edge case.
- */
+/** Built-in personas and paginated employees share a folder UI; identities and
+ * ownership remain distinct so work is never attributed by a matching role. */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Check, Pause, Play, Archive, Plus, Search } from "iconoir-react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { belongsToAgent } from "./agent-library-model";
+import { AgentTrace } from "./agent-trace";
+import { AvalAgentAvatar } from "./agent-avatar/AgentAvatar";
+import { PERSONA_PRESETS } from "./agent-avatar/personas";
+import { Check, Pause, Play, Archive, Plus, Search, Xmark, NavArrowRight, Circle, Folder, Link } from "iconoir-react";
 
 interface Employee {
   id: string;
@@ -41,6 +36,10 @@ interface Directory {
   templates: Template[];
 }
 
+interface Work { id: string; agentId: string; employeeId?: string | null; goal: string; status: string }
+interface ConnectionProvider { id: string; name: string; connection: { id: string; status: string } | null }
+interface EmployeeDetail { scopes: Partial<Record<string, string[]>>; openWork: number }
+interface LibraryAgent { id: string; name: string; role: string; objective: string | null; employee?: Employee; preset: typeof PERSONA_PRESETS.general }
 const PAGE_SIZE = 24;
 
 /** Which lifecycle actions make sense from where the employee currently is. */
@@ -60,6 +59,13 @@ export function EmployeeDirectory() {
   const [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<LibraryAgent | null>(null);
+  const [work, setWork] = useState<Work[]>([]);
+  const [workError, setWorkError] = useState(false);
+  const [employeeDetails, setEmployeeDetails] = useState<Record<string, EmployeeDetail>>({});
+  const [providers, setProviders] = useState<ConnectionProvider[]>([]);
+  const [custom, setCustom] = useState<LibraryAgent[]>([]);
+  const [filter, setFilter] = useState("all");
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState({ name: "", role: "", objective: "" });
 
@@ -108,7 +114,8 @@ export function EmployeeDirectory() {
       }
       setError(null);
       await load();
-    } finally { setBusy(null); }
+      return true;
+    } catch { setError(t("Employees.actionFailed")); } finally { setBusy(null); }
   };
 
   const create = async () => {
@@ -126,106 +133,118 @@ export function EmployeeDirectory() {
       }
       setDraft({ name: "", role: "", objective: "" });
       setCreating(false);
+      setSearch("");
+      setOffset(0);
+      setFilter("employees");
       setError(null);
-      await load();
-    } finally { setBusy(null); }
+      // Changed search/page triggers its own fetch; never let the old query overwrite it.
+      if (offset === 0 && search === "") await load();
+    } catch { setError(t("Employees.createFailed")); } finally { setBusy(null); }
   };
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/agents/tasks", { signal: controller.signal }).then(async r => {
+      if (!r.ok) throw new Error();
+      const data = await r.json() as { tasks: Work[] };
+      if (!controller.signal.aborted) { setWork(data.tasks); setWorkError(false); }
+    }).catch(() => { if (!controller.signal.aborted) setWorkError(true); });
+    void fetch("/api/integrations", { signal: controller.signal }).then(async r => {
+      if (!r.ok) return;
+      const data = await r.json() as { providers?: ConnectionProvider[] };
+      if (!controller.signal.aborted) setProviders(data.providers ?? []);
+    }).catch(() => {});
+    void fetch("/api/agents", { signal: controller.signal }).then(async r => {
+      if (!r.ok) throw new Error();
+      const data = await r.json() as { personas: { id: string; label: string; focusDescription: string }[] };
+      if (!controller.signal.aborted) setCustom(data.personas.map(p => ({ id: p.id, name: p.label, role: t("AgentLibrary.customAgent"), objective: p.focusDescription, preset: { ...PERSONA_PRESETS.general, icon: undefined } })));
+    }).catch(() => { if (!controller.signal.aborted) setError(t("Employees.loadFailed")); });
+    return () => controller.abort();
+  }, [t, selected]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all((directory?.employees ?? []).map(async employee => {
+      try {
+        const r = await fetch(`/api/agents/employees/${encodeURIComponent(employee.id)}`, { signal: controller.signal });
+        if (!r.ok) return;
+        const detail = await r.json() as EmployeeDetail;
+        if (!controller.signal.aborted) setEmployeeDetails(current => ({ ...current, [employee.id]: detail }));
+      } catch { /* The card keeps its explicit unavailable state. */ }
+    }));
+    return () => controller.abort();
+  }, [directory]);
+
+  const builtIns: LibraryAgent[] = Object.values(PERSONA_PRESETS).map(preset => ({ id: preset.id, name: t(preset.labelKey), role: t("AgentLibrary.builtIn"), objective: null, preset }));
   const employees = directory?.employees ?? [];
+  const agents: LibraryAgent[] = [
+    ...(filter === "employees" ? [] : [...builtIns, ...(filter === "builtIn" ? [] : custom)].filter(a => `${a.name} ${a.role}`.toLowerCase().includes(search.toLowerCase()))),
+    ...(filter === "builtIn" ? [] : employees.map(employee => ({ id: employee.id, name: employee.name, role: employee.role, objective: employee.objective, employee, preset: { ...PERSONA_PRESETS.general, icon: undefined } }))),
+  ];
   const pages = useMemo(() => Math.max(1, Math.ceil((directory?.total ?? 0) / PAGE_SIZE)), [directory?.total]);
   const page = Math.floor(offset / PAGE_SIZE) + 1;
+  const agentWork = (agent: LibraryAgent) => work.filter(task => belongsToAgent(task, agent.id, !!agent.employee));
+  const location = (agent: LibraryAgent) => {
+    if (!agent.employee) return t("AgentLibrary.workspace");
+    const detail = employeeDetails[agent.id];
+    if (!detail) return t("AgentLibrary.connectionsUnavailable");
+    const connections = detail.scopes.connection ?? [];
+    return connections.length ? connections.map(id => providers.find(provider => provider.connection?.id === id || provider.id === id)?.name ?? t("AgentLibrary.assignedConnection")).join(", ") : t("AgentLibrary.unassigned");
+  };
 
-  return <section className="panel" data-reveal>
+  return <section className="panel agent-library" data-reveal>
     <div className="panel-heading">
-      <div>
-        <p className="eyebrow">{t("Employees.eyebrow")}</p>
-        <h2>{t("Employees.title")}</h2>
-      </div>
-      <button className="pill-button" onClick={() => setCreating((open) => !open)} disabled={busy !== null}>
-        <Plus width={15} height={15}/>{t("Employees.create")}
-      </button>
+      <div><p className="eyebrow">{t("Employees.eyebrow")}</p><h2>{t("AgentLibrary.title")}</h2><p className="library-subtitle">{t("AgentLibrary.subtitle")}</p></div>
+      <button type="button" className="primary-button library-create" onClick={() => setCreating(true)}><Plus width={16} height={16}/>{t("AgentLibrary.newAgent")}</button>
     </div>
-
-    <div className="employee-toolbar">
-      <label className="employee-search">
-        <Search width={14} height={14}/>
-        <input placeholder={t("Employees.searchPlaceholder")} value={search} aria-label={t("Employees.searchPlaceholder")}
-          onChange={(event) => { setOffset(0); setSearch(event.target.value); }}/>
-      </label>
-      {/* A ceiling is shown only where one is configured, rather than invented. */}
-      <span className="employee-count">
-        {directory?.limit == null
-          ? t("Employees.countUnlimited", { count: directory?.total ?? 0 })
-          : t("Employees.countOfLimit", { count: directory?.total ?? 0, limit: directory.limit })}
-      </span>
+    <div className="library-toolbar">
+      <div className="library-filters" aria-label={t("AgentLibrary.filter")}>
+        {["all", "employees", "builtIn"].map(value => <button type="button" key={value} aria-pressed={filter === value} onClick={() => { setFilter(value); setOffset(0); }}>{t(`AgentLibrary.${value}`)}</button>)}
+      </div>
+      <label className="employee-search"><Search width={16} height={16}/><input placeholder={t("Employees.searchPlaceholder")} value={search} aria-label={t("Employees.searchPlaceholder")} onChange={event => { setOffset(0); setSearch(event.target.value); }}/></label>
     </div>
-
-    {creating && <div className="employee-form">
-      <div className="employee-form-row">
-        <input placeholder={t("Employees.namePlaceholder")} value={draft.name} aria-label={t("Employees.namePlaceholder")}
-          onChange={(event) => setDraft({ ...draft, name: event.target.value })}/>
-        <input placeholder={t("Employees.rolePlaceholder")} value={draft.role} aria-label={t("Employees.rolePlaceholder")}
-          onChange={(event) => setDraft({ ...draft, role: event.target.value })}/>
-      </div>
-      <input placeholder={t("Employees.objectivePlaceholder")} value={draft.objective} aria-label={t("Employees.objectivePlaceholder")}
-        onChange={(event) => setDraft({ ...draft, objective: event.target.value })}/>
-
-      {/* Templates fill the form. They are a head start, never the roster. */}
-      {(directory?.templates ?? []).length > 0 && <div className="employee-templates">
-        <span>{t("Employees.templateHint")}</span>
-        {(directory?.templates ?? []).slice(0, 6).map((template) => <button key={template.slug} type="button" className="employee-template-chip"
-          onClick={() => setDraft({ name: template.name, role: template.role, objective: template.objective })}>
-          {template.role}
-        </button>)}
-      </div>}
-
-      <div className="employee-form-actions">
-        <p className="employee-form-note">{t("Employees.grantsNothing")}</p>
-        <button className="primary-button" onClick={() => void create()}
-          disabled={busy !== null || !draft.name.trim() || !draft.role.trim()}>
-          {t("Employees.createConfirm")}
-        </button>
-      </div>
-    </div>}
-
     {error && <p className="employee-error" role="alert">{error}</p>}
+    {workError && <p className="employee-error" role="status">{t("AgentLibrary.workUnavailable")}</p>}
+    <div className="agent-folder-grid">
+      {agents.map((agent) => {
+        const tasks = agentWork(agent);
+        const color = Array.from(agent.id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6;
+        return <button type="button" className={`agent-folder folder-color-${color}`} key={agent.id} onClick={() => setSelected(agent)}>
+          <span className="folder-cover"><span className="folder-badge">{agent.employee ? t(`Employees.status_${agent.employee.status}`) : t("AgentLibrary.ready")}</span></span>
+          <span className="folder-front">
+            <span className="folder-identity"><AvalAgentAvatar {...agent.preset} personaId={agent.id} size={40} label={agent.name}/><span><strong>{agent.name}</strong><small>{agent.role}</small></span></span>
+            <span className="folder-location"><Link width={13} height={13}/><span>{location(agent)}</span></span>
+            <span className="folder-work">
+              {tasks.length ? tasks.slice(0, 2).map(task => <span className={`folder-check ${task.status === "COMPLETED" ? "is-done" : ""}`} key={task.id}>{task.status === "COMPLETED" ? <Check width={14} height={14}/> : <Circle width={14} height={14}/>}<span>{task.goal}</span></span>) : <span className="folder-check"><Circle width={14} height={14}/><span>{workError ? t("AgentLibrary.workUnavailable") : agent.objective || t("AgentLibrary.noWork")}</span></span>}
+            </span>
+            <span className="folder-footer"><span><Folder width={14} height={14}/>{t("AgentLibrary.workCount", { count: tasks.length })}</span><NavArrowRight width={16} height={16}/></span>
+          </span>
+        </button>;
+      })}
+    </div>
+    {!agents.length && <p className="library-empty">{directory ? t("AgentLibrary.noResults") : t("AgentTrace.loadingTasks")}</p>}
+    {pages > 1 && filter !== "builtIn" && <div className="employee-pager"><button className="soft-button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>{t("Employees.previous")}</button><span>{t("Employees.pageOf", { page, pages })}</span><button className="soft-button" disabled={page >= pages} onClick={() => setOffset(offset + PAGE_SIZE)}>{t("Employees.next")}</button></div>}
 
-    {employees.length === 0
-      ? <p className="empty-copy">{t("Employees.none")}</p>
-      : <div className="employee-grid">
-          {employees.map((employee) => <article key={employee.id} className="employee-card">
-            <div className="employee-card-head">
-              <span className="employee-identity">
-                <strong>{employee.name}</strong>
-                <small>{employee.role}</small>
-              </span>
-              <span className={`employee-status is-${employee.status}`}>{t(`Employees.status_${employee.status}`)}</span>
-            </div>
-            {employee.objective && <p className="employee-objective">{employee.objective}</p>}
-            <div className="employee-card-foot">
-              <small className="employee-count">{t(`Employees.autonomy_${employee.autonomyMode}`)}</small>
-              <span className="employee-actions">
-                {actionsFor(employee.status).map((action) => <button key={action} type="button" className="icon-button"
-                  aria-label={t(`Employees.action_${action}`)} title={t(`Employees.action_${action}`)}
-                  disabled={busy !== null} onClick={() => void act(employee.id, action)}>
-                  {action === "pause" ? <Pause width={15} height={15}/>
-                    : action === "archive" ? <Archive width={15} height={15}/>
-                    : action === "activate" ? <Check width={15} height={15}/>
-                    : <Play width={15} height={15}/>}
-                </button>)}
-              </span>
-            </div>
-          </article>)}
-        </div>}
+    <Dialog.Root open={creating} onOpenChange={setCreating}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="agent-library-dialog agent-create-dialog">
+      <div className="library-dialog-heading"><div><p className="eyebrow">{t("AgentLibrary.yourTeam")}</p><Dialog.Title>{t("AgentLibrary.newAgent")}</Dialog.Title></div><Dialog.Close className="icon-button" aria-label={t("Overview.close")}><Xmark width={20} height={20}/></Dialog.Close></div>
+      <Dialog.Description>{t("AgentLibrary.createDescription")}</Dialog.Description>
+      <form className="employee-form" onSubmit={event => { event.preventDefault(); void create(); }}>
+        <label>{t("AgentLibrary.responsibilities")}<textarea required rows={4} value={draft.objective} placeholder={t("Employees.objectivePlaceholder")} onChange={e => setDraft({ ...draft, objective: e.target.value })}/></label>
+        <div className="employee-form-row"><label>{t("AgentLibrary.name")}<input required value={draft.name} placeholder={t("Employees.namePlaceholder")} onChange={e => setDraft({ ...draft, name: e.target.value })}/></label><label>{t("AgentLibrary.role")}<input required value={draft.role} placeholder={t("Employees.rolePlaceholder")} onChange={e => setDraft({ ...draft, role: e.target.value })}/></label></div>
+        {!!directory?.templates.length && <details className="library-templates"><summary>{t("Employees.templateHint")}</summary><div className="employee-templates">{directory.templates.map(template => <button key={template.slug} type="button" className="employee-template-chip" onClick={() => setDraft({ name: template.name, role: template.role, objective: template.objective })}>{template.role}</button>)}</div></details>}
+        <p className="employee-form-note">{t("AgentLibrary.createNote")}</p>
+        {error && <p role="alert" className="employee-error">{error}</p>}
+        <div className="employee-form-actions"><Dialog.Close type="button" className="soft-button" disabled={busy !== null}>{t("AgentLibrary.cancel")}</Dialog.Close><button className="primary-button" disabled={busy !== null || !draft.name.trim() || !draft.role.trim() || !draft.objective.trim()}>{busy === "new" ? t("SetupView.saving") : t("Employees.createConfirm")}</button></div>
+      </form>
+    </Dialog.Content></Dialog.Portal></Dialog.Root>
 
-    {pages > 1 && <div className="employee-pager">
-      <button className="pill-button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-        {t("Employees.previous")}
-      </button>
-      <span className="employee-count">{t("Employees.pageOf", { page, pages })}</span>
-      <button className="pill-button" disabled={page >= pages} onClick={() => setOffset(offset + PAGE_SIZE)}>
-        {t("Employees.next")}
-      </button>
-    </div>}
+    <Dialog.Root open={!!selected} onOpenChange={open => { if (!open) setSelected(null); }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="agent-library-dialog agent-work-dialog">
+      {selected && <><div className="library-dialog-heading"><div className="folder-identity"><AvalAgentAvatar {...selected.preset} personaId={selected.id} size={48} label={selected.name}/><div><Dialog.Title>{selected.name}</Dialog.Title><p>{selected.role}</p></div></div><Dialog.Close className="icon-button" aria-label={t("Overview.close")}><Xmark width={20} height={20}/></Dialog.Close></div>
+      <Dialog.Description className="folder-location"><Link width={14} height={14}/>{location(selected)}</Dialog.Description>
+      {selected.objective && <p className="library-objective">{selected.objective}</p>}
+      {selected.employee && <div className="library-lifecycle"><span className="employee-status">{t(`Employees.status_${selected.employee.status}`)}</span>{actionsFor(selected.employee.status).map(action => <button type="button" className="soft-button" key={action} disabled={busy !== null} onClick={async () => { if (await act(selected.id, action)) setSelected(null); }}>{action === "pause" ? <Pause width={14} height={14}/> : action === "archive" ? <Archive width={14} height={14}/> : <Play width={14} height={14}/>} {t(`Employees.action_${action}`)}</button>)}</div>}
+      {error && <p className="employee-error" role="alert">{error}</p>}
+      <AgentTrace key={selected.id} agentFilter={selected.id} employeeFilter={!!selected.employee} agentLabel={selected.name}/></>}
+    </Dialog.Content></Dialog.Portal></Dialog.Root>
   </section>;
 }

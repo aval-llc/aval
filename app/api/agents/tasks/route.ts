@@ -35,6 +35,7 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
     tasks: tasks.map((task) => ({
       id: task.id,
       agentId: task.agentId,
+      employeeId: task.employeeId,
       goal: task.goal,
       status: task.status,
       steps: { used: task.stepCount, max: task.maxSteps },

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, HalfMoon, SunLight, User } from "iconoir-react";
-import { BACKGROUNDS, CHARACTER_IDS, PORTRAIT_IDS, type AvatarSelection, type AvatarMotion } from "@/lib/appearance";
+import { BACKGROUNDS, CHARACTER_IDS, PORTRAIT_IDS, defaultAgentAvatar, currentAvatar, type AvatarSelection, type AvatarMotion } from "@/lib/appearance";
 import { PERSONA_IDS, PERSONA_PRESETS } from "./agent-avatar/personas";
 import { useAppearance } from "./appearance-provider";
 import { CharacterAvatar, ProfileAvatar } from "./character-avatar";
@@ -17,15 +17,33 @@ export function AppearanceSettings({ displayName }: { displayName: string }) {
   const [family, setFamily] = useState<"portrait" | "character">("portrait");
   const [customAgents, setCustomAgents] = useState<{ id: string; label: string }[]>([]);
   const dirty = JSON.stringify(appearance) !== JSON.stringify(saved);
-  const selected = target === "profile" ? appearance.profile : appearance.agents[target] ?? null;
+  const savedSelection = target === "profile" ? appearance.profile : appearance.agents[target] ?? null;
+  const selected = savedSelection ? currentAvatar(savedSelection) : null;
   const builtIn = PERSONA_PRESETS[target as keyof typeof PERSONA_PRESETS];
   const targetName = target === "profile" ? displayName : builtIn ? t(builtIn.labelKey) : customAgents.find((agent) => agent.id === target)?.label ?? target;
 
   useEffect(() => {
     let live = true;
-    void fetch("/api/agents").then(async (response) => response.ok ? await response.json() as { personas?: { id: string; label: string }[] } : null).then((body) => {
-      if (live && Array.isArray(body?.personas)) setCustomAgents(body.personas.filter((agent: { id?: unknown; label?: unknown }) => typeof agent.id === "string" && typeof agent.label === "string"));
-    }).catch(() => {});
+    void (async () => {
+      const agents: { id: string; label: string }[] = [];
+      try {
+        const response = await fetch("/api/agents");
+        if (response.ok) {
+          const body = await response.json() as { personas?: { id: string; label: string }[] };
+          agents.push(...(body.personas ?? []));
+        }
+        let offset = 0;
+        while (live) {
+          const response = await fetch(`/api/agents/employees?limit=100&offset=${offset}`);
+          if (!response.ok) break;
+          const body = await response.json() as { employees: { id: string; name: string; role: string }[]; total: number };
+          agents.push(...body.employees.map(employee => ({ id: employee.id, label: `${employee.name} · ${employee.role}` })));
+          offset += body.employees.length;
+          if (!body.employees.length || offset >= body.total) break;
+        }
+      } catch { /* Built-in agents remain customizable if the directory is unavailable. */ }
+      if (live) setCustomAgents(agents);
+    })();
     return () => { live = false; };
   }, []);
 
@@ -37,8 +55,8 @@ export function AppearanceSettings({ displayName }: { displayName: string }) {
       setAppearance({ ...appearance, agents });
     }
   };
-  const effectiveAvatar: AvatarSelection | null = selected ?? (builtIn?.icon ? { kind: "character", id: builtIn.icon.split("/").pop()!.replace(".webp", ""), background: "paper" } : null);
-  const selectTarget = (value: string) => { setTarget(value); const next = value === "profile" ? appearance.profile : appearance.agents[value]; if (next) setFamily(next.kind); };
+  const effectiveAvatar: AvatarSelection | null = selected ?? (target !== "profile" ? defaultAgentAvatar(target) : null);
+  const selectTarget = (value: string) => { setTarget(value); const next = value === "profile" ? appearance.profile : appearance.agents[value]; setFamily(next ? currentAvatar(next).kind : value === "general" ? "character" : "portrait"); };
 
   return <div className="appearance-settings">
     <section className="settings-section">
@@ -70,8 +88,8 @@ export function AppearanceSettings({ displayName }: { displayName: string }) {
         <div className="avatar-workbench">
           <div className="avatar-library">
             <div className="avatar-library-heading"><div className="settings-choice-group" role="group" aria-label={t("Appearance.collection")}>
-              <button type="button" aria-pressed={family === "portrait"} onClick={() => setFamily("portrait")}>{t("Appearance.portraits")} <span>24</span></button>
-              <button type="button" aria-pressed={family === "character"} onClick={() => setFamily("character")}>{t("Appearance.originals")} <span>9</span></button>
+              <button type="button" aria-pressed={family === "portrait"} onClick={() => setFamily("portrait")}>{t("Appearance.portraits")} <span>{PORTRAIT_IDS.length}</span></button>
+              <button type="button" aria-pressed={family === "character"} onClick={() => setFamily("character")}>{t("Appearance.avalIcon")} <span>{CHARACTER_IDS.length}</span></button>
             </div></div>
             <div className="avatar-gallery" role="group" aria-label={t("Appearance.chooseAvatar")}>
               {(family === "portrait" ? PORTRAIT_IDS : CHARACTER_IDS).map((id) => {
