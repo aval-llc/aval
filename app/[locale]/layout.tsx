@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
+import { PmsRunnerHost } from "@/app/components/pms-runner-host";
 import { getMessages } from "next-intl/server";
 import "../globals.css";
 import "../enterprise.css";
@@ -81,6 +82,9 @@ export default async function RootLayout({
       <body className={inter.variable}>
         <NextIntlClientProvider locale={locale} messages={messages}>
           {children}
+          {/* Drains authorized provider work while the desktop app is open.
+              Renders nothing, and does nothing at all in the browser build. */}
+          <PmsRunnerHost/>
         </NextIntlClientProvider>
       </body>
     </html>

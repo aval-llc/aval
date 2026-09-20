@@ -84,12 +84,21 @@ interface Page {
 }
 
 /**
- * The provider's UI, as far as a flow can see it.
+ * A provider's UI, as far as a flow can see it.
  *
- * One page per step of the work-order path. Kept as data so a fault can rename
- * a label without any code knowing that a rename is a thing that happens.
+ * Kept as data so a fault can rename a label without any code knowing that a
+ * rename is a thing that happens — and so a second provider can be a different
+ * shape rather than the same shape with different strings.
  */
-const PAGES: Record<string, Page> = {
+export type ProviderShape = Record<string, Page>;
+
+/**
+ * One provider's web app: a list, a form, a confirmation.
+ *
+ * The shape most maintenance systems have, and the one the first flow was
+ * recorded against.
+ */
+export const LIST_FORM_CONFIRM: ProviderShape = {
   "Maintenance": {
     fields: [],
     buttons: ["New Work Order"],
@@ -104,19 +113,68 @@ const PAGES: Record<string, Page> = {
   "Work Order Created": { fields: [], buttons: [], captures: { "Work Order #": "externalId" } },
 };
 
+/**
+ * A materially different app: a database to pick before anything else, a
+ * search-then-select step, and a two-stage save.
+ *
+ * Not a re-skin. It has more pages, a different number of steps, a selection
+ * the first shape has no equivalent of, and it reads its identifier from a
+ * differently named field. If the boundary were quietly shaped around the first
+ * provider, replaying a flow here would not work.
+ */
+export const DATABASE_SEARCH_SAVE: ProviderShape = {
+  "Voyager": {
+    fields: [],
+    buttons: ["Select Database"],
+    opens: { "Select Database": "Database" },
+  },
+  "Database": {
+    fields: ["Database"],
+    buttons: ["Continue"],
+    opens: { "Continue": "Service Requests" },
+  },
+  "Service Requests": {
+    fields: ["Search Unit"],
+    buttons: ["Add Service Request"],
+    opens: { "Add Service Request": "Service Request" },
+  },
+  "Service Request": {
+    fields: ["Unit Code", "Problem Description", "Category"],
+    buttons: ["Save"],
+    opens: { "Save": "Review" },
+  },
+  "Review": {
+    fields: [],
+    buttons: ["Confirm"],
+    creates: "Confirm",
+    opens: { "Confirm": "Saved" },
+  },
+  "Saved": { fields: [], buttons: [], captures: { "Service Request ID": "externalId" } },
+};
+
 export class BrowserSimulator implements BrowserProviderAdapter {
   readonly provider: string;
   readonly faults: SimulatorFaults = {};
   private session: ProviderSessionState = "NEW";
   private readonly records = new Map<string, SimulatedRecord>();
   private readonly supported: Set<PmsAction>;
+  private readonly pages: ProviderShape;
+  /** Prefix for the identifiers this provider hands back. */
+  private readonly idPrefix: string;
   private sequence = 0;
   /** Counted so a test can assert a retry did not submit twice. */
   submits = 0;
 
-  constructor(provider: string, supported: readonly PmsAction[]) {
+  constructor(
+    provider: string,
+    supported: readonly PmsAction[],
+    pages: ProviderShape = LIST_FORM_CONFIRM,
+    idPrefix = "WO",
+  ) {
     this.provider = provider;
     this.supported = new Set(supported);
+    this.pages = pages;
+    this.idPrefix = idPrefix;
   }
 
   /** Everything the provider holds, for assertions. Never read by product code. */
@@ -248,7 +306,7 @@ export class BrowserSimulator implements BrowserProviderAdapter {
     for (const step of steps) {
       switch (step.kind) {
         case "open": {
-          page = PAGES[step.page] ?? null;
+          page = this.pages[step.page] ?? null;
           if (!page) return this.changed(`There is no page called "${step.page}" any more.`, observations);
           break;
         }
@@ -265,7 +323,7 @@ export class BrowserSimulator implements BrowserProviderAdapter {
             const record = this.create(action, fields);
             captured.externalId = record.externalId;
           }
-          page = opened ? PAGES[opened] ?? page : page;
+          page = opened ? this.pages[opened] ?? page : page;
           if (creating) {
             if (this.faults.loseOutcomeAfterSubmit) {
               // The provider has the record; the runner never finds out. This is
@@ -352,7 +410,7 @@ export class BrowserSimulator implements BrowserProviderAdapter {
 
   private create(action: PmsAction, fields: Record<string, string>): SimulatedRecord {
     this.sequence += 1;
-    const externalId = `WO-${String(this.sequence).padStart(5, "0")}`;
+    const externalId = `${this.idPrefix}-${String(this.sequence).padStart(5, "0")}`;
     const record: SimulatedRecord = {
       externalId,
       action,

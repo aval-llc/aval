@@ -30,8 +30,11 @@ import type { DbSession } from "@/db/postgres/session";
 import { pmsActionFlows, pmsWriteQueue } from "@/db/postgres/schema";
 import { resolveCapability } from "../capability.ts";
 import type { PmsAction } from "../types.ts";
-import { browserAdapter, UNREPLAYABLE, type BrowserContext, type ProviderSessionState } from "./adapter.ts";
-import { flowDigest, parseFlowSteps } from "./steps.ts";
+import {
+  browserAdapter, UNREPLAYABLE,
+  type BrowserContext, type ExecutionResult, type ProviderSessionState, type VerificationResult,
+} from "./adapter.ts";
+import { flowDigest, parseFlowSteps, type FlowStep } from "./steps.ts";
 
 /** How long a runner holds a queued write before another may take it. */
 const LEASE_MS = 2 * 60 * 1000;
@@ -167,15 +170,43 @@ async function settle(
  * `organizationId` scopes the claim, and `runnerId` identifies the desktop
  * instance holding it — both are the caller's, never the model's.
  */
-export async function drainOneWrite(
+export interface RunnerInstruction {
+  queueId: string;
+  provider: string;
+  action: PmsAction;
+  /**
+   * The closed, reviewable step vocabulary — never arbitrary browser commands.
+   * Cloud tells the runner *which authorized workflow* to replay, and the
+   * runner has no way to be told "navigate here and click that" outside it.
+   */
+  steps: FlowStep[];
+  payload: unknown;
+  flowVersion: number;
+}
+
+export type ClaimResult =
+  | { instruction: RunnerInstruction }
+  /** Nothing to do, or the claim was settled without the runner acting. */
+  | { outcome: DrainOutcome };
+
+/**
+ * Cloud's half: take one queued write and hand the runner an authorized
+ * instruction, or settle it without involving the runner at all.
+ *
+ * Everything that decides *whether* a write may happen lives here, on the side
+ * that holds the database and the policy. The runner receives a provider, an
+ * action and a recorded workflow; it cannot widen any of them, and there is no
+ * shape in which cloud could send it a browser command that is not a step of an
+ * approved flow.
+ */
+export async function claimForRunner(
   dbSession: DbSession,
   organizationId: string,
   runnerId: string,
-): Promise<DrainOutcome> {
+): Promise<ClaimResult> {
   const claimed = await claim(dbSession, organizationId, runnerId);
-  if (!claimed) return { status: "idle" };
+  if (!claimed) return { outcome: { status: "idle" } };
 
-  const ctx: BrowserContext = { organizationId, providerId: claimed.provider, runnerId };
   const base = { queueId: claimed.id, action: claimed.action };
 
   // Authority, again. Assembly and `executePmsWrite` both checked it, and a
@@ -185,25 +216,19 @@ export async function drainOneWrite(
   const resolution = await resolveCapability(dbSession, organizationId, claimed.provider, claimed.action);
   if (resolution.state !== "allow") {
     await settle(dbSession, organizationId, claimed.id, "abandoned", resolution.reason ?? `Capability is ${resolution.state}.`);
-    return { ...base, status: "denied", reason: resolution.reason ?? `This action is ${resolution.state} for this workspace.` };
+    return { outcome: { ...base, status: "denied", reason: resolution.reason ?? `This action is ${resolution.state} for this workspace.` } };
   }
 
-  const adapter = browserAdapter(claimed.provider);
-  if (!adapter || !adapter.supports(claimed.action)) {
-    await settle(dbSession, organizationId, claimed.id, "abandoned", "No browser workflow is implemented for this action.");
-    return { ...base, status: "denied", reason: "No browser workflow is implemented for this action." };
-  }
-
-  // The flow, and proof it is the one that was approved.
   if (!claimed.flowId) {
     await settle(dbSession, organizationId, claimed.id, "abandoned", "The queued write names no flow.");
-    return { ...base, status: "denied", reason: "The queued write names no flow." };
+    return { outcome: { ...base, status: "denied", reason: "The queued write names no flow." } };
   }
   const [flowRow] = await dbSession.db
     .select({
       stepsJson: pmsActionFlows.stepsJson,
       digest: pmsActionFlows.digest,
       status: pmsActionFlows.status,
+      version: pmsActionFlows.version,
     })
     .from(pmsActionFlows)
     .where(and(eq(pmsActionFlows.organizationId, organizationId), eq(pmsActionFlows.id, claimed.flowId)))
@@ -211,22 +236,200 @@ export async function drainOneWrite(
 
   if (!flowRow || flowRow.status !== "active") {
     await settle(dbSession, organizationId, claimed.id, "abandoned", "The flow is no longer active.");
-    return { ...base, status: "denied", reason: "The flow this write was approved against is no longer active." };
+    return { outcome: { ...base, status: "denied", reason: "The flow this write was approved against is no longer active." } };
   }
 
-  let steps;
+  let steps: FlowStep[];
   try {
     steps = parseFlowSteps(JSON.parse(flowRow.stepsJson));
   } catch (error) {
     await settle(dbSession, organizationId, claimed.id, "abandoned", "The flow could not be read.");
-    return { ...base, status: "denied", reason: error instanceof Error ? error.message : "The flow could not be read." };
+    return { outcome: { ...base, status: "denied", reason: error instanceof Error ? error.message : "The flow could not be read." } };
   }
 
   // An approval binds to the digest. A flow edited afterwards is a different
   // flow, and replaying it would run something nobody approved.
   if (await flowDigest(steps) !== flowRow.digest) {
     await settle(dbSession, organizationId, claimed.id, "abandoned", "The flow changed after it was approved.");
-    return { ...base, status: "denied", reason: "The flow changed after it was approved, so it was not replayed." };
+    return { outcome: { ...base, status: "denied", reason: "The flow changed after it was approved, so it was not replayed." } };
+  }
+
+  return {
+    instruction: {
+      queueId: claimed.id,
+      provider: claimed.provider,
+      action: claimed.action,
+      steps,
+      payload: claimed.payload,
+      flowVersion: flowRow.version,
+    },
+  };
+}
+
+/**
+ * What the runner may say about a claimed write.
+ *
+ * A closed set, because this crosses a trust boundary in the other direction:
+ * the runner is the customer's own machine reporting on a provider neither side
+ * controls. It reports what happened; it never reports what should follow.
+ */
+export type RunnerReport =
+  /** The provider session is not usable. Nothing was attempted. */
+  | { queueId: string; kind: "not_ready"; session: ProviderSessionState; reason?: string }
+  /** The record was already at the provider. Nothing was submitted. */
+  | { queueId: string; kind: "duplicate"; externalId: string; matchedOn: string[] }
+  /** The workflow ran. `verification` is the provider read back afterwards. */
+  | { queueId: string; kind: "executed"; execution: ExecutionResult; verification: VerificationResult };
+
+/**
+ * Cloud's other half: record what the runner did and settle the queue.
+ *
+ * The lease is re-checked against this runner and this organization before
+ * anything is written. A report naming a row the caller does not hold is not an
+ * error to recover from, it is someone reporting on work that is not theirs.
+ */
+export async function reportRunnerResult(
+  dbSession: DbSession,
+  organizationId: string,
+  runnerId: string,
+  report: RunnerReport,
+): Promise<DrainOutcome> {
+  const [row] = await dbSession.db
+    .select({
+      id: pmsWriteQueue.id,
+      action: pmsWriteQueue.action,
+      attempts: pmsWriteQueue.attempts,
+      leasedBy: pmsWriteQueue.leasedBy,
+      leaseExpiresAt: pmsWriteQueue.leaseExpiresAt,
+      status: pmsWriteQueue.status,
+    })
+    .from(pmsWriteQueue)
+    .where(and(eq(pmsWriteQueue.organizationId, organizationId), eq(pmsWriteQueue.id, report.queueId)))
+    .limit(1);
+
+  if (!row) return { status: "denied", reason: "No such queued write for this workspace." };
+  if (row.leasedBy !== runnerId || row.status !== "leased") {
+    return { status: "denied", queueId: row.id, reason: "This write is not leased by this runner." };
+  }
+  if ((row.leaseExpiresAt?.getTime() ?? 0) < Date.now()) {
+    // The lease lapsed while the runner worked. Reporting is refused rather
+    // than applied, because another runner may already hold it — and two
+    // reports settling one row is how a duplicate becomes invisible.
+    return { status: "denied", queueId: row.id, reason: "The lease on this write expired before it was reported." };
+  }
+
+  const action = row.action as PmsAction;
+  const base = { queueId: row.id, action };
+
+  if (report.kind === "not_ready") {
+    const needsHuman = UNREPLAYABLE.has(report.session);
+    await settle(dbSession, organizationId, row.id, needsHuman ? "abandoned" : "pending", report.reason ?? "Not ready.");
+    return {
+      ...base,
+      status: needsHuman ? "denied" : "deferred",
+      reason: report.reason,
+      session: report.session,
+      needsHuman,
+    };
+  }
+
+  if (report.kind === "duplicate") {
+    await settle(dbSession, organizationId, row.id, "done", null);
+    return {
+      ...base,
+      status: "duplicate",
+      externalId: report.externalId,
+      reason: `The provider already holds this record (matched on ${report.matchedOn.join(", ")}). Nothing was submitted.`,
+    };
+  }
+
+  const { execution, verification } = report;
+  if (!execution.ok) {
+    const exhausted = row.attempts >= MAX_ATTEMPTS;
+    const retryable = execution.retryable === true && !exhausted;
+    await settle(dbSession, organizationId, row.id, retryable ? "pending" : "failed", execution.error ?? "The workflow did not complete.");
+    return {
+      ...base,
+      status: retryable ? "deferred" : "failed",
+      reason: execution.error,
+      session: execution.session,
+      needsHuman: !retryable,
+    };
+  }
+
+  if (verification.confirmed) {
+    await settle(dbSession, organizationId, row.id, "done", null);
+    return { ...base, status: "done", externalId: verification.externalId ?? execution.externalId, session: execution.session };
+  }
+
+  if (verification.pending) {
+    // The write happened. The queue's job is finished and the proof is not, so
+    // the row settles and the Work item is the thing that stays unproven.
+    await settle(dbSession, organizationId, row.id, "done", null);
+    return {
+      ...base,
+      status: "pending_verification",
+      externalId: execution.externalId,
+      reason: verification.detail ?? "The provider has not caught up yet.",
+      session: execution.session,
+    };
+  }
+
+  // Submitted, and the provider says the record is not there. That is a failure
+  // even though the browser reported success, which is the entire reason
+  // verification is a separate step.
+  await settle(dbSession, organizationId, row.id, "failed", verification.detail ?? "The record could not be found after the write.");
+  return {
+    ...base,
+    status: "failed",
+    reason: verification.detail ?? "The provider does not show the record after the write.",
+    session: execution.session,
+    needsHuman: true,
+  };
+}
+
+/**
+ * One write, claimed and carried out.
+ *
+ * This is exactly what the desktop runner does, with the two halves co-located:
+ * `claimForRunner` over the API, the adapter against the provider, then
+ * `reportRunnerResult`. It exists as one function so the composition can be
+ * exercised without a network, and it is the same composition — not a
+ * test-only shortcut around it.
+ */
+export async function drainOneWrite(
+  dbSession: DbSession,
+  organizationId: string,
+  runnerId: string,
+): Promise<DrainOutcome> {
+  const claimed = await claimForRunner(dbSession, organizationId, runnerId);
+  if ("outcome" in claimed) return claimed.outcome;
+
+  const instruction = claimed.instruction;
+  const report = await runInstruction(instruction, { organizationId, providerId: instruction.provider, runnerId });
+  return reportRunnerResult(dbSession, organizationId, runnerId, report);
+}
+
+/**
+ * The runner's half: everything that touches the provider, and nothing that
+ * decides whether it may be touched.
+ *
+ * Exported because the desktop process runs precisely this against the
+ * instruction it fetched, and a second implementation there would be a second
+ * set of rules about when a duplicate counts.
+ */
+export async function runInstruction(
+  instruction: RunnerInstruction,
+  ctx: BrowserContext,
+): Promise<RunnerReport> {
+  const adapter = browserAdapter(instruction.provider);
+  if (!adapter || !adapter.supports(instruction.action)) {
+    return {
+      queueId: instruction.queueId,
+      kind: "not_ready",
+      session: "BLOCKED",
+      reason: "This runner has no workflow for that action.",
+    };
   }
 
   // The session is the customer's own. Where it has lapsed the runner may sign
@@ -239,15 +442,7 @@ export async function drainOneWrite(
       : { ready: false, session: recovery.session, reason: recovery.reason };
   }
   if (!preflight.ready) {
-    const needsHuman = UNREPLAYABLE.has(preflight.session);
-    await settle(dbSession, organizationId, claimed.id, needsHuman ? "abandoned" : "pending", preflight.reason ?? "Not ready.");
-    return {
-      ...base,
-      status: needsHuman ? "denied" : "deferred",
-      reason: preflight.reason,
-      session: preflight.session,
-      needsHuman,
-    };
+    return { queueId: instruction.queueId, kind: "not_ready", session: preflight.session, reason: preflight.reason };
   }
 
   // Look before writing. A previous attempt may have submitted successfully and
@@ -255,76 +450,30 @@ export async function drainOneWrite(
   // work order. An adapter that cannot look throws, and a throw defers rather
   // than proceeding blind.
   try {
-    const existing = await adapter.findExisting(claimed.action, claimed.payload, ctx);
+    const existing = await adapter.findExisting(instruction.action, instruction.payload, ctx);
     if (existing) {
-      await settle(dbSession, organizationId, claimed.id, "done", null);
       return {
-        ...base,
-        status: "duplicate",
+        queueId: instruction.queueId,
+        kind: "duplicate",
         externalId: existing.externalId,
-        reason: `The provider already holds this record (matched on ${existing.matchedOn.join(", ")}). Nothing was submitted.`,
-        session: preflight.session,
+        matchedOn: existing.matchedOn,
       };
     }
   } catch (error) {
-    await settle(dbSession, organizationId, claimed.id, "pending", "The duplicate check could not be completed.");
     return {
-      ...base,
-      status: "deferred",
+      queueId: instruction.queueId,
+      kind: "not_ready",
+      session: "EXPIRED",
       reason: error instanceof Error ? error.message : "The duplicate check could not be completed.",
     };
   }
 
-  const execution = await adapter.execute(claimed.action, steps, claimed.payload, ctx);
-  if (!execution.ok) {
-    const exhausted = claimed.attempts >= MAX_ATTEMPTS;
-    const retryable = execution.retryable === true && !exhausted;
-    await settle(dbSession, organizationId, claimed.id, retryable ? "pending" : "failed", execution.error ?? "The workflow did not complete.");
-    return {
-      ...base,
-      status: retryable ? "deferred" : "failed",
-      reason: execution.error,
-      session: execution.session,
-      needsHuman: !retryable,
-    };
-  }
+  const execution = await adapter.execute(instruction.action, instruction.steps, instruction.payload, ctx);
+  const verification = execution.ok
+    ? await adapter.verify(instruction.action, execution, instruction.payload, ctx)
+    : { confirmed: false };
 
-  // The only step that turns a submitted form into a fact.
-  const verification = await adapter.verify(claimed.action, execution, claimed.payload, ctx);
-  if (verification.confirmed) {
-    await settle(dbSession, organizationId, claimed.id, "done", null);
-    return {
-      ...base,
-      status: "done",
-      externalId: verification.externalId ?? execution.externalId,
-      session: execution.session,
-    };
-  }
-
-  if (verification.pending) {
-    // The write happened. The queue's job is finished and the proof is not, so
-    // the row settles and the Work item is the thing that stays unproven.
-    await settle(dbSession, organizationId, claimed.id, "done", null);
-    return {
-      ...base,
-      status: "pending_verification",
-      externalId: execution.externalId,
-      reason: verification.detail ?? "The provider has not caught up yet.",
-      session: execution.session,
-    };
-  }
-
-  // Submitted, and the provider says the record is not there. That is a
-  // failure even though the browser reported success, which is the entire
-  // reason verification is a separate step.
-  await settle(dbSession, organizationId, claimed.id, "failed", verification.detail ?? "The record could not be found after the write.");
-  return {
-    ...base,
-    status: "failed",
-    reason: verification.detail ?? "The provider does not show the record after the write.",
-    session: execution.session,
-    needsHuman: true,
-  };
+  return { queueId: instruction.queueId, kind: "executed", execution, verification };
 }
 
 /** Drain until the queue is empty or `limit` writes have been handled. */

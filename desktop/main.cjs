@@ -3,6 +3,7 @@
 
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain, shell, session, nativeTheme } = require("electron");
+const { pms: pmsProvider } = require("./pms-provider.cjs");
 const { CodexAppServerService } = require("./codex-app-server.cjs");
 
 const { isChatWindowRequest, applyChatBackground, parseChatAppearance } = require("./chat-window.cjs");
@@ -113,6 +114,18 @@ app.whenReady().then(async () => {
   registerIpc("set-active", ({ active } = {}) => service.setActive(active === true));
   registerIpc("set-model", ({ modelId } = {}) => service.setModel(modelId));
   registerIpc("ask", (payload) => service.ask(payload));
+  // The customer-authorized provider surface. Registered through the same
+  // trusted-sender check as everything else, and each name is one structured
+  // provider operation rather than a browser primitive.
+  for (const [channel, method] of [
+    ["supported", "supported"], ["preflight", "preflight"], ["recover-session", "recoverSession"],
+    ["health-check", "healthCheck"], ["find-existing", "findExisting"], ["execute", "execute"], ["verify", "verify"],
+  ]) {
+    ipcMain.handle(`aval:pms:${channel}`, async (event, payload) => {
+      if (!isTrustedSender(event)) throw new Error("Untrusted Aval Desktop request.");
+      return pmsProvider[method](payload || {});
+    });
+  }
   registerIpc("cancel-turn", async (payload) => { await service.cancelTurn(payload || {}); return null; });
   ipcMain.handle('aval:chat:background', (event, payload) => {
     if (event.sender !== mainWindow?.webContents || !isTrustedSender(event)) throw new Error('Untrusted chat appearance request.');
