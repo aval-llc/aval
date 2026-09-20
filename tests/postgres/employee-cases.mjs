@@ -8,6 +8,7 @@ import {
 } from "../../lib/agents/employees.ts";
 import { createTask, getTask } from "../../lib/agents/tasks.ts";
 import { assembleToolset } from "../../lib/agents/toolset.ts";
+import { ancestorActors, delegationRefusal } from "../../lib/agents/delegation.ts";
 import { TOOLS } from "../../lib/ask-aval/tools.ts";
 import { getPersona } from "../../lib/ask-aval/personas.ts";
 
@@ -214,6 +215,67 @@ export async function runEmployeeCases(t, { session, userA, userB, administrator
     assert.ok(offered.has("render_answer"), "and the model can always conclude");
     assert.equal(offered.has("get_delinquent_accounts"), false, "an ungranted capability is absent");
     assert.equal(offered.size, 2, "nothing arrived that nobody granted");
+  });
+
+  await t.test("an employee delegates only to colleagues it was granted", async () => {
+    const maya = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Delegating Maya", role: "Resident Operations Manager", status: "active", mayDelegate: true,
+    }));
+    const david = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Delegate David", role: "Maintenance Coordinator", status: "active",
+    }));
+    const stranger = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Ungranted stranger", role: "Analyst", status: "active",
+    }));
+    const parent = await run((s, org) => createTask(s, {
+      organizationId: org, userId: userA, agentId: "general", employeeId: maya.id,
+      goal: "Own the resident issue",
+      check: { kind: "evidence", tools: ["get_portfolio_metrics"] },
+    }));
+
+    // Absence of a grant is never permission.
+    assert.ok(await run((s, org) => delegationRefusal(s, org, parent, { agentId: "maintenance", employeeId: stranger.id })),
+      "an employee with no delegate_to grants delegates to nobody");
+
+    await run((s, org) => grantScope(s, org, maya.id, userA, { kind: "delegate_to", value: david.id }));
+    assert.equal(await run((s, org) => delegationRefusal(s, org, parent, { agentId: "maintenance", employeeId: david.id })),
+      null, "the granted colleague is reachable");
+    assert.ok(await run((s, org) => delegationRefusal(s, org, parent, { agentId: "maintenance", employeeId: stranger.id })),
+      "and granting one colleague did not grant the rest");
+  });
+
+  await t.test("delegation cannot close a loop back onto an ancestor", async () => {
+    // Nothing prevented this before. MAX_DELEGATION_DEPTH bounded how long a
+    // cycle could run, which is not the same as refusing one: A delegating to B
+    // delegating back to A was legal, and merely shallow.
+    const alice = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Cycle Alice", role: "Coordinator", status: "active", mayDelegate: true,
+    }));
+    const bob = await run((s, org) => createEmployee(s, org, userA, {
+      name: "Cycle Bob", role: "Analyst", status: "active", mayDelegate: true,
+    }));
+    await run((s, org) => grantScope(s, org, alice.id, userA, { kind: "delegate_to", value: bob.id }));
+    await run((s, org) => grantScope(s, org, bob.id, userA, { kind: "delegate_to", value: alice.id }));
+
+    const root = await run((s, org) => createTask(s, {
+      organizationId: org, userId: userA, agentId: "general", employeeId: alice.id,
+      goal: "Alice starts", check: { kind: "evidence", tools: ["get_portfolio_metrics"] },
+    }));
+    const child = await run((s, org) => createTask(s, {
+      organizationId: org, userId: userA, agentId: "general", employeeId: bob.id,
+      goal: "Bob continues", check: { kind: "evidence", tools: ["get_portfolio_metrics"] },
+      parentTaskId: root.id, delegationDepth: 1,
+    }));
+
+    const ancestry = await run((s, org) => ancestorActors(s, org, child.id));
+    assert.ok(ancestry.has(alice.id) && ancestry.has(bob.id), "the chain is visible from the child");
+
+    const refusal = await run((s, org) => delegationRefusal(s, org, child, { agentId: "general", employeeId: alice.id }));
+    assert.match(refusal ?? "", /loop/i, "Bob may not hand the work back to Alice");
+    // And the mutual grant is genuinely there — the refusal is the cycle, not a
+    // missing permission.
+    const bobScopes = await run((s, org) => employeeScopes(s, org, bob.id));
+    assert.deepEqual(bobScopes.delegate_to, [alice.id]);
   });
 
   await t.test("work is never handed to an employee that cannot run it", async () => {

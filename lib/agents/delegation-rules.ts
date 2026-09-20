@@ -108,3 +108,9 @@ export function checkDelegation(parent: DelegationParent, toPersonaId: string): 
 
   return { ok: true, permissions };
 }
+
+/** The delegation role for an actor, with what it may delegate to. */
+export function roleForDelegation(actorId: string): { role: AgentRole; allowed: readonly AgentRole[] } {
+  const role = roleForPersona(actorId);
+  return { role, allowed: DELEGATION_RULES[role] ?? [] };
+}

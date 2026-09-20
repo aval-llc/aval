@@ -8,6 +8,7 @@ import { getTool } from './registry';
 import { hasPermission, roleForPersona, canOrchestrate } from './permissions';
 import { resolveAttemptPolicy } from "./attempt-policy.ts";
 import { loadAttemptPolicies } from "./attempt-policy-store.ts";
+import { delegationRefusal } from "./delegation.ts";
 /** Fan-out and total size remain structural caps. How many times a goal may be
  * rethought is policy — see DEFAULT_ATTEMPT_POLICIES.replan. */
 export const MAX_PLAN_NODES = 4, MAX_GOAL_TASKS = 8;
@@ -101,6 +102,15 @@ export async function writeGoalPlan(dbSession: DbSession, org: string, rootId: s
         const existing = await dbSession.db.select({ id: agentPlanNodes.id }).from(agentPlanNodes).where(eq(agentPlanNodes.rootTaskId, rootId));
         if (existing.length + nodes.length > MAX_GOAL_TASKS)
             throw Error('The goal reached its total task cap.');
+        // Who may open work under whom, and whether doing so would close a
+        // loop. The live path has never asked either question: it checked that
+        // the child held the permissions its node needed, which is a different
+        // question from whether this parent may hand work to that child at all.
+        for (const node of nodes) {
+            if (node.agentId === root.agentId && !root.employeeId) continue;
+            const refusal = await delegationRefusal(dbSession, org, root, { agentId: node.agentId, employeeId: null });
+            if (refusal) throw Error(refusal);
+        }
         const steps = Math.floor((root.maxSteps - root.stepCount - 2) / (2 * nodes.length)), tokens = Math.floor((root.maxTokens - root.tokensUsed) / (2 * nodes.length));
         if (steps < 2 || tokens < 2048)
             throw Error('Insufficient shared budget for this plan. Reduce its size.');
