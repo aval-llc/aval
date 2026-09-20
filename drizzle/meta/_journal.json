@@ -295,6 +295,20 @@
       "when": 1789848311466,
       "tag": "0041_hesitant_star_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1789862134275,
+      "tag": "0042_equal_mongoose",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1789862385338,
+      "tag": "0043_loose_jasper_sitwell",
+      "breakpoints": true
     }
   ]
 }

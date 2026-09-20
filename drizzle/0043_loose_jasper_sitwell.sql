@@ -1,0 +1,1 @@
+ALTER TABLE `agent_tasks` ADD `employee_id` text;

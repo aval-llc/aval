@@ -18,6 +18,7 @@ import { runIntakeCases } from "./intake-cases.mjs";
 import { runVerificationCases } from "./verification-cases.mjs";
 import { runPmsWriteCases } from "./pms-write-cases.mjs";
 import { runCrashResumeCases } from "./crash-resume-cases.mjs";
+import { runEmployeeCases } from "./employee-cases.mjs";
 import { runFactsEvidenceCases } from "./facts-evidence-cases.mjs";
 import { runReadModelCases } from "./read-model-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
@@ -220,6 +221,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runVerificationCases(t, { session, userA });
     await runPmsWriteCases(t, { session, userA, propertyId, administrator });
     await runCrashResumeCases(t, { session, userA, propertyId, administrator });
+    await runEmployeeCases(t, { session, userA, userB, administrator });
     await runFactsEvidenceCases(t, { session, userA });
     await runReadModelCases(t, { session, userA });
     await runBackupCases(t, url);

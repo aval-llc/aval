@@ -88,6 +88,10 @@ export const organizations = pgTable("organizations", {
   // send disappear. `organization_seat_slugs` is that permanent set, and every
   // value here must also exist there.
   seatSlug: text("seat_slug"),
+  // How many AI employees this workspace may have. Null means no limit, which
+  // is the architecture's own position: a ceiling is a commercial decision, not
+  // a property of the runtime, so nothing below this column assumes a number.
+  aiEmployeeLimit: integer("ai_employee_limit"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 }, (table) => [uniqueIndex("organizations_seat_slug_uq").on(table.seatSlug)]);
@@ -1209,6 +1213,15 @@ export const agentTasks = pgTable(
     // Persona id — a built-in role or a custom persona row. Resolved to a
     // permission envelope by lib/agents/permissions.ts on every step.
     agentId: text("agent_id").notNull(),
+    /**
+     * The employee that owns this work.
+     *
+     * Durable, so a restart resumes with the same owner rather than re-deriving
+     * one. Nullable while the built-in specialists are still addressed by
+     * `agentId`; once every persona resolves to an employee record this becomes
+     * the only answer to "who is doing this".
+     */
+    employeeId: text("employee_id"),
     goal: text("goal").notNull(),
     // QUEUED | RUNNING | WAITING_FOR_TOOL | WAITING_FOR_APPROVAL | COMPLETED | FAILED | CANCELLED
     status: text("status").notNull(),
@@ -2125,5 +2138,97 @@ export const workAttempts = pgTable(
     check("work_attempts_kind", sql`kind IN ('execution','verification','check_repair','replan')`),
     check("work_attempts_outcome", sql`outcome IN ('succeeded','failed','inconclusive','blocked')`),
     check("work_attempts_number_positive", sql`attempt_number >= 1`),
+  ],
+);
+
+/**
+ * A durable organizational actor.
+ *
+ * Not a model session and not a persona: an employee outlives any particular
+ * run, owns Work, and carries its own authority. The eight specialists that
+ * preceded this were a fixed union in source — `PersonaId` — which meant the
+ * roster was a property of the build rather than of the customer. Here a role
+ * is just text, because "Turnover Coordinator" is a thing a customer invents,
+ * not a thing Aval ships.
+ *
+ * Scopes are relational (`ai_employee_scopes`) rather than folded into one
+ * opaque prompt, so what an employee may reach is enforced by the backend and
+ * legible to the person who granted it.
+ */
+export const aiEmployees = pgTable(
+  "ai_employees",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    name: text("name").notNull(),
+    /** Free text on purpose. No enum of valid roles exists, or may exist. */
+    role: text("role").notNull(),
+    description: text("description"),
+    /** What this employee is responsible for, in the customer's own words. */
+    objective: text("objective"),
+    instructions: text("instructions"),
+    /** draft | active | paused | archived */
+    status: text("status").notNull().default("draft"),
+    /** supervised | assisted | autonomous */
+    autonomyMode: text("autonomy_mode").notNull().default("supervised"),
+    /** Named approval policy this employee runs under. */
+    approvalPolicy: text("approval_policy").notNull().default("standard"),
+    /** Null means this employee commits no money at all, which is the safe default. */
+    spendLimitCents: bigint("spend_limit_cents", { mode: "number" }),
+    /** The highest risk tier this employee may act at without a person. */
+    riskCeiling: text("risk_ceiling").notNull().default("low"),
+    /** organization | property | work — how widely its memory reaches. */
+    memoryScope: text("memory_scope").notNull().default("work"),
+    /** Creating an employee grants nothing; these are turned on deliberately. */
+    mayCommunicateExternally: boolean("may_communicate_externally").notNull().default(false),
+    mayDelegate: boolean("may_delegate").notNull().default(false),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (table) => [
+    index("ai_employees_org_idx").on(table.organizationId, table.status),
+    // One name per workspace. Duplicates are allowed by the architecture but not
+    // by this table: a directory containing two employees called Maya cannot be
+    // used to decide which one is waiting on you.
+    uniqueIndex("ai_employees_org_name_uq").on(table.organizationId, table.name),
+    check("ai_employees_status", sql`status IN ('draft','active','paused','archived')`),
+    check("ai_employees_autonomy", sql`autonomy_mode IN ('supervised','assisted','autonomous')`),
+    check("ai_employees_risk", sql`risk_ceiling IN ('low','medium','high','critical')`),
+    check("ai_employees_memory_scope", sql`memory_scope IN ('organization','property','work')`),
+    check("ai_employees_spend_nonnegative", sql`spend_limit_cents IS NULL OR spend_limit_cents >= 0`),
+    check("ai_employees_name_present", sql`length(trim(name)) > 0`),
+    check("ai_employees_role_present", sql`length(trim(role)) > 0`),
+  ],
+);
+
+/**
+ * What one employee is allowed to reach.
+ *
+ * One row per grant, so authority is additive, auditable and revocable a piece
+ * at a time. `scope_kind` is an internal taxonomy and is constrained; the
+ * values are not, because a data domain or a work type is something a customer
+ * names.
+ *
+ * Absence is never permission: an employee with no rows of a given kind reaches
+ * nothing of that kind, rather than everything.
+ */
+export const aiEmployeeScopes = pgTable(
+  "ai_employee_scopes",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    employeeId: text("employee_id").notNull().references(() => aiEmployees.id),
+    /** property | connection | capability | work_type | data_domain | delegate_to */
+    scopeKind: text("scope_kind").notNull(),
+    value: text("value").notNull(),
+    grantedBy: text("granted_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (table) => [
+    index("ai_employee_scopes_lookup_idx").on(table.employeeId, table.scopeKind),
+    uniqueIndex("ai_employee_scopes_grant_uq").on(table.employeeId, table.scopeKind, table.value),
+    check("ai_employee_scopes_kind", sql`scope_kind IN ('property','connection','capability','work_type','data_domain','delegate_to')`),
+    check("ai_employee_scopes_value_present", sql`length(trim(value)) > 0`),
   ],
 );
