@@ -557,7 +557,7 @@ No container runtime is available on this machine (no docker, podman, colima,
 nerdctl). PostgreSQL 16.15 is installed natively via Homebrew, so a cluster was
 provisioned directly instead.
 
-`scripts/test-database.mjs` creates a disposable cluster with its own data
+`scripts/database-harness.mjs` creates a disposable cluster with its own data
 directory under the OS temp area, its own port (55433), and loopback-only trust
 auth. It never touches an existing cluster, database, or port 5432, and removes
 only what it created. The socket lives on a short path because PostgreSQL

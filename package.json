@@ -43,10 +43,10 @@
     "validate:runtime:codex": "node --import ./tests/integration/module-hooks.mjs scripts/validate-codex-runtime.mjs docs/audit/codex-runtime-validation.json",
     "validate:independence": "node --import ./tests/integration/module-hooks.mjs scripts/validate-independence.mjs",
     "compare:agents:codex": "node --import ./tests/integration/module-hooks.mjs scripts/compare-agent-llm.mjs",
-    "test:db:start": "node scripts/test-database.mjs start",
-    "test:db:reset": "node scripts/test-database.mjs reset",
-    "test:db:stop": "node scripts/test-database.mjs stop",
-    "test:postgres:local": "AVAL_TEST_DATABASE_URL=$(node scripts/test-database.mjs reset) npm run test:postgres"
+    "test:db:start": "node scripts/database-harness.mjs start",
+    "test:db:reset": "node scripts/database-harness.mjs reset",
+    "test:db:stop": "node scripts/database-harness.mjs stop",
+    "test:postgres:local": "AVAL_TEST_DATABASE_URL=$(node scripts/database-harness.mjs reset) npm run test:postgres"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",

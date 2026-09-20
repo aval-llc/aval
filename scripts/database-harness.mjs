@@ -2,6 +2,12 @@
 /**
  * Provisions a disposable local PostgreSQL cluster for the integration lane.
  *
+ * Named `database-harness` rather than `test-database` because Node's test
+ * runner collects `test-*.mjs` by default. Under the old name it was run as a
+ * test suite: it passed on a machine with PostgreSQL installed and failed on CI,
+ * where there is none — green locally and red on main, which is the worst place
+ * for a difference like that to live.
+ *
  * `tests/postgres/*.integration.mjs` refuse to run without
  * `AVAL_TEST_DATABASE_URL`, and refuse any host that is not loopback. That is
  * the right default — the fixtures are destructive — but it left the suite
@@ -12,9 +18,9 @@
  * touches an existing cluster, an existing database, or port 5432.
  *
  * Usage:
- *   node scripts/test-database.mjs start   # prints the URL on stdout
- *   node scripts/test-database.mjs stop
- *   node scripts/test-database.mjs reset   # drop and recreate the database
+ *   node scripts/database-harness.mjs start   # prints the URL on stdout
+ *   node scripts/database-harness.mjs stop
+ *   node scripts/database-harness.mjs reset   # drop and recreate the database
  *
  * The printed URL carries no password: the cluster trusts loopback and listens
  * nowhere else.
