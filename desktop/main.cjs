@@ -2,7 +2,7 @@
  
 
 const path = require("node:path");
-const { app, BrowserWindow, ipcMain, shell, session, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, session, nativeTheme, dialog, systemPreferences } = require("electron");
 const { pms: pmsProvider } = require("./pms-provider.cjs");
 const { CodexAppServerService } = require("./codex-app-server.cjs");
 
@@ -96,7 +96,26 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  const microphoneGrants = new Set();
+  const trustedMicrophone = (contents, permission, details) => {
+    try { return permission === 'media' && new URL(contents.getURL()).origin === allowedOrigin && new URL(details.requestingUrl || details.securityOrigin || contents.getURL()).origin === allowedOrigin && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio'; } catch { return false; }
+  };
+  session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) => {
+    return !!contents && permission === 'media' && origin === allowedOrigin && details.mediaType === 'audio' && microphoneGrants.has(contents.id);
+  });
+  session.defaultSession.setPermissionRequestHandler(async (contents, permission, callback, details) => {
+    if (!trustedMicrophone(contents, permission, details)) { callback(false); return; }
+    try {
+      if (!microphoneGrants.has(contents.id)) {
+        const choice = await dialog.showMessageBox(BrowserWindow.fromWebContents(contents), { type: 'question', buttons: ['Allow microphone', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Aval microphone', message: 'Allow Aval to record your voice request?', detail: 'Audio is sent to your workspace’s connected transcription provider when you stop. Aval does not retain the recording.' });
+        if (choice.response !== 0 || contents.isDestroyed()) { callback(false); return; }
+        if (process.platform === 'darwin' && !await systemPreferences.askForMediaAccess('microphone')) { callback(false); return; }
+        microphoneGrants.add(contents.id);
+        contents.once('destroyed', () => microphoneGrants.delete(contents.id));
+      }
+      callback(true);
+    } catch { callback(false); }
+  });
   service = new CodexAppServerService({
     userDataDir: app.getPath("userData"),
     version: app.getVersion(),

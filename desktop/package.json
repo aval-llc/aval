@@ -60,6 +60,9 @@
       }
     ],
     "mac": {
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Aval records voice requests only when you press the microphone button."
+      },
       "category": "public.app-category.business",
       "icon": "../public/icon-512.png",
       "hardenedRuntime": true,
