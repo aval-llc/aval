@@ -903,6 +903,27 @@
     "workOrdersEmptyDescription": "Órdenes abiertas una vez que conectes mantenimiento.",
     "workOrdersLabel": "Órdenes abiertas"
   },
+  "PmsSession": {
+      "couldNotConnect": "Aval no pudo comunicarse con el proveedor en esta computadora.",
+      "desktopOnly": "Esta conexión se hace desde la aplicación de escritorio de Aval, en la computadora donde usas tu PMS.",
+      "explainer": "Inicia sesión en {provider} tú mismo, en su propia ventana. Aval trabaja dentro de la sesión que creas y nunca ve tu contraseña.",
+      "lastUsed": "Usado por última vez {when}",
+      "neverStoresCredentials": "Aval no guarda ninguna contraseña ni código de autenticación para esta conexión. Aquí no hay dónde escribirlos.",
+      "notPermission": "Poder acceder a algo no es permiso para usarlo. Habilita abajo cada acción que quieras que Aval realice.",
+      "notSignedIn": "No se encontró una sesión iniciada. Inicia sesión e inténtalo de nuevo.",
+      "reaches": "Este acceso alcanza {count} acciones:",
+      "signInAgain": "Iniciar sesión de nuevo",
+      "state_CONNECTED": "Sesión activa",
+      "state_DEGRADED": "Responde con lentitud",
+      "state_PERMISSION_DENIED": "Este usuario del PMS no tiene permiso",
+      "state_PROVIDER_UNAVAILABLE": "Proveedor no disponible",
+      "state_SESSION_EXPIRED": "La sesión expiró",
+      "state_SESSION_REQUIRED": "Falta iniciar sesión",
+      "state_UI_CHANGED": "La pantalla del proveedor cambió",
+      "title": "Conectar {provider} usando esta computadora",
+      "useThisComputer": "Usar esta computadora",
+      "waitingForSignIn": "Esperando el inicio de sesión…"
+  },
   "ReviewCenter": {
     "emptyFilter": "Todavía no hay nada aquí.",
     "filterAll": "{count, plural, one {Todos · # elemento} other {Todos · # elementos}}",

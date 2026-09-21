@@ -40,7 +40,18 @@ export type IntegrationProvider = {
   category: "Accounting" | "Leasing & PMS" | "Communication" | "Knowledge" | "Model" | "Marketing";
   description: string;
   /** "oauth_subscription_paste" — see lib/integrations/subscription-oauth.ts's file comment for exactly why this can't be a normal server-redirect "oauth2" flow. */
-  authMode: "oauth2" | "credentials" | "bot_token" | "api_key" | "msp" | "qr_link" | "oauth_subscription_paste";
+  /**
+   * How a workspace proves it may use this provider.
+   *
+   * `customer_desktop_session` is the odd one and the reason this is a union
+   * rather than a boolean: there is nothing to collect. The customer signs into
+   * the provider themselves, on their own machine, and Aval operates inside the
+   * session they established. No password, no authenticator seed, and no field
+   * in which either could be typed — so a connection in this mode carries no
+   * ciphertext at all.
+   */
+  authMode: "oauth2" | "credentials" | "bot_token" | "api_key" | "msp" | "qr_link"
+    | "oauth_subscription_paste" | "customer_desktop_session";
   permissions: string[];
   credentialFields?: { key: string; label: string; secret?: boolean }[];
   env: string[];

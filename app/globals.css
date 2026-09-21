@@ -1891,3 +1891,33 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 
 .employee-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; }
 .employee-error { margin-top: 10px; font-size: 11px; color: var(--danger, #b4232b); }
+
+/* ── customer-authorized PMS session ───────────────────────────────────────
+   Its own block rather than the connection dialog's, because this panel has
+   no credential form to lay out and the thing it most needs to show clearly
+   is the difference between what a login reaches and what Aval may do. */
+.pms-session { margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-soft); }
+.pms-session-head { display: flex; align-items: flex-start; gap: 10px; }
+.pms-session-head > svg { flex-shrink: 0; margin-top: 2px; color: var(--quiet); }
+.pms-session-head > div { flex: 1 1 auto; min-width: 0; }
+.pms-session-head strong { display: block; font-size: 13px; font-weight: 600; }
+.pms-session-head p { margin: 3px 0 0; font-size: 11px; color: var(--quiet); }
+
+.pms-session-state { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 10px; font-weight: 600; white-space: nowrap; }
+.pms-session-state.is-ok { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, transparent); }
+.pms-session-state.is-waiting { color: var(--quiet); }
+.pms-session-state.is-blocked { color: var(--danger, #b4232b); border-color: color-mix(in srgb, var(--danger, #b4232b) 40%, transparent); }
+
+/* Before the button, deliberately: it is the reason there is no form here. */
+.pms-session-note { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0 0; font-size: 11px; color: var(--quiet); }
+.pms-session-note > svg { flex-shrink: 0; margin-top: 1px; }
+.pms-session-detail { margin: 8px 0 0; font-size: 11px; color: var(--quiet); }
+.pms-session-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+
+.pms-session-discovered { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.pms-session-discovered > p { margin: 0 0 8px; font-size: 11px; color: var(--quiet); }
+.pms-session-discovered ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pms-session-discovered li { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 10px; }
+/* The sentence the panel exists to be able to say. It is not a footnote. */
+.pms-session-not-permission { margin: 10px 0 0; font-size: 11px; font-weight: 600; color: var(--ink); }
+.pms-session-error { margin: 10px 0 0; font-size: 11px; color: var(--danger, #b4232b); }

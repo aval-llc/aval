@@ -3,6 +3,7 @@ import { ConnectionOperations } from "./connection-operations";
 import { CommunicationSettings } from "./communication-settings";
 import { PmsMatrix } from "./pms-matrix";
 import { PmsSeat } from "./pms-seat";
+import { PmsDesktopSession } from "./pms-desktop-session";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -56,6 +57,8 @@ export function IntegrationsCatalog({
       </header>
       <CommunicationSettings/>
       <PmsSeat/>
+      {/* Connecting the PMS comes before choosing what Aval may do in it. */}
+      <PmsDesktopSession provider="appfolio"/>
       <PmsMatrix/>
       <ConnectionOperations/>
       <div className="enterprise-toolbar">

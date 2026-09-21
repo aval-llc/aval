@@ -4,6 +4,9 @@ import { eq } from 'drizzle-orm';
 import { pmsActionFlows, pmsWriteQueue, pmsSeatSenderAddresses } from '../../db/postgres/schema.ts';
 import { resolveCapability } from '../../lib/pms/capability.ts';
 import { pmsToolAvailability } from '../../lib/pms/assembly.ts';
+import { env } from 'cloudflare:workers';
+import { withVerifiedIdentityHeaders } from '../../lib/auth/request-identity.ts';
+import { GET as sessionGet, POST as sessionPost } from '../../app/api/pms/session/route.ts';
 
 /**
  * An attempt to falsify the claims, rather than to demonstrate them.
@@ -22,7 +25,7 @@ import { pmsToolAvailability } from '../../lib/pms/assembly.ts';
  *     it.
  */
 
-export async function runPmsAdversarialCases(t, { session, userA, userB, administrator }) {
+export async function runPmsAdversarialCases(t, { session, userA, userB, administrator, config }) {
   const run = (work) => session(userA, (s) => work(s, s.identity.organizationId));
   const other = (work) => session(userB, (s) => work(s, s.identity.organizationId));
   const orgA = await run((_s, o) => o);
@@ -96,4 +99,85 @@ export async function runPmsAdversarialCases(t, { session, userA, userB, adminis
     assert.ok(!offered.includes('appfolio'),
       `an unauthorized write must not be offered for that provider: ${JSON.stringify(offered)}`);
   });
+
+  /* ── the connection surface a customer actually uses ─────────────────── */
+
+  const previousEnv = { ...env };
+  env.DATABASE_URL = config.connectionString;
+  delete env.HYPERDRIVE;
+  try {
+    const request = (user, org, method, body, query = '') => new Request(
+      `https://app.aval.llc/api/pms/session${query}`,
+      {
+        method,
+        headers: withVerifiedIdentityHeaders(
+          new Headers({ 'content-type': 'application/json', cookie: `aval-active-organization=${org}` }),
+          { userId: user, email: `${user}@example.test`, displayName: user, emailVerified: true },
+        ),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      },
+    );
+    const post = async (user, org, body) => {
+      const response = await sessionPost(request(user, org, 'POST', body), undefined);
+      return [response.status, await response.json()];
+    };
+    const get = async (user, org, query) => {
+      const response = await sessionGet(request(user, org, 'GET', null, query), undefined);
+      return [response.status, await response.json()];
+    };
+
+    await t.test('connecting by signing in records what a login reaches, and grants none of it', async () => {
+      const [status, body] = await post(userA, orgA, {
+        provider: 'appfolio',
+        session: 'ACTIVE',
+        discovered: ['maintenance.work_order.create', 'arrears.payment.post'],
+        runner: 'a-laptop',
+      });
+      assert.equal(status, 200);
+      assert.ok(body.discovered.includes('arrears.payment.post'), 'the reach is recorded');
+      assert.match(body.note, /not permissions/i, 'and said to be reach rather than permission');
+
+      // The load-bearing assertion for this whole screen: a customer who
+      // connected must not thereby have authorized anything.
+      const resolution = await run((s, o) => resolveCapability(s, o, 'appfolio', 'arrears.payment.post'));
+      assert.notEqual(resolution.state, 'allow', `connecting granted ${resolution.state}`);
+      const availability = await run((s, o) => pmsToolAvailability(s, o, 'maintenance'));
+      assert.ok(!(availability.providersByTool.get('post_payment') ?? []).includes('appfolio'),
+        'and no tool appeared because a session could reach it');
+    });
+
+    await t.test('the connection reports its session state to the customer', async () => {
+      const [status, body] = await get(userA, orgA, '?provider=appfolio');
+      assert.equal(status, 200);
+      assert.equal(body.connected, true);
+      assert.equal(body.accessMode, 'customer_desktop_session', 'the access mode is a real thing, not a label');
+      assert.equal(body.session.state, 'CONNECTED');
+      assert.ok(body.session.lastVerifiedAt, 'dated by a session that actually worked');
+    });
+
+    await t.test('a lapsed session is recorded as lapsed, not as disconnected', async () => {
+      const [, body] = await post(userA, orgA, { provider: 'appfolio', session: 'EXPIRED' });
+      assert.equal(body.session.state, 'SESSION_EXPIRED');
+      const [, view] = await get(userA, orgA, '?provider=appfolio');
+      assert.equal(view.connected, true, 'a closed laptop has not disconnected the PMS');
+    });
+
+    await t.test('the route refuses what it cannot honestly accept', async () => {
+      // A provider whose writes do not run on the customer's machine has no
+      // desktop session to establish.
+      assert.equal((await get(userA, orgA, '?provider=doorloop'))[0], 404);
+      assert.equal((await post(userA, orgA, { provider: 'doorloop', session: 'ACTIVE' }))[0], 404);
+      // "Nearly signed in" is not a state this path has.
+      assert.equal((await post(userA, orgA, { provider: 'appfolio', session: 'PROBABLY_FINE' }))[0], 422);
+    });
+
+    await t.test('one workspace cannot connect on behalf of another', async () => {
+      await post(userB, orgB, { provider: 'appfolio', session: 'PERMISSION_DENIED' });
+      const [, mine] = await get(userA, orgA, '?provider=appfolio');
+      assert.equal(mine.session.state, 'SESSION_EXPIRED',
+        "another workspace's session state must not overwrite this one");
+    });
+  } finally {
+    Object.assign(env, previousEnv);
+  }
 }

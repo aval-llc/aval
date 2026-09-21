@@ -903,6 +903,27 @@
     "workOrdersEmptyDescription": "Open work orders once maintenance is connected.",
     "workOrdersLabel": "Open work orders"
   },
+  "PmsSession": {
+      "couldNotConnect": "Aval could not reach the provider on this computer.",
+      "desktopOnly": "This connection is made from the Aval desktop app, on the computer you use your PMS from.",
+      "explainer": "Sign into {provider} yourself, in its own window. Aval works inside the session you create and never sees your password.",
+      "lastUsed": "Last used {when}",
+      "neverStoresCredentials": "Aval stores no password and no authenticator code for this connection. There is nowhere here to enter one.",
+      "notPermission": "Reaching something is not permission to use it. Enable each action you want Aval to perform below.",
+      "notSignedIn": "No signed-in session was found. Sign in and try again.",
+      "reaches": "This login can reach {count} actions:",
+      "signInAgain": "Sign in again",
+      "state_CONNECTED": "Session active",
+      "state_DEGRADED": "Responding slowly",
+      "state_PERMISSION_DENIED": "This PMS user lacks permission",
+      "state_PROVIDER_UNAVAILABLE": "Provider unavailable",
+      "state_SESSION_EXPIRED": "Session expired",
+      "state_SESSION_REQUIRED": "Sign-in needed",
+      "state_UI_CHANGED": "Provider screen changed",
+      "title": "Connect {provider} using this computer",
+      "useThisComputer": "Use this computer",
+      "waitingForSignIn": "Waiting for sign-in…"
+  },
   "ReviewCenter": {
     "emptyFilter": "Nothing here yet.",
     "filterAll": "{count, plural, one {All · # item} other {All · # items}}",
