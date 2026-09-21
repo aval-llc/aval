@@ -62,6 +62,7 @@ import {
   type TaskState,
 } from "./tasks.ts";
 import { planEvidence } from "./autonomy-storage";
+import { effectiveEmployeeAccess } from "./employee-access";
 import { assembleToolset } from "./toolset.ts";
 import { employeeEnvelope } from "./policy.ts";
 import type { Permission } from "./permissions.ts";
@@ -69,6 +70,7 @@ import { employeeScopes, getEmployee } from "./employees.ts";
 import { selectExpertiseForWork } from "./expertise.ts";
 import { budgetExhausted, detectStagnation, nextDelayMs, resolveAttemptPolicy, type EscalationBehavior } from "./attempt-policy.ts";
 import { loadAttemptPolicies } from "./attempt-policy-store.ts";
+import { classifyToolFailure, replanGuidance } from "./tool-failure.ts";
 import { attemptSignature, attemptSpend, attemptTraces, recordWorkAttempt } from "./work-attempts.ts";
 import { autonomyInstructions, autonomyMode } from "./autonomy";
 import { readOnboarding } from "@/lib/onboarding/storage";
@@ -207,6 +209,7 @@ export async function advanceTask(dbSession: DbSession,
   const assembled = await assembleToolset(dbSession, {
     organizationId, subject, agentId: task.agentId, persona,
     baseTools: TOOLS, finalToolName: "render_answer",
+    employeeId: owner?.id,
     employeeCapabilities: scopes?.capability ?? null,
     employeePermissions,
   });
@@ -583,6 +586,11 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
         error: `${owner.name} is ${owner.status} and is not running work. Resume the employee, or reassign this work to one that is active.`,
       });
     }
+    if(owner){
+      const effective=await effectiveEmployeeAccess(dbSession,organizationId,owner.id);
+      const required:string[]=contract.kind==='evidence'?contract.tools:[];
+      if(!effective.capabilities.length||required.some(name=>!effective.capabilities.includes(name)))return finish('WAITING_FOR_PROVIDER',{error:'Employee access is unavailable. Configure its connections and capabilities in Setup; this work will retry automatically.',nextAttemptAt:new Date(Date.now()+60000)});
+    }
     // Answer the proposal the run parked on, before asking the model anything
     // else. Until this happens the transcript ends on an unanswered tool_use,
     // which no provider will accept as a valid conversation.
@@ -848,7 +856,50 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
           argsDigest: await digestPayload(redactArguments(use.input)),
           error: message,
         });
-        results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify({ error: message }), is_error: true });
+        // The failure enters attempt history, which is the whole of what was
+        // missing. Without this a failed call was an error string handed back
+        // to the model and recorded nowhere, so the second identical failure
+        // was indistinguishable from the first and nothing could tell a retry
+        // from a loop.
+        const failure = classifyToolFailure(result);
+        await recordWorkAttempt(dbSession, {
+          organizationId, taskId,
+          kind: "replan",
+          outcome: result.status === "denied" ? "blocked" : "failed",
+          objectiveSnapshot: task.goal,
+          tools: [use.name],
+          observations: message,
+          failureReason: failure.reason,
+          transient: failure.transient,
+          // A failed call moved nothing. Saying otherwise would hide the loop
+          // from `detectStagnation`, which treats progress as absolution.
+          progressed: false,
+          signature: await attemptSignature(use.name, redactArguments(use.input), failure.reason),
+        });
+
+        let errorContent = message;
+        if (!failure.transient) {
+          // Only for failures that will not fix themselves. A rate limit told
+          // to "try something else" is bad advice — repeating it verbatim is
+          // the correct move, and `detectStagnation` already declines to count
+          // transient attempts as repetition.
+          const traces = await attemptTraces(dbSession, organizationId, taskId);
+          const stagnation = detectStagnation(traces);
+          const guidance = replanGuidance(use.name, stagnation.repeats || 1);
+          errorContent = `${message} ${guidance}`;
+
+          if (stagnation.stagnant) {
+            // The budget is not the problem; the approach is. Handing this to a
+            // person beats spending the remaining steps rediscovering it.
+            results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify({ error: errorContent }), is_error: true });
+            messages.push({ role: "user", content: results });
+            return handOff("human_handoff",
+              `${message} ${stagnation.repeats} recent attempts made no progress (${stagnation.reason}).`,
+              "A different approach is needed rather than another attempt; the objective and every attempt behind it are on the record.");
+          }
+        }
+
+        results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify({ error: errorContent }), is_error: true });
       }
 
       messages.push({ role: "user", content: results });
