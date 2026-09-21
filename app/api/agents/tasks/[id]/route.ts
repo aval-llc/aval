@@ -6,6 +6,7 @@ import { goalPlan } from "@/lib/agents/goal-plan";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { serializeTraceStep } from "@/lib/agents/trace-view";
+import { getTool } from '@/lib/agents/registry';
 import { getTask, listSteps, requestCancel, TERMINAL_STATES, type TaskState } from "@/lib/agents/tasks";
 
 /**
@@ -47,7 +48,7 @@ async function GETWithSession(dbSession: DbSession, request: Request, context: {
     error: task.error,
     createdAt: task.createdAt,
     finishedAt: task.finishedAt,
-    trace: steps.map(serializeTraceStep),
+    trace: steps.map(step => ({ ...serializeTraceStep(step), mutates: step.toolName ? getTool(step.toolName)?.mutates : undefined })),
     completionCondition: safeParse(task.checkJson ?? "{}"),
     deadlineAt: task.deadlineAt,
     plan,

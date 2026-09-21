@@ -2,6 +2,7 @@
 @import "./settings.css";
 @import "./onboarding.css";
 @import "./tutorial.css";
+@import "./minimal-chat.css";
 
 @theme inline {
   --color-background: var(--surface);

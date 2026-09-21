@@ -418,6 +418,7 @@ export const draftDocuments = pgTable(
     errorMessage: text("error_message"),
     sentTo: text("sent_to"),
     moduleLabel: text("module_label"),
+    personaId: text("persona_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
   },

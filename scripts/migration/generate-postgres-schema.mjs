@@ -24,6 +24,8 @@ source = source
     'import { bigint, boolean, check, date, doublePrecision, foreignKey, index, integer, numeric, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";\nimport { jsonText } from "./json-text.ts";',
   )
   .replaceAll("sqliteTable(", "pgTable(")
+  // Post-cutover draft ownership is defined by 20260920000200.
+  .replace('    moduleLabel: text("module_label"),', '    moduleLabel: text("module_label"),\n    personaId: text("persona_id"),')
   .replace(/integer\((['"][^'"]+['"])\s*,\s*\{\s*mode:\s*['"]timestamp_ms['"]\s*\}\)/g,
     'timestamp($1, { withTimezone: true, mode: "date" })')
   .replace(/integer\((['"][^'"]+['"])\s*,\s*\{\s*mode:\s*['"]boolean['"]\s*\}\)/g, "boolean($1)")
