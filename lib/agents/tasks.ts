@@ -153,11 +153,21 @@ export async function getTask(dbSession: DbSession, organizationId: string, task
   return (row as TaskRecord | undefined) ?? null;
 }
 
-export async function listTasks(dbSession: DbSession, organizationId: string, limit = 25): Promise<TaskRecord[]> {
+export type TaskOwner = { id: string; employee: boolean };
+export function taskOwnerPredicate(owner: TaskOwner) {
+  return owner.employee ? eq(agentTasks.employeeId, owner.id) : and(isNull(agentTasks.employeeId), eq(agentTasks.agentId, owner.id));
+}
+
+export async function ownedTaskIds(dbSession: DbSession, organizationId: string, owner: TaskOwner): Promise<string[]> {
+  const rows = await dbSession.db.select({ id: agentTasks.id }).from(agentTasks).where(and(eq(agentTasks.organizationId, organizationId), taskOwnerPredicate(owner)));
+  return rows.map(row => row.id);
+}
+
+export async function listTasks(dbSession: DbSession, organizationId: string, limit = 25, owner?: TaskOwner): Promise<TaskRecord[]> {
   const rows = await dbSession.db
     .select()
     .from(agentTasks)
-    .where(eq(agentTasks.organizationId, organizationId))
+    .where(and(eq(agentTasks.organizationId, organizationId), owner ? taskOwnerPredicate(owner) : undefined))
     .orderBy(desc(agentTasks.createdAt))
     .limit(limit);
   return rows as TaskRecord[];

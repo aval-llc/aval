@@ -418,10 +418,11 @@ export const draftDocuments = pgTable(
     errorMessage: text("error_message"),
     sentTo: text("sent_to"),
     moduleLabel: text("module_label"),
+    personaId: text("persona_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
   },
-  (table) => [index("draft_documents_org_created_idx").on(table.organizationId, table.createdAt)],
+  (table) => [index("draft_documents_org_created_idx").on(table.organizationId, table.createdAt), index("draft_documents_org_persona_idx").on(table.organizationId, table.personaId, table.createdAt)],
 );
 
 // A structured, redacted workflow preference — never raw tenant/financial

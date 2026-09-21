@@ -3,11 +3,11 @@
 /** Built-in personas and paginated employees share a folder UI; identities and
  * ownership remain distinct so work is never attributed by a matching role. */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import * as Dialog from "@radix-ui/react-dialog";
 import { belongsToAgent } from "./agent-library-model";
-import { AgentTrace } from "./agent-trace";
+import { EmployeeWorkspace, type EmployeeWorkProps } from "./employee-workspace";
 import { AvalAgentAvatar } from "./agent-avatar/AgentAvatar";
 import { PERSONA_PRESETS } from "./agent-avatar/personas";
 import { Check, Pause, Play, Archive, Plus, Search, Xmark, NavArrowRight, Circle, Folder, Link } from "iconoir-react";
@@ -52,14 +52,16 @@ function actionsFor(status: Employee["status"]): ("activate" | "pause" | "resume
   }
 }
 
-export function EmployeeDirectory() {
+export function EmployeeDirectory({ work: draftWork }: { work?: EmployeeWorkProps } = {}) {
   const t = useTranslations();
   const [directory, setDirectory] = useState<Directory | null>(null);
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const openedLink = useRef(false);
   const [selected, setSelected] = useState<LibraryAgent | null>(null);
+  const [reviews, setReviews] = useState<{ agentId: string; employeeId?: string | null }[]>([]);
   const [work, setWork] = useState<Work[]>([]);
   const [workError, setWorkError] = useState(false);
   const [employeeDetails, setEmployeeDetails] = useState<Record<string, EmployeeDetail>>({});
@@ -144,6 +146,11 @@ export function EmployeeDirectory() {
 
   useEffect(() => {
     const controller = new AbortController();
+    void fetch("/api/agents/approvals", { signal: controller.signal }).then(async response => {
+      if (!response.ok) return;
+      const data = await response.json() as { approvals: { agentId: string; employeeId?: string | null }[] };
+      if (!controller.signal.aborted) setReviews(data.approvals);
+    }).catch(() => {});
     void fetch("/api/agents/tasks", { signal: controller.signal }).then(async r => {
       if (!r.ok) throw new Error();
       const data = await r.json() as { tasks: Work[] };
@@ -181,6 +188,15 @@ export function EmployeeDirectory() {
     ...(filter === "employees" ? [] : [...builtIns, ...(filter === "builtIn" ? [] : custom)].filter(a => `${a.name} ${a.role}`.toLowerCase().includes(search.toLowerCase()))),
     ...(filter === "builtIn" ? [] : employees.map(employee => ({ id: employee.id, name: employee.name, role: employee.role, objective: employee.objective, employee, preset: { ...PERSONA_PRESETS.general, icon: undefined } }))),
   ];
+  useEffect(() => {
+    if (openedLink.current) return;
+    const id = new URLSearchParams(window.location.search).get("agent");
+    if (!id) { openedLink.current = true; return; }
+    const preset = Object.values(PERSONA_PRESETS).find(preset => preset.id === id);
+    const employee = directory?.employees.find(employee => employee.id === id);
+    const match: LibraryAgent | undefined = preset ? { id, name: t(preset.labelKey), role: t("AgentLibrary.builtIn"), objective: null, preset } : employee ? { id, name: employee.name, role: employee.role, objective: employee.objective, employee, preset: { ...PERSONA_PRESETS.general, icon: undefined } } : custom.find(agent => agent.id === id);
+    if (match) { openedLink.current = true; queueMicrotask(() => setSelected(match)); }
+  }, [directory, custom, t]);
   const pages = useMemo(() => Math.max(1, Math.ceil((directory?.total ?? 0) / PAGE_SIZE)), [directory?.total]);
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const agentWork = (agent: LibraryAgent) => work.filter(task => belongsToAgent(task, agent.id, !!agent.employee));
@@ -208,6 +224,8 @@ export function EmployeeDirectory() {
     <div className="agent-folder-grid">
       {agents.map((agent) => {
         const tasks = agentWork(agent);
+        const pending = reviews.filter(review => belongsToAgent(review, agent.id, !!agent.employee)).length;
+        const documents = draftWork?.jobs.filter(job => !agent.employee && job.input.personaId === agent.id).length ?? 0;
         const color = Array.from(agent.id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6;
         return <button type="button" className={`agent-folder folder-color-${color}`} key={agent.id} onClick={() => setSelected(agent)}>
           <span className="folder-cover"><span className="folder-badge">{agent.employee ? t(`Employees.status_${agent.employee.status}`) : t("AgentLibrary.ready")}</span></span>
@@ -217,7 +235,7 @@ export function EmployeeDirectory() {
             <span className="folder-work">
               {tasks.length ? tasks.slice(0, 2).map(task => <span className={`folder-check ${task.status === "COMPLETED" ? "is-done" : ""}`} key={task.id}>{task.status === "COMPLETED" ? <Check width={14} height={14}/> : <Circle width={14} height={14}/>}<span>{task.goal}</span></span>) : <span className="folder-check"><Circle width={14} height={14}/><span>{workError ? t("AgentLibrary.workUnavailable") : agent.objective || t("AgentLibrary.noWork")}</span></span>}
             </span>
-            <span className="folder-footer"><span><Folder width={14} height={14}/>{t("AgentLibrary.workCount", { count: tasks.length })}</span><NavArrowRight width={16} height={16}/></span>
+            <span className="folder-footer"><span><Folder width={14} height={14}/>{pending ? t("AgentLibrary.needsReview", { count: pending }) : documents ? t("AgentLibrary.documentCount", { count: documents }) : t("AgentLibrary.workCount", { count: tasks.length })}</span><NavArrowRight width={16} height={16}/></span>
           </span>
         </button>;
       })}
@@ -244,7 +262,7 @@ export function EmployeeDirectory() {
       {selected.objective && <p className="library-objective">{selected.objective}</p>}
       {selected.employee && <div className="library-lifecycle"><span className="employee-status">{t(`Employees.status_${selected.employee.status}`)}</span>{actionsFor(selected.employee.status).map(action => <button type="button" className="soft-button" key={action} disabled={busy !== null} onClick={async () => { if (await act(selected.id, action)) setSelected(null); }}>{action === "pause" ? <Pause width={14} height={14}/> : action === "archive" ? <Archive width={14} height={14}/> : <Play width={14} height={14}/>} {t(`Employees.action_${action}`)}</button>)}</div>}
       {error && <p className="employee-error" role="alert">{error}</p>}
-      <AgentTrace key={selected.id} agentFilter={selected.id} employeeFilter={!!selected.employee} agentLabel={selected.name}/></>}
+      <EmployeeWorkspace key={selected.id} id={selected.id} employee={!!selected.employee} name={selected.name} work={draftWork} reviewCount={reviews.filter(review => belongsToAgent(review, selected.id, !!selected.employee)).length}/></>}
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   </section>;
 }

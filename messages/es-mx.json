@@ -183,8 +183,8 @@
     "deleteAgent": "Eliminar agente",
     "draftDocument": "Redactar un documento",
     "draftInstructionsPlaceholder": "¿Qué debe cubrir? Aval usará solo datos verificados del panel.",
-    "draftStartedInTasks": "Sigue su progreso en Tareas de Aval.",
-    "draftStartedMessage": "Redactando \"{title}\" ahora. Sigue su progreso en Tareas de Aval.",
+    "draftStartedInTasks": "Sigue su progreso en la carpeta de este agente.",
+    "draftStartedMessage": "Redactando \"{title}\" ahora. Sigue su progreso en la carpeta de este agente.",
     "draftTitlePlaceholder": "¿Qué estás redactando?",
     "focusedModule": "Módulo enfocado",
     "focusedSuggestion1": "Analiza este módulo",
@@ -630,7 +630,7 @@
     "settings": "Ajustes",
     "sharedInbox": "Bandeja compartida",
     "workspace": "Espacio",
-    "setup": "Configuración",
+    "setup": "Tu equipo 24/7",
     "planning": "Planificación",
     "calendar": "Calendario",
     "projects": "Proyectos",
@@ -1090,8 +1090,8 @@
     "savedTitle": "Predeterminado actualizado",
     "saving": "Guardando…",
     "setHere": "Definido aquí",
-    "setup": "Configuración de Aval",
-    "setupSubtitle": "Crea tu equipo y define cómo trabaja.",
+    "setup": "Tu equipo 24/7",
+    "setupSubtitle": "Un solo lugar para tu equipo, su trabajo y todo lo que necesita tu atención.",
     "sourceAccounting": "Desglose contable",
     "sourceDataConflicts": "Conflictos entre fuentes",
     "sourceDelinquency": "Cuentas morosas",
@@ -1785,7 +1785,7 @@
     "howTitle": "Cómo usar Aval",
     "howConnect": "Elige tu idioma y región, y cuéntale a Aval qué aplicaciones usas. Conecta una fuente en Conexiones cuando estés listo.",
     "howAsk": "Abre el chat, elige un agente y describe el resultado que buscas. Aval consulta la evidencia disponible y propone los siguientes pasos.",
-    "howReview": "Sigue el progreso en Tareas y revisa las solicitudes en el chat o el Centro de revisión. Encuentra el recorrido y los ejemplos de independencia en Configuración → Preferencias.",
+    "howReview": "Abre la carpeta de un empleado para seguir su trabajo y revisar solicitudes. Encuentra el recorrido y los ejemplos de independencia en Configuración → Preferencias.",
     "limits": "La independencia se aplica a tus acciones en este espacio. Los permisos del agente siguen vigentes. Las acciones sensibles requieren aprobación; la falta de evidencia o un resultado no confirmado detiene la ejecución. Cambiar de modo afecta acciones futuras; no deshace trabajo ya ejecutado.",
     "modes": {
       "supervised": "Aval investiga; tú apruebas cada acción antes de ejecutarla.",
@@ -1923,8 +1923,8 @@
         "body": "Empieza con el desempeño del portafolio y la actividad reciente. Las cifras reflejan los registros disponibles; conecta o importa datos para completar lo que falta."
       },
       "setup": {
-        "title": "Configuración e independencia",
-        "body": "Elige tu especialista, define la independencia de Aval y prueba los ejemplos animados o la práctica sintética. Enséñale las preferencias que quieres que recuerde."
+        "title": "Tu equipo 24/7",
+        "body": "Abre la carpeta de un empleado para asignar trabajo, leer documentos y revisar aprobaciones. Personaliza tu equipo y sus preferencias aquí."
       },
       "tasks": {
         "title": "Tareas de Aval",
@@ -2152,7 +2152,22 @@
     "executionDetails": "Actividad y detalles de ejecución",
     "aboutMemory": "Cómo funciona la memoria",
     "assignedConnection": "Conexión asignada",
-    "downloadDocument": "Descargar documento"
+    "downloadDocument": "Descargar documento",
+    "workTab": "Trabajo",
+    "documentsTab": "Documentos",
+    "reviewTab": "Revisar",
+    "workspaceTab": "Espacio de trabajo",
+    "reviewEmpty": "Nada necesita tu revisión.",
+    "legacyDrafts": "Documentos anteriores del espacio",
+    "legacyNote": "Estos documentos anteriores no tienen un agente asignado. Siguen disponibles aquí.",
+    "workspaceNote": "Aval administra las automatizaciones del espacio.",
+    "documentsTitle": "Documentos",
+    "documentsSubtitle": "Borradores y entregables de este empleado.",
+    "needsReview": "{count} por revisar",
+    "documentCount": "{count} documentos",
+    "employeeDocuments": "Los documentos de este empleado aparecen en su trabajo completado.",
+    "workEmpty": "Aún no hay trabajo. Asigna su primera tarea a este agente.",
+    "reviewSubtitle": "Revisa las solicitudes de este empleado para continuar."
   },
   "DashboardState": {
     "preview": "Vista previa · Esperando datos",

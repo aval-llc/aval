@@ -183,8 +183,8 @@
     "deleteAgent": "Delete agent",
     "draftDocument": "Draft a document",
     "draftInstructionsPlaceholder": "What should it cover? Aval will use only verified dashboard data.",
-    "draftStartedInTasks": "Track its progress under Aval Tasks.",
-    "draftStartedMessage": "Drafting \"{title}\" now. Track its progress under Aval Tasks.",
+    "draftStartedInTasks": "Track its progress in this agent’s folder.",
+    "draftStartedMessage": "Drafting \"{title}\" now. Track its progress in this agent’s folder.",
     "draftTitlePlaceholder": "What are you drafting?",
     "focusedModule": "Focused module",
     "focusedSuggestion1": "Analyze this module",
@@ -630,7 +630,7 @@
     "settings": "Settings",
     "sharedInbox": "Shared inbox",
     "workspace": "Workspace",
-    "setup": "Setup",
+    "setup": "Your 24/7 employees",
     "planning": "Planning",
     "calendar": "Calendar",
     "projects": "Projects",
@@ -1090,8 +1090,8 @@
     "savedTitle": "Workspace default updated",
     "saving": "Saving…",
     "setHere": "Set here",
-    "setup": "Aval Setup",
-    "setupSubtitle": "Build your team and shape how they work.",
+    "setup": "Your 24/7 employees",
+    "setupSubtitle": "One home for your team, their work, and everything that needs your attention.",
     "sourceAccounting": "Accounting breakdown",
     "sourceDataConflicts": "Source conflicts",
     "sourceDelinquency": "Delinquent accounts",
@@ -1785,7 +1785,7 @@
     "howTitle": "How to use Aval",
     "howConnect": "Choose your language and region, then tell Aval which apps you use. Connect a source in Connections when you are ready.",
     "howAsk": "Open chat, choose an agent, and describe the outcome you want. Aval reads available evidence and proposes the next steps.",
-    "howReview": "Follow progress in Tasks and review requests in chat or the Review Center. Find the module tour and independence examples in Settings → Preferences.",
+    "howReview": "Open an employee’s folder to follow work and review requests. Find the module tour and independence examples in Settings → Preferences.",
     "limits": "Independence applies to your actions in this workspace. Agent permissions still apply. Sensitive actions need approval, and missing evidence or an unconfirmed provider result stops execution. Switching modes affects future actions; it cannot undo work already executed.",
     "modes": {
       "supervised": "Aval investigates; you approve each action before it runs.",
@@ -1923,8 +1923,8 @@
         "body": "Start with portfolio performance and recent workspace activity. Figures reflect the records available to Aval; connect or import data to fill gaps."
       },
       "setup": {
-        "title": "Setup & independence",
-        "body": "Choose your default specialist, set how independently Aval works, and try the animated examples or synthetic rehearsal. Teach Aval the preferences you want it to remember."
+        "title": "Your 24/7 employees",
+        "body": "Open any employee folder to assign work, read documents, and review approvals. Customize your team and working preferences here."
       },
       "tasks": {
         "title": "Aval Tasks",
@@ -2152,7 +2152,22 @@
     "executionDetails": "Activity & execution details",
     "aboutMemory": "How memory works",
     "assignedConnection": "Assigned connection",
-    "downloadDocument": "Download document"
+    "downloadDocument": "Download document",
+    "workTab": "Work",
+    "documentsTab": "Documents",
+    "reviewTab": "Review",
+    "workspaceTab": "Workspace",
+    "reviewEmpty": "Nothing needs your review.",
+    "legacyDrafts": "Earlier workspace documents",
+    "legacyNote": "These older documents have no saved agent assignment. They remain available here.",
+    "workspaceNote": "Workspace automations are managed by Aval.",
+    "documentsTitle": "Documents",
+    "documentsSubtitle": "Drafts and deliverables from this employee.",
+    "needsReview": "{count} to review",
+    "documentCount": "{count} documents",
+    "employeeDocuments": "Documents produced by this employee appear in its completed work.",
+    "workEmpty": "No work yet. Give this agent its first assignment.",
+    "reviewSubtitle": "Review this employee’s requests before work continues."
   },
   "DashboardState": {
     "preview": "Preview · Waiting for data",

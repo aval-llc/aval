@@ -57,6 +57,7 @@ type Answer = {
 };
 type ChatMessage = {
   taskId?: string;
+  taskAgentId?: string;
   id: number;
   role: "user" | "assistant";
   text?: string;
@@ -407,7 +408,7 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
       const response = await fetch("/api/agents/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal, agentId: personaId }) });
       const data = await response.json() as { taskId?: string; error?: string };
       if (!response.ok || !data.taskId) throw new Error(data.error || t("AvalAssistant.unavailable"));
-      setMessages(current => [...current, { id: nextId.current++, role: "user", text: goal }, { id: nextId.current++, role: "assistant", taskId: data.taskId, text: t("ChatPanel.taskStartedWith", { agent: activePersona.label }) }]);
+      setMessages(current => [...current, { id: nextId.current++, role: "user", text: goal }, { id: nextId.current++, role: "assistant", taskId: data.taskId, taskAgentId: personaId, text: t("ChatPanel.taskStartedWith", { agent: activePersona.label }) }]);
       setInput(current => current.trim() === goal ? "" : current);
     } catch (error) {
       setMessages(current => [...current, { id: nextId.current++, role: "assistant", error: error instanceof Error ? error.message : t("AvalAssistant.unavailable") }]);
@@ -646,7 +647,7 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
             {messages.map((message) => (
               <div className={`aval-chat-message ${message.role}`} key={message.id}>
                 {message.text && <p>{message.text}</p>}
-                {message.taskId && <><AgentTaskConversation taskId={message.taskId}/><a className="soft-button" href={`/${locale}?view=tasks`}>{t("Independence.viewTask")}</a></>}
+                {message.taskId && <><AgentTaskConversation taskId={message.taskId}/><a className="soft-button" href={`/${locale}?view=setup&agent=${encodeURIComponent(message.taskAgentId ?? "general")}`}>{t("Independence.viewTask")}</a></>}
                 {message.error && (
                   <div className="aval-chat-error">
                     <WarningTriangle width={16} height={16}/>

@@ -86,3 +86,11 @@
 .agent-library-dialog select, .appearance-settings button, .appearance-settings select { font-family: var(--font-sans); }
 .library-document-output { overflow-x: auto; font-size: 12px; line-height: 1.8; }
 .library-document-output .soft-button { margin-top: 16px; text-decoration: none; }
+.employee-work-tabs { margin: 22px 0 6px; width: fit-content; flex-wrap: wrap; }
+.employee-review-count { margin-left: 6px; padding: 2px 5px; border-radius: 5px; background: var(--ink); color: var(--inverse-ink); font-size: 10px; }
+.employee-workspace > .ask-aval-tasks { margin-top: 20px; border: 0; background: transparent; box-shadow: none; padding: 0; }
+.employee-workspace .draft-task-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.employee-workspace [data-reveal] { opacity: 1; transform: none; }
+/* Draft dialogs are portaled above the employee folder dialog. */
+.employee-draft-overlay { z-index: 160; }
+.employee-draft-dialog { z-index: 161; max-height: calc(100dvh - 40px); overflow-y: auto; }

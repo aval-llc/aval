@@ -23,6 +23,7 @@ export async function reserveDraft(dbSession: DbSession,
     format: string;
     documentType: string | null;
     moduleLabel: string | null;
+    personaId?: string | null;
   }
 ) {
   const db = dbSession.db,

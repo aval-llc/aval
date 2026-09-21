@@ -6,7 +6,7 @@ import type { ComponentType, FormEvent, ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  Bell, Calendar, ChatLines, Check, ClipboardCheck,
+  Bell, Calendar, ChatLines, Check,
   Database, Flash, Globe, HalfMoon, Key,
   Language, LogOut, NetworkLeft, NavArrowDown, NavArrowRight, Page,
   Plus, Settings,
@@ -18,7 +18,7 @@ import { AnimatedNumber, ExperienceProvider, useExperience, usePrefersReducedMot
 import { useRouter, usePathname } from "./navigation";
 import { AvalAssistant } from "@/app/components/aval-assistant";
 import type { AuthMode } from "@/app/components/auth-gate";
-import { AskAvalTasksSection, useDraftJobs, type CreateDraftInput, type DraftJob } from "@/app/components/ask-aval-tasks";
+import { useDraftJobs } from "@/app/components/ask-aval-tasks";
 import { AppearanceProvider } from "@/app/components/appearance-provider";
 import { ProfileAvatar } from "@/app/components/character-avatar";
 import { UsageGrid, UsageRecorder } from "@/app/components/usage-activity";
@@ -27,8 +27,6 @@ import { SettingsModule } from "@/app/components/settings-module";
 import { BrandMark } from "@/app/components/brand-mark";
 import { DesktopServiceBar } from "@/app/components/desktop-codex";
 import { ConnectionDialog, type Provider } from "@/app/components/connection-dialog";
-import { AutomationTimeline } from "@/app/components/automation-timeline";
-import { AgentTrace } from "@/app/components/agent-trace";
 import type { NotificationItem } from "@/app/data/sample";
 import { AvalAgentAvatar } from "@/app/components/agent-avatar/AgentAvatar";
 import { DATA_SOURCE_NODES, PERSONA_IDS, PERSONA_PRESETS, PERSONA_TOOL_ACCESS, type PersonaId } from "@/app/components/agent-avatar/personas";
@@ -42,6 +40,7 @@ import { ModuleTour } from "@/app/components/module-tour";
 import { useOnboarding } from "@/app/components/preference-context";
 import { IndependenceControls } from "@/app/components/independence-controls";
 import { OnboardingBoundary } from "@/app/components/onboarding";
+import type { EmployeeWorkProps } from "@/app/components/employee-workspace";
 import { EmployeeDirectory } from "@/app/components/employee-directory";
 import type { DashboardDomain } from "@/lib/operations/dashboard-state";
 
@@ -53,8 +52,6 @@ const navGroups: { labelKey: string; items: { id: View; labelKey: string; icon: 
   { labelKey: "Nav.agent", items: [
     { id: "overview", labelKey: "Nav.portfolioOverview", icon: LayoutGrid },
     { id: "setup", labelKey: "Nav.setup", icon: NetworkLeft },
-    { id: "tasks", labelKey: "Nav.avalTasks", icon: TaskList },
-    { id: "reviewCenter", labelKey: "Nav.reviewCenter", icon: ClipboardCheck },
     { id: "inbox", labelKey: "Nav.sharedInbox", icon: ChatLines },
   ]},
   { labelKey: "Nav.operations", items: [
@@ -184,13 +181,6 @@ function OverviewHero({ displayName, t }: { displayName: string; t: T }) {
       <span className="visually-hidden">{phrases.join(". ")}</span>
     </div>
   </section></>;
-}
-
-function TasksView({ draftJobs, onCreateDraft, onPauseDraft, onResumeDraft, onRetryDraft, onSendDraft, onRemoveDrafts, loading }: {
-  draftJobs: DraftJob[]; onCreateDraft: (input: CreateDraftInput) => void; onPauseDraft: (id: string) => void; onResumeDraft: (id: string) => void; onRetryDraft: (id: string) => void; onSendDraft: (id: string, recipient: string) => void; onRemoveDrafts: (ids: string[]) => Promise<void>; loading: boolean;
-}) {
-  const t = useTranslations();
-  return <div className="view-wrap"><AppHeader title={t("Nav.avalTasks")} subtitle={t("AskAvalTasks.sectionSubtitle")}/><AskAvalTasksSection jobs={draftJobs} onCreate={onCreateDraft} onPause={onPauseDraft} onResume={onResumeDraft} onRetry={onRetryDraft} onSend={onSendDraft} onRemove={onRemoveDrafts} loading={loading}/><AgentTrace/><AutomationTimeline/></div>;
 }
 
 function ConnectionsView({ providers, loading, onOpen, focus }: { providers: Provider[]; loading: boolean; onOpen: (id: string) => void; focus?: string }) {
@@ -446,7 +436,7 @@ const PREFERENCE_TOPIC_LABEL_KEY: Record<string, string> = {
  *     system prompt by getPreferenceContext(). Teaching here writes the same
  *     rows the assistant learns from mid-conversation corrections.
  */
-function SetupView({ openConnections }: { openConnections: () => void }) {
+function SetupView({ openConnections, work }: { openConnections: () => void; work: EmployeeWorkProps }) {
   const t = useTranslations();
   const { notify } = useExperience();
   const [selected, setSelected] = useState<PersonaId>("general");
@@ -544,7 +534,7 @@ function SetupView({ openConnections }: { openConnections: () => void }) {
       actions={<button className="soft-button" onClick={openConnections}><NetworkLeft width={17} height={17}/>{t("SetupView.connectASource")}</button>}
     />
 
-    <EmployeeDirectory/>
+    <EmployeeDirectory work={work}/>
     <IndependenceControls/>
     <section className="panel setup-panel" data-reveal>
       <div className="panel-heading">
@@ -777,7 +767,7 @@ function DesktopApp({ authMode, displayName, email, initialView }: { authMode: A
   const pendingReviewCount = 0;
   const loadProviders = async () => { try { const response = await fetch("/api/integrations"); const data = await response.json() as { providers?: Provider[] }; if (data.providers?.length) setProviders(data.providers); } catch { /* local preview stays usable */ } setLoading(false); };
   useEffect(() => { queueMicrotask(() => void loadProviders()); const show = () => setNotifications(true); window.addEventListener("aval:notifications", show); const connected = new URLSearchParams(window.location.search).get("connected"); if (connected) { window.setTimeout(() => celebrate(t("DesktopApp.connectionAuthorized"), connected), 250); const url = new URL(window.location.href); url.searchParams.delete("connected"); window.history.replaceState({}, "", url); } return () => window.removeEventListener("aval:notifications", show); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const setActiveView = (next: View) => { setView(next); setProfile(false); const url = new URL(window.location.href); url.searchParams.set("view", next); window.history.replaceState({}, "", url); window.scrollTo({ top: 0, behavior: "smooth" }); }; const openConnections = (domain?: DashboardDomain) => { setConnectionFocus(domain ? ({ property: "Leasing & PMS", occupancy: "Leasing & PMS", leasing: "Leasing & PMS", maintenance: "Leasing & PMS", rent: "Leasing & PMS", collections: "Accounting", accounting: "Accounting", communications: "Communication" })[domain] : undefined); setActiveView("connections"); }; const openProvider = (id: string) => setSelectedProvider(providers.find((provider) => provider.id === id) ?? null); const titleKey = useMemo<string>(() => navGroups.flatMap((group) => group.items).find((item) => item.id === view)?.labelKey ?? "DesktopApp.avalFallback", [view]);
+  const setActiveView = (requested: View) => { const next = requested === "tasks" || requested === "reviewCenter" ? "setup" : requested; setView(next); setProfile(false); const url = new URL(window.location.href); url.searchParams.set("view", next); window.history.replaceState({}, "", url); window.scrollTo({ top: 0, behavior: "smooth" }); }; const openConnections = (domain?: DashboardDomain) => { setConnectionFocus(domain ? ({ property: "Leasing & PMS", occupancy: "Leasing & PMS", leasing: "Leasing & PMS", maintenance: "Leasing & PMS", rent: "Leasing & PMS", collections: "Accounting", accounting: "Accounting", communications: "Communication" })[domain] : undefined); setActiveView("connections"); }; const openProvider = (id: string) => setSelectedProvider(providers.find((provider) => provider.id === id) ?? null); const titleKey = useMemo<string>(() => navGroups.flatMap((group) => group.items).find((item) => item.id === view)?.labelKey ?? "DesktopApp.avalFallback", [view]);
   const resolveNotificationProvider = (item: NotificationItem) => item.provider === "quickbooks" && market === "latam" ? accountingProviderId : item.provider;
   const openNotification = (item: NotificationItem) => {
     setNotificationItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, read: true } : entry));
@@ -797,10 +787,11 @@ function DesktopApp({ authMode, displayName, email, initialView }: { authMode: A
         ? <button type="button" onClick={signOutOfPasswordAccount}><LogOut width={17} height={17}/>{t("DesktopApp.signOut")}</button>
         // eslint-disable-next-line @next/next/no-html-link-for-pages -- external platform sign-out route, not part of this app router
         : <a href="/signout-with-chatgpt?return_to=/"><LogOut width={17} height={17}/>{t("DesktopApp.signOut")}</a>}
-      </div>}</aside><section className="content-shell" aria-label={t(titleKey)}><UsageRecorder enabled={!isGuest}/><DesktopServiceBar/>{(view === "calendar" || view === "projects" || view === "teams") && <PlanningWorkspace key={view} view={view} isGuest={isGuest}/>} {view === "overview" && <OperationsWorkspace view="overview" openConnections={openConnections} hero={<OverviewHero displayName={displayName} t={t}/>}/>} {view === "tasks" && <TasksView onRemoveDrafts={removeDraftJobs} loading={draftsLoading} draftJobs={draftJobs} onCreateDraft={createDraftJob} onPauseDraft={pauseDraftJob} onResumeDraft={resumeDraftJob} onRetryDraft={retryDraftJob} onSendDraft={sendDraftJob}/>} {view === "reviewCenter" && <div className="view-wrap"><AppHeader title={t("Nav.reviewCenter")} subtitle={t("Workspace.realDataOnly")}/><AgentTrace/></div>} {view === "inbox" && <ConnectedInbox/>} {view === "connections" && <ConnectionsView providers={providers} loading={loading} onOpen={openProvider} focus={connectionFocus}/>} {view === "settings" && <SettingsView openConnections={openConnections} displayName={displayName} email={email}/>} {view === "infrastructure" && <InfrastructureView onAddMeter={() => setAddMeterOpen(true)}/>} {view === "setup" && <SetupView openConnections={openConnections}/>} {view === "documents" && <DocumentsView isGuest={isGuest}/>} {(["properties", "leasing", "maintenance", "accounting"] as View[]).includes(view) && <OperationsView view={view} openConnections={openConnections} providers={providers}/>}</section>{selectedProvider && <ConnectionDialog provider={selectedProvider} onClose={() => setSelectedProvider(null)} onRefresh={loadProviders}/>}{addMeterOpen && <AddMeterDialog onClose={() => setAddMeterOpen(false)}/>}<Dialog.Root open={notifications} onOpenChange={setNotifications}><Dialog.Portal><Dialog.Overlay className="dialog-overlay subtle"/><Dialog.Content className="notification-drawer"><div className="drawer-heading"><div><p className="eyebrow">{t("DesktopApp.liveWorkspace")}</p><Dialog.Title>{t("DesktopApp.notifications")}</Dialog.Title></div><Dialog.Close className="icon-button" aria-label={t("Overview.close")}><Xmark width={20} height={20}/></Dialog.Close></div><div className="notification-list">{notificationItems.map((item) => <button key={item.id} className={item.read ? "" : "unread"} onClick={() => openNotification(item)}><BrandMark provider={resolveNotificationProvider(item)} small/><span><strong>{t(item.titleKey)}</strong><small>{t(item.detailKey, item.detailParams)}</small></span><span className="notif-trailing">{!item.read && <i className="unread-dot"/>}<time>{formatMinutesAgo(item.minutesAgo, currentLocale)}</time></span></button>)}</div><button className="wide-button" onClick={() => setNotificationItems((current) => current.map((item) => ({ ...item, read: true })))}><Check width={17} height={17}/>{unreadCount ? t("DesktopApp.markAllAsRead") : t("DesktopApp.allCaughtUp")}</button></Dialog.Content></Dialog.Portal></Dialog.Root><AvalAssistant view={view} onCreateDraft={createDraftJob}/><ModuleTour currentView={view} onNavigate={setActiveView}/></main>;
+      </div>}</aside><section className="content-shell" aria-label={t(titleKey)}><UsageRecorder enabled={!isGuest}/><DesktopServiceBar/>{(view === "calendar" || view === "projects" || view === "teams") && <PlanningWorkspace key={view} view={view} isGuest={isGuest}/>} {view === "overview" && <OperationsWorkspace view="overview" openConnections={openConnections} hero={<OverviewHero displayName={displayName} t={t}/>}/>} {view === "inbox" && <ConnectedInbox/>} {view === "connections" && <ConnectionsView providers={providers} loading={loading} onOpen={openProvider} focus={connectionFocus}/>} {view === "settings" && <SettingsView openConnections={openConnections} displayName={displayName} email={email}/>} {view === "infrastructure" && <InfrastructureView onAddMeter={() => setAddMeterOpen(true)}/>} {view === "setup" && <SetupView openConnections={openConnections} work={{ jobs: draftJobs, onCreate: createDraftJob, onPause: pauseDraftJob, onResume: resumeDraftJob, onRetry: retryDraftJob, onSend: sendDraftJob, onRemove: removeDraftJobs, loading: draftsLoading }}/>} {view === "documents" && <DocumentsView isGuest={isGuest}/>} {(["properties", "leasing", "maintenance", "accounting"] as View[]).includes(view) && <OperationsView view={view} openConnections={openConnections} providers={providers}/>}</section>{selectedProvider && <ConnectionDialog provider={selectedProvider} onClose={() => setSelectedProvider(null)} onRefresh={loadProviders}/>}{addMeterOpen && <AddMeterDialog onClose={() => setAddMeterOpen(false)}/>}<Dialog.Root open={notifications} onOpenChange={setNotifications}><Dialog.Portal><Dialog.Overlay className="dialog-overlay subtle"/><Dialog.Content className="notification-drawer"><div className="drawer-heading"><div><p className="eyebrow">{t("DesktopApp.liveWorkspace")}</p><Dialog.Title>{t("DesktopApp.notifications")}</Dialog.Title></div><Dialog.Close className="icon-button" aria-label={t("Overview.close")}><Xmark width={20} height={20}/></Dialog.Close></div><div className="notification-list">{notificationItems.map((item) => <button key={item.id} className={item.read ? "" : "unread"} onClick={() => openNotification(item)}><BrandMark provider={resolveNotificationProvider(item)} small/><span><strong>{t(item.titleKey)}</strong><small>{t(item.detailKey, item.detailParams)}</small></span><span className="notif-trailing">{!item.read && <i className="unread-dot"/>}<time>{formatMinutesAgo(item.minutesAgo, currentLocale)}</time></span></button>)}</div><button className="wide-button" onClick={() => setNotificationItems((current) => current.map((item) => ({ ...item, read: true })))}><Check width={17} height={17}/>{unreadCount ? t("DesktopApp.markAllAsRead") : t("DesktopApp.allCaughtUp")}</button></Dialog.Content></Dialog.Portal></Dialog.Root><AvalAssistant view={view} onCreateDraft={createDraftJob}/><ModuleTour currentView={view} onNavigate={setActiveView}/></main>;
 }
 
 export function AvalDashboard({ authMode, displayName, email, requestedView }: { authMode: AuthMode; displayName: string; email: string; requestedView?: string }) {
-  const initialView = navGroups.some(g => g.items.some(item => item.id === requestedView)) ? requestedView as View : "overview";
+  const resolvedView = requestedView === "tasks" || requestedView === "reviewCenter" ? "setup" : requestedView;
+  const initialView = navGroups.some(g => g.items.some(item => item.id === resolvedView)) ? resolvedView as View : "overview";
   return <ExperienceProvider><AppearanceProvider key={`${authMode}:${email}`} isGuest={authMode === "guest"}>{authMode === "guest" ? <DesktopApp authMode={authMode} displayName={displayName} email={email} initialView={initialView}/> : <OnboardingBoundary key={`${authMode}:${email}`}><DesktopApp authMode={authMode} displayName={displayName} email={email} initialView={initialView}/></OnboardingBoundary>}</AppearanceProvider></ExperienceProvider>;
 }

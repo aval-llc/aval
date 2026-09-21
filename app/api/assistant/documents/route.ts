@@ -43,6 +43,7 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
         error: row.errorMessage,
         sentTo: row.sentTo,
         moduleLabel: row.moduleLabel,
+        personaId: row.personaId,
         createdAt: row.createdAt?.getTime() ?? Date.now(),
       })),
     },

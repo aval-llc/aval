@@ -30,7 +30,10 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   await ensureOrganization(dbSession, identity);
-  const tasks = await listTasks(dbSession, identity.organizationId);
+  const params = new URL(request.url).searchParams;
+  const ownerId = params.get("employeeId") || params.get("agentId");
+  const owner = ownerId ? { id: ownerId, employee: !!params.get("employeeId") } : undefined;
+  const tasks = await listTasks(dbSession, identity.organizationId, owner ? 100 : 25, owner);
   return Response.json({
     tasks: tasks.map((task) => ({
       id: task.id,
