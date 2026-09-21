@@ -23,9 +23,11 @@ import { personaTools } from "@/lib/ask-aval/personas";
 import { isPmsWriteTool } from "@/lib/pms/tool-map";
 import { pmsToolAvailability } from "@/lib/pms/assembly";
 import { allowedToolNames } from "./policy.ts";
+import { effectiveEmployeeAccess } from "./employee-access";
 import { getTool } from "./registry.ts";
 
 export interface ToolsetRequest {
+  employeeId?: string;
   organizationId: string;
   subject: { organizationId: string; userId: string; isGuest: boolean };
   /** Whose permission envelope applies. */
@@ -65,6 +67,7 @@ export async function assembleToolset(
   dbSession: DbSession,
   request: ToolsetRequest,
 ): Promise<AssembledToolset> {
+  const effective = request.employeeId ? await effectiveEmployeeAccess(dbSession,request.organizationId,request.employeeId) : null;
   const excluded: AssembledToolset["excluded"] = {};
   const keep = (name: string) => name === request.finalToolName;
 
@@ -94,6 +97,7 @@ export async function assembleToolset(
   const tools: ToolSchema[] = [];
   for (const tool of request.baseTools) {
     if (keep(tool.name)) { tools.push(tool); continue; }
+    if(effective && !effective.capabilities.includes(tool.name)){excluded[tool.name]="employee";continue;}
 
     // A persona's declared subset is a curation of what it should be *reading*
     // — it is framing, not authority. Applying it to provider writes made those

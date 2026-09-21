@@ -211,12 +211,24 @@ export async function runEmployeeCases(t, { session, userA, userB, administrator
       agentId: "maintenance", persona: getPersona("maintenance"),
       baseTools: TOOLS, finalToolName: "render_answer",
       employeeCapabilities: scopes.capability ?? [],
+      employeeId: narrow.id,
     }));
     const offered = new Set(tools.map((tool) => tool.name));
     assert.ok(offered.has("get_portfolio_metrics"), "the granted capability is offered");
     assert.ok(offered.has("render_answer"), "and the model can always conclude");
     assert.equal(offered.has("get_delinquent_accounts"), false, "an ungranted capability is absent");
     assert.equal(offered.size, 2, "nothing arrived that nobody granted");
+    await run((s, org) => revokeScope(s, org, narrow.id, { kind: "capability", value: "get_portfolio_metrics" }));
+    const revoked = await run((s, org) => assembleToolset(s, {
+      organizationId: org,
+      subject: { organizationId: org, userId: userA, isGuest: false },
+      agentId: "maintenance", persona: getPersona("maintenance"),
+      baseTools: TOOLS, finalToolName: "render_answer",
+      employeeId: narrow.id,
+      employeeCapabilities: scopes.capability ?? [],
+    }));
+    assert.deepEqual(revoked.tools.map(tool => tool.name), ["render_answer"], "fresh employee access overrides a stale capability snapshot");
+    assert.equal(revoked.excluded.get_portfolio_metrics, "employee");
   });
 
   await t.test("an employee delegates only to colleagues it was granted", async () => {
