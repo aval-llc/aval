@@ -156,6 +156,8 @@ export class BrowserSimulator implements ProviderDriver {
   readonly provider: string;
   /** A simulated web app is only ever reached inside a customer's own session. */
   readonly accessModes = ["customer_desktop_session"] as const;
+  /** Says so itself, so nothing downstream has to infer it from the name. */
+  readonly simulated = true;
   readonly faults: SimulatorFaults = {};
   private session: ProviderSessionState = "NEW";
   private readonly records = new Map<string, SimulatedRecord>();

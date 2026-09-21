@@ -177,6 +177,15 @@ export interface ProviderDriver {
   readonly accessModes: readonly AccessMode[];
   /** Every canonical capability this driver implements. */
   readonly capabilities: readonly PmsAction[];
+  /**
+   * True when this driver talks to a simulation rather than a provider.
+   *
+   * Declared by the driver rather than inferred from its name, and read by the
+   * certification harness to cap what a passing run may claim. A simulator
+   * proves Aval's own path and nothing whatever about a provider, and the place
+   * that would otherwise be tempted to forget is the place reporting success.
+   */
+  readonly simulated?: boolean;
 
   /** Whether the provider session is usable right now, and if not, why. */
   sessionStatus(ctx: BrowserContext): Promise<PreflightResult>;
