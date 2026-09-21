@@ -155,4 +155,9 @@ async function clearProviderSession(provider) {
   await session.fromPartition(partitionFor(provider)).clearStorageData();
 }
 
+// The drivers this build ships with. Registered here rather than discovered,
+// so what a desktop can drive is a reviewed list rather than whatever happens
+// to be on disk.
+registerProviderDriver("appfolio", require("./providers/appfolio.cjs").driver);
+
 module.exports = { pms, registerProviderDriver, clearProviderSession, partitionFor };
