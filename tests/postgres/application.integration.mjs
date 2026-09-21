@@ -20,6 +20,7 @@ import { runVerificationCases } from "./verification-cases.mjs";
 import { runPmsWriteCases } from "./pms-write-cases.mjs";
 import { runCrashResumeCases } from "./crash-resume-cases.mjs";
 import { runSetupGraphCases } from "./setup-graph-cases.mjs";
+import { runMinimalChatCases } from './minimal-chat-cases.mjs';
 import { runEmployeeFolderCases } from "./employee-folder-cases.mjs";
 import { runEmployeeCases } from "./employee-cases.mjs";
 import { runExpertiseCases } from "./expertise-cases.mjs";
@@ -241,13 +242,14 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runBrowserWriteCases(t, { session, userA, userB, administrator });
     await runRunnerApiCases(t, { session, userA, userB, administrator, config });
     await runPmsJourneyCases(t, { session, administrator, propertyId, config });
-    await runWorkflowLifecycleCases(t, { session, userA, userB });
+    await runWorkflowLifecycleCases(t, { session, userA, userB, config });
     await runPmsAdversarialCases(t, { session, userA, userB, administrator, config });
     await runNoPmsCases(t, { session, userA });
     await runEmployeeApiCases(t, { session, userA, userB, config });
     await runFactsEvidenceCases(t, { session, userA });
     await runReadModelCases(t, { session, userA });
     await runSetupGraphCases(t, {session,config});
+    await runMinimalChatCases(t, {session,config});
     await runBackupCases(t, url);
   } finally {
     if (roleCreated) {

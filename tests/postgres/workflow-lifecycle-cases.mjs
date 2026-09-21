@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { pmsActionFlows } from "../../db/postgres/schema.ts";
 import { listWorkflows, promoteFlow, recordFlow, transitionAllowed } from "../../lib/pms/flows.ts";
+import { env } from "cloudflare:workers";
+import { withVerifiedIdentityHeaders } from "../../lib/auth/request-identity.ts";
+import { GET as workflowsGet, POST as workflowsPost } from "../../app/api/pms/workflows/route.ts";
 
 /**
  * How a provider workflow gets into service, and what stops it.
@@ -25,7 +28,7 @@ const STEPS = [
   { kind: "capture", label: "Work Order #", as: "externalId" },
 ];
 
-export async function runWorkflowLifecycleCases(t, { session, userA, userB }) {
+export async function runWorkflowLifecycleCases(t, { session, userA, userB, config }) {
   const run = (work) => session(userA, (s) => work(s, s.identity.organizationId));
   const other = (work) => session(userB, (s) => work(s, s.identity.organizationId));
   const proven = { certification: "simulator_e2e_tested" };
@@ -152,6 +155,73 @@ export async function runWorkflowLifecycleCases(t, { session, userA, userB }) {
     assert.equal(backToService.ok, false, "a degraded workflow does not go straight back into service");
     assert.equal((await run((s, o) => promoteFlow(s, o, live.id, userA, "testing"))).ok, true);
     await run((s, o) => promoteFlow(s, o, live.id, userA, "disabled"));
+  });
+
+  /* ── the surface a person actually uses ──────────────────────────────── */
+
+  await t.test("the surface shows what a workflow is, and never how it works", async () => {
+    const previousEnv = { ...env };
+    env.DATABASE_URL = config.connectionString;
+    delete env.HYPERDRIVE;
+    try {
+      const org = await run((_s, o) => o);
+      const call = async (user, activeOrg, method, body, query = "") => {
+        const request = new Request(`https://app.aval.llc/api/pms/workflows${query}`, {
+          method,
+          headers: withVerifiedIdentityHeaders(
+            new Headers({ "content-type": "application/json", cookie: `aval-active-organization=${activeOrg}` }),
+            { userId: user, email: `${user}@example.test`, displayName: user, emailVerified: true },
+          ),
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        const response = await (method === "GET" ? workflowsGet : workflowsPost)(request, undefined);
+        return [response.status, await response.json()];
+      };
+
+      const [status, listing] = await call(userA, org, "GET", null, `?provider=${PROVIDER}`);
+      assert.equal(status, 200);
+      assert.ok(listing.workflows.length > 0);
+
+      // The refusal that defines this surface. A workflow's steps are how Aval
+      // drives somebody's PMS; the screen that lists workflows is not the place
+      // they can be read off or rewritten.
+      const serialized = JSON.stringify(listing);
+      assert.ok(!/steps|stepsJson|"open"|"click"/.test(serialized),
+        "the steps must not cross this boundary");
+
+      const shipped = listing.workflows.find((flow) => flow.shipped);
+      assert.ok(shipped, "the workflow Aval ships is listed");
+      assert.equal(shipped.certification, "simulator_e2e_tested", "and says what has actually been proven");
+      assert.equal(shipped.canPromote, false, "and cannot be promoted from here");
+      assert.ok(shipped.capability && shipped.verificationStrategy && shipped.fallback,
+        "with enough to judge it: capability, verification, fallback");
+      assert.ok("lastTestedAt" in shipped && "knownIssues" in shipped);
+
+      // Promotion through the route takes the same path the runtime does, so
+      // the two cannot disagree about what is allowed.
+      const own = await run((s, o) => recordFlow(s, o, PROVIDER, ACTION, STEPS, userA, proven));
+      const [shortcut, refused] = await call(userA, org, "POST", { id: own.id, status: "active" });
+      assert.equal(shortcut, 422);
+      assert.match(refused.error, /through testing/i);
+
+      assert.equal((await call(userA, org, "POST", { id: own.id, status: "testing" }))[0], 200);
+      const [promoted, body] = await call(userA, org, "POST", { id: own.id, status: "active" });
+      assert.equal(promoted, 200, JSON.stringify(body));
+      assert.equal(body.status, "active");
+
+      // A shipped workflow is refused at the route as firmly as in the runtime.
+      const [shippedStatus, shippedError] = await call(userA, org, "POST", { id: shipped.id, status: "testing" });
+      assert.equal(shippedStatus, 422);
+      assert.match(shippedError.error, /deployment, not at runtime/i);
+
+      assert.equal((await call(userA, org, "POST", { id: own.id, status: "in_service" }))[0], 422,
+        "an invented status is refused rather than coerced");
+      assert.equal((await call(userA, org, "GET", null, "?provider=not_a_pms"))[0], 404);
+
+      await run((s, o) => promoteFlow(s, o, own.id, userA, "disabled"));
+    } finally {
+      Object.assign(env, previousEnv);
+    }
   });
 
   await t.test("a recorded workflow still cannot carry a selector or a coordinate", async () => {

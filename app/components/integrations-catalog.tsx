@@ -4,6 +4,7 @@ import { CommunicationSettings } from "./communication-settings";
 import { PmsMatrix } from "./pms-matrix";
 import { PmsSeat } from "./pms-seat";
 import { PmsDesktopSession } from "./pms-desktop-session";
+import { PmsWorkflows } from "./pms-workflows";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -60,6 +61,8 @@ export function IntegrationsCatalog({
       {/* Connecting the PMS comes before choosing what Aval may do in it. */}
       <PmsDesktopSession provider="appfolio"/>
       <PmsMatrix/>
+      {/* What Aval can drive, and how far each one is actually proven. */}
+      <PmsWorkflows/>
       <ConnectionOperations/>
       <div className="enterprise-toolbar">
         <div className="segmented" role="group" aria-label={t("browse")}>

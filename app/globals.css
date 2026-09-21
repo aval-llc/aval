@@ -1921,3 +1921,43 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 /* The sentence the panel exists to be able to say. It is not a footnote. */
 .pms-session-not-permission { margin: 10px 0 0; font-size: 11px; font-weight: 600; color: var(--ink); }
 .pms-session-error { margin: 10px 0 0; font-size: 11px; color: var(--danger, #b4232b); }
+/* ── provider workflows ────────────────────────────────────────────────────
+   An inspection surface. There is no step editor here by design, so the
+   layout optimises for reading a row quickly and expanding the one that
+   matters — and for certification being impossible to miss beside the
+   provider's name. */
+.pms-workflows { margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-soft); }
+.pms-workflows-head { display: flex; align-items: flex-start; gap: 10px; }
+.pms-workflows-head > svg { flex-shrink: 0; margin-top: 2px; color: var(--quiet); }
+.pms-workflows-head strong { display: block; font-size: 13px; font-weight: 600; }
+.pms-workflows-head p { margin: 3px 0 0; font-size: 11px; color: var(--quiet); }
+
+.pms-workflow-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+.pms-workflow { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.pms-workflow-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 13px; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.pms-workflow-row:hover { background: var(--surface-soft); }
+.pms-workflow-row > svg:last-child { flex-shrink: 0; color: var(--quiet); transition: transform .18s var(--ease-snap); }
+.pms-workflow-row > svg.is-open { transform: rotate(180deg); }
+.pms-workflow-identity { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.pms-workflow-identity strong { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pms-workflow-identity small { font-size: 10px; color: var(--quiet); }
+
+.pms-workflow-status { flex-shrink: 0; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); font-size: 9px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--quiet); }
+.pms-workflow-status.is-active { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, transparent); }
+.pms-workflow-status.is-degraded { color: var(--danger, #b4232b); border-color: color-mix(in srgb, var(--danger, #b4232b) 40%, transparent); }
+.pms-workflow-status.is-disabled { opacity: .55; }
+
+/* Deliberately loud when a real provider has never been touched. */
+.pms-workflow-cert { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 10px; color: var(--quiet); }
+.pms-workflow-cert.is-unproven { color: var(--danger, #b4232b); font-weight: 600; }
+
+.pms-workflow-detail { padding: 0 13px 13px; border-top: 1px solid var(--line); }
+.pms-workflow-detail dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 12px 0 0; }
+.pms-workflow-detail dl > div.is-wide { grid-column: 1 / -1; }
+.pms-workflow-detail dt { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: var(--quiet); }
+.pms-workflow-detail dd { margin: 2px 0 0; font-size: 11px; }
+.pms-workflow-issues { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0 0; padding: 9px 11px; border-radius: 10px; background: var(--surface-soft); font-size: 11px; }
+.pms-workflow-issues > svg { flex-shrink: 0; margin-top: 1px; color: var(--danger, #b4232b); }
+.pms-workflow-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.pms-workflow-locked { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-size: 11px; color: var(--quiet); }
+.pms-workflow-error { margin: 10px 0 0; font-size: 11px; color: var(--danger, #b4232b); }
