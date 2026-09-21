@@ -5,6 +5,9 @@ import { agentApprovals, integrationConnections } from '../../db/postgres/schema
 import { seedWorkspaceEmployees, assignEmployeeForWork } from '../../lib/agents/expertise.ts';
 import { intakeEvent } from '../../lib/agents/intake.ts';
 import { createTask, getTask } from '../../lib/agents/tasks.ts';
+import { listEmployees } from '../../lib/agents/employees.ts';
+import { pmsToolAvailability } from '../../lib/pms/assembly.ts';
+import { executePmsWrite } from '../../lib/pms/execute.ts';
 import { executeApprovedTool } from '../../lib/agents/executor.ts';
 import { requestApproval } from '../../lib/agents/approvals.ts';
 import { getTool } from '../../lib/agents/registry.ts';
@@ -14,7 +17,10 @@ import { discoverGrants } from '../../lib/pms/grants.ts';
 import { activateFlow, recordFlow } from '../../lib/pms/flows.ts';
 import { BrowserSimulator } from '../../lib/pms/browser/simulator.ts';
 import { clearBrowserAdapters, registerBrowserAdapter } from '../../lib/pms/browser/adapter.ts';
-import { drainOneWrite } from '../../lib/pms/browser/drain.ts';
+import { runInstruction } from '../../lib/pms/browser/drain.ts';
+import { POST as runnerRoute } from '../../app/api/pms/runner/route.ts';
+import { withVerifiedIdentityHeaders } from '../../lib/auth/request-identity.ts';
+import { env } from 'cloudflare:workers';
 import { readConnectionHealth } from '../../lib/pms/browser/health.ts';
 
 /**
@@ -43,7 +49,7 @@ const STEPS = [
   { kind: 'capture', label: 'Work Order #', as: 'externalId' },
 ];
 
-export async function runPmsJourneyCases(t, { session, administrator, propertyId }) {
+export async function runPmsJourneyCases(t, { session, administrator, propertyId, config }) {
   // A brand-new workspace, so "before connecting anything" is a real state
   // rather than whatever a previous file left behind.
   const customer = `user_${randomUUID()}`;
@@ -53,6 +59,36 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
   const provider = new BrowserSimulator(PROVIDER, [ACTION]);
   clearBrowserAdapters();
   registerBrowserAdapter(provider);
+
+  // The desktop talks to cloud over HTTP and nothing else. Calling the drain
+  // helper directly here would test a composition the product does not use.
+  const runnerCall = async (body) => {
+    const request = new Request('https://app.aval.llc/api/pms/runner', {
+      method: 'POST',
+      headers: withVerifiedIdentityHeaders(
+        new Headers({ 'content-type': 'application/json', cookie: `aval-active-organization=${org}` }),
+        { userId: customer, email: `${customer}@example.test`, displayName: customer, emailVerified: true },
+      ),
+      body: JSON.stringify(body),
+    });
+    const response = await runnerRoute(request, undefined);
+    return [response.status, await response.json()];
+  };
+
+  /** Exactly what the desktop runner does: claim over HTTP, act, report over HTTP. */
+  const runnerPass = async (runnerId) => {
+    const [, claimed] = await runnerCall({ intent: 'claim', runner: runnerId });
+    if (!claimed.instruction) return claimed.outcome;
+    const report = await runInstruction(claimed.instruction, {
+      organizationId: org, providerId: claimed.instruction.provider, runnerId,
+    });
+    const [, reported] = await runnerCall({ intent: 'result', runner: runnerId, ...report });
+    return reported.outcome;
+  };
+
+  const previousEnv = { ...env };
+  env.DATABASE_URL = config.connectionString;
+  delete env.HYPERDRIVE;
 
   await t.test('1. a new workspace has a team and no PMS at all', async () => {
     assert.ok(await run((s, o) => seedWorkspaceEmployees(s, o, customer)) > 0, 'the starting team arrives');
@@ -182,7 +218,7 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
   });
 
   await t.test('8. the desktop runner carries it out and Aval verifies it', async () => {
-    const drained = await run((s, o) => drainOneWrite(s, o, 'the-customers-laptop'));
+    const drained = await runnerPass('the-customers-laptop');
     assert.equal(drained.status, 'done', 'executed and read back at the provider');
     assert.ok(drained.externalId, "with the provider's own identifier");
     assert.equal(drained.connection, 'CONNECTED');
@@ -204,5 +240,47 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
       `a created work order does not finish the objective (was ${current.status})`);
   });
 
+  await t.test('10. disconnecting the PMS takes the tools, not the employee or the work', async () => {
+    // The inverse of step 2, and the one that decides whether a PMS is a
+    // capability or an identity. Removing it must leave the employee, the
+    // objective and everything Aval can do without a provider untouched.
+    const employeesBefore = await run((s, o) => listEmployees(s, o, { limit: 100 }));
+    assert.ok(employeesBefore.length > 0);
+
+    await run((s, o) => s.db.delete(integrationConnections)
+      .where(eq(integrationConnections.organizationId, o)));
+
+    const availability = await run((s, o) => pmsToolAvailability(s, o, 'maintenance'));
+    assert.equal(availability.toolNames.size, 0, 'the provider tools are gone');
+
+    const employeesAfter = await run((s, o) => listEmployees(s, o, { limit: 100 }));
+    assert.equal(employeesAfter.length, employeesBefore.length, 'the team is untouched');
+
+    const objective = await run((s, o) => getTask(s, o, task.id));
+    assert.ok(objective, 'and so is the resident objective');
+    assert.ok(!['COMPLETED', 'FAILED', 'CANCELLED'].includes(objective.status),
+      'losing a provider does not finish or fail the work');
+
+    const repair = await run((s, o) => getTask(s, o, child.id));
+    assert.ok(repair, 'no orphaned task');
+  });
+
+  await t.test('11. work queued before the disconnect cannot execute after it', async () => {
+    // A revoked connection must reach the queue. Anything still waiting was
+    // authorized under a connection that no longer exists.
+    provider.reset();
+    provider.signIn();
+    await run((s, o) => executePmsWrite(s, {
+      organizationId: o, providerId: PROVIDER, toolName: 'create_work_order',
+      payload: { unit: '99Z', description: 'queued before revocation' },
+      idempotencyKey: `revoked-${randomUUID()}`, personaId: 'maintenance', approvalId: randomUUID(),
+    })).catch(() => null);
+
+    const outcome = await runnerPass('the-customers-laptop');
+    assert.notEqual(outcome.status, 'done', `a revoked connection must not execute: ${JSON.stringify(outcome)}`);
+    assert.equal(provider.external.length, 0, 'and nothing reached the provider');
+  });
+
+  Object.assign(env, previousEnv);
   clearBrowserAdapters();
 }
