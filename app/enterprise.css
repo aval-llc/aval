@@ -2245,6 +2245,13 @@ html.aval-desktop-runtime .demo-mode-banner {
 .chart-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
 .chart-controls .enterprise-select, .chart-controls .soft-button { min-height: 32px; font-size: .75rem; padding: 6px 10px; border-radius: 8px; }
 .data-chart-plot { position: relative; isolation: isolate; }
+.data-chart-preview { filter: blur(1.5px); opacity: .58; pointer-events: none; }
+.data-chart-preview svg { display: block; }
+.dashboard-state-label { color: var(--muted); font-size: .75rem; }
+.dashboard-connect { margin-top: 10px; }
+.dashboard-metric-connect { display: block; margin-top: 10px; padding: 0; border: 0; background: none; color: var(--viz-blue); font: inherit; font-size: .75rem; cursor: pointer; text-align: left; }
+.operations-workspace .metric-card[data-state="syncing"] strong { color: var(--muted); animation: dashboard-pulse 1.4s ease-in-out infinite; }
+@keyframes dashboard-pulse { 50% { opacity: .45; } }
 .chart-reveal { animation: chart-reveal 850ms cubic-bezier(.22,1,.36,1) both; }
 @keyframes chart-reveal { from { clip-path: inset(0 100% 0 0); opacity: .25; } to { clip-path: inset(0); opacity: 1; } }
 .chart-tooltip { position: absolute; top: 12px; transform: translateX(-50%); display: grid; gap: 8px; min-width: 170px; max-width: min(300px, 85%); padding: 12px 14px; border: 1px solid var(--line); background: var(--surface-raised); border-radius: 12px; box-shadow: var(--shadow-float); pointer-events: none; font-size: .75rem; z-index: 2; }

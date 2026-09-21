@@ -13,14 +13,16 @@ export function IntegrationsCatalog({
   providers,
   loading,
   onOpen,
+  initialCategory,
 }: {
   providers: Provider[];
   loading: boolean;
   onOpen: (id: string) => void;
+  initialCategory?: string;
 }) {
   const t = useTranslations("Catalog");
   const [query, setQuery] = useState(""),
-    [category, setCategory] = useState(""),
+    [category, setCategory] = useState(initialCategory ?? ""),
     [installed, setInstalled] = useState(false);
   const categories = [...new Set(providers.map((p) => p.category))];
   const connected = providers.filter(

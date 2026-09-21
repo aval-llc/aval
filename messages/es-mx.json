@@ -2153,5 +2153,15 @@
     "aboutMemory": "Cómo funciona la memoria",
     "assignedConnection": "Conexión asignada",
     "downloadDocument": "Descargar documento"
+  },
+  "DashboardState": {
+    "preview": "Vista previa · Esperando datos",
+    "syncing": "Sincronizando...",
+    "empty": "Sin registros para este período",
+    "property": "Conectar sistema de propiedades",
+    "leasing": "Conectar datos de arrendamiento",
+    "inbox": "Conectar bandeja de entrada",
+    "accounting": "Conectar contabilidad",
+    "connect": "Conectar datos"
   }
 }

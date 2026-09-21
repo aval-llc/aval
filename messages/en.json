@@ -2153,5 +2153,15 @@
     "aboutMemory": "How memory works",
     "assignedConnection": "Assigned connection",
     "downloadDocument": "Download document"
+  },
+  "DashboardState": {
+    "preview": "Preview · Waiting for data",
+    "syncing": "Syncing...",
+    "empty": "No records for this period",
+    "property": "Connect property system",
+    "leasing": "Connect leasing data",
+    "inbox": "Connect inbox",
+    "accounting": "Connect accounting",
+    "connect": "Connect data"
   }
 }
