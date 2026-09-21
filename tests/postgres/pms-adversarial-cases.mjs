@@ -164,6 +164,33 @@ export async function runPmsAdversarialCases(t, { session, userA, userB, adminis
       assert.equal(view.connected, true, 'a closed laptop has not disconnected the PMS');
     });
 
+    await t.test('a healthy session does not stand in for being able to execute', async () => {
+      // The distinction the Connections panel exists to keep. A session can be
+      // perfectly connected while nothing can run: reachable, authorized and
+      // performable are three different numbers, and the smallest is what the
+      // employee can actually do.
+      // The preceding case leaves the session lapsed on purpose, so this one
+      // establishes its own rather than depending on the order it runs in.
+      await post(userA, orgA, {
+        provider: 'appfolio', session: 'ACTIVE',
+        discovered: ['maintenance.work_order.create', 'arrears.payment.post'],
+      });
+      const [, view] = await get(userA, orgA, '?provider=appfolio');
+      assert.equal(view.session.state, 'CONNECTED', 'the session is up');
+      assert.ok(view.support, 'and execution support is reported separately');
+      assert.equal(typeof view.support.discovered, 'number');
+      assert.equal(typeof view.support.granted, 'number');
+      assert.equal(typeof view.support.workflows, 'number');
+
+      // No workflow has been promoted into service for this workspace, so
+      // nothing is performable however much was discovered.
+      assert.equal(view.support.workflows, 0, 'no active workflow');
+      assert.equal(view.support.certification, 'unimplemented',
+        'and a connection with nothing live claims nothing');
+      assert.ok(view.support.discovered >= view.support.granted,
+        'a workspace cannot authorize more than the login reaches');
+    });
+
     await t.test('the route refuses what it cannot honestly accept', async () => {
       // A provider whose writes do not run on the customer's machine has no
       // desktop session to establish.
@@ -174,10 +201,15 @@ export async function runPmsAdversarialCases(t, { session, userA, userB, adminis
     });
 
     await t.test('one workspace cannot connect on behalf of another', async () => {
+      // Compared against whatever this workspace's state actually is, rather
+      // than a value baked in from whichever case ran before: the claim is
+      // that another workspace cannot change it, not what it happens to be.
+      const [, before] = await get(userA, orgA, '?provider=appfolio');
       await post(userB, orgB, { provider: 'appfolio', session: 'PERMISSION_DENIED' });
       const [, mine] = await get(userA, orgA, '?provider=appfolio');
-      assert.equal(mine.session.state, 'SESSION_EXPIRED',
+      assert.equal(mine.session.state, before.session.state,
         "another workspace's session state must not overwrite this one");
+      assert.notEqual(mine.session.state, 'PERMISSION_DENIED');
     });
   } finally {
     Object.assign(env, previousEnv);

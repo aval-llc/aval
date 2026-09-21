@@ -36,6 +36,8 @@ import { withApiSession } from "@/lib/api/with-session";
 import { pmsProvider } from "@/lib/pms/providers/index.ts";
 import { PMS_ACTIONS, type PmsAction } from "@/lib/pms/types.ts";
 import { readGrants } from "@/lib/pms/grants.ts";
+import { readAllEnablements } from "@/lib/pms/enablement.ts";
+import { CERTIFICATIONS, listWorkflows } from "@/lib/pms/flows.ts";
 import {
   readConnectionHealth,
   recordConnectionHealth,
@@ -77,11 +79,14 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
     ))
     .limit(1);
 
-  const [health, grants] = await Promise.all([
+  const [health, grants, enablements, workflows] = await Promise.all([
     readConnectionHealth(dbSession, identity.organizationId, providerId),
     readGrants(dbSession, identity.organizationId, providerId),
+    readAllEnablements(dbSession, identity.organizationId),
+    listWorkflows(dbSession, identity.organizationId, providerId),
   ]);
   const role = await roleFor(dbSession, identity.userId, identity.organizationId).catch(() => null);
+  const active = workflows.filter((flow) => flow.status === "active");
 
   return Response.json({
     provider: providerId,
@@ -94,6 +99,32 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
     // a reader to treat it as permission.
     discovered: grants.available,
     discoveredAt: grants.probedAt,
+    /**
+     * Four separate numbers, because "Connected" on its own is misleading.
+     *
+     * A session can be perfectly healthy while nothing can execute: the login
+     * reaches six things, the workspace authorized three, and Aval has a
+     * working workflow for two of them. The smallest of those is what the
+     * employee can actually do, and collapsing them into one green word is how
+     * a customer comes to believe Aval is doing something it cannot.
+     */
+    support: {
+      discovered: grants.available.length,
+      granted: grants.available.filter((action) =>
+        enablements.get(`${providerId}:${action}`)?.enabled === true).length,
+      workflows: active.length,
+      // The *lowest* certification among the workflows that can actually run.
+      // A connection is only as proven as its weakest live path, and showing
+      // the highest would let one well-tested workflow vouch for the rest.
+      certification: active.length === 0
+        ? "unimplemented"
+        : active.map((flow) => flow.certification)
+          .sort((a, b) => CERTIFICATIONS.indexOf(a) - CERTIFICATIONS.indexOf(b))[0],
+      /** Actions the workspace authorized that no active workflow can perform. */
+      unsupported: grants.available.filter((action) =>
+        enablements.get(`${providerId}:${action}`)?.enabled === true
+        && !active.some((flow) => flow.action === action)),
+    },
     canEdit: Boolean(role && canManagePolicy(role)) && !isGuestIdentity(identity),
   });
 }

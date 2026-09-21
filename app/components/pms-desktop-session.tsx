@@ -25,11 +25,20 @@ type SessionState =
   | "CONNECTED" | "SESSION_REQUIRED" | "SESSION_EXPIRED" | "PERMISSION_DENIED"
   | "PROVIDER_UNAVAILABLE" | "UI_CHANGED" | "DEGRADED";
 
+interface SupportView {
+  discovered: number;
+  granted: number;
+  workflows: number;
+  certification: string;
+  unsupported: string[];
+}
+
 interface SessionView {
   displayName: string;
   connected: boolean;
   session: { state: SessionState; detail?: string; lastVerifiedAt?: string | null };
   discovered: string[];
+  support: SupportView;
   canEdit: boolean;
 }
 
@@ -172,6 +181,31 @@ export function PmsDesktopSession({ provider }: { provider: string }) {
       {/* The sentence this whole screen exists to be able to say honestly. */}
       <p className="pms-session-not-permission">{t("PmsSession.notPermission")}</p>
     </div>}
+
+    {/* Four numbers rather than one green word. A session can be perfectly
+        healthy while nothing can execute, and the smallest of these is what
+        the employee can actually do. */}
+    {view.connected && <dl className="pms-session-support">
+      <div><dt>{t("PmsSession.supportDiscovered")}</dt><dd>{view.support.discovered}</dd></div>
+      <div><dt>{t("PmsSession.supportGranted")}</dt><dd>{view.support.granted}</dd></div>
+      <div><dt>{t("PmsSession.supportWorkflows")}</dt><dd>{view.support.workflows}</dd></div>
+      <div className="is-wide">
+        <dt>{t("PmsSession.supportCertification")}</dt>
+        <dd className={view.support.certification === "live_provider_tested" ? "" : "is-unproven"}>
+          {t(`PmsWorkflows.cert_${view.support.certification}`)}
+        </dd>
+      </div>
+    </dl>}
+
+    {/* The message the directive asks for in place of a generic error: say
+        plainly what works, what does not, and that the work still goes on. */}
+    {view.connected && view.support.unsupported.length > 0 && <p className="pms-session-unsupported">
+      <WarningTriangle width={15} height={15}/>
+      {t("PmsSession.notYetEnabled", {
+        provider: view.displayName,
+        actions: view.support.unsupported.join(", "),
+      })}
+    </p>}
 
     {error && <p className="pms-session-error" role="alert">{error}</p>}
   </section>;

@@ -1029,6 +1029,7 @@
       "neverStoresCredentials": "Aval stores no password and no authenticator code for this connection. There is nowhere here to enter one.",
       "notPermission": "Reaching something is not permission to use it. Enable each action you want Aval to perform below.",
       "notSignedIn": "No signed-in session was found. Sign in and try again.",
+      "notYetEnabled": "Connected successfully. Aval can read what is listed above, but {actions} is not yet enabled for {provider}. Work needing it will be handled another way — by email, or by a step for a person — rather than failing.",
       "reaches": "This login can reach {count} actions:",
       "signInAgain": "Sign in again",
       "state_CONNECTED": "Session active",
@@ -1038,6 +1039,10 @@
       "state_SESSION_EXPIRED": "Session expired",
       "state_SESSION_REQUIRED": "Sign-in needed",
       "state_UI_CHANGED": "Provider screen changed",
+      "supportCertification": "How far this is proven",
+      "supportDiscovered": "Reachable by this login",
+      "supportGranted": "Enabled by this workspace",
+      "supportWorkflows": "Aval can perform",
       "title": "Connect {provider} using this computer",
       "useThisComputer": "Use this computer",
       "waitingForSignIn": "Waiting for sign-in…"

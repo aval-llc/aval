@@ -1029,6 +1029,7 @@
       "neverStoresCredentials": "Aval no guarda ninguna contraseña ni código de autenticación para esta conexión. Aquí no hay dónde escribirlos.",
       "notPermission": "Poder acceder a algo no es permiso para usarlo. Habilita abajo cada acción que quieras que Aval realice.",
       "notSignedIn": "No se encontró una sesión iniciada. Inicia sesión e inténtalo de nuevo.",
+      "notYetEnabled": "Conexión correcta. Aval puede leer lo que aparece arriba, pero {actions} aún no está habilitado para {provider}. El trabajo que lo necesite se resolverá de otra forma — por correo o con un paso para una persona — en lugar de fallar.",
       "reaches": "Este acceso alcanza {count} acciones:",
       "signInAgain": "Iniciar sesión de nuevo",
       "state_CONNECTED": "Sesión activa",
@@ -1038,6 +1039,10 @@
       "state_SESSION_EXPIRED": "La sesión expiró",
       "state_SESSION_REQUIRED": "Falta iniciar sesión",
       "state_UI_CHANGED": "La pantalla del proveedor cambió",
+      "supportCertification": "Hasta dónde está comprobado",
+      "supportDiscovered": "Alcanzable con este acceso",
+      "supportGranted": "Habilitado por este espacio de trabajo",
+      "supportWorkflows": "Aval puede realizar",
       "title": "Conectar {provider} usando esta computadora",
       "useThisComputer": "Usar esta computadora",
       "waitingForSignIn": "Esperando el inicio de sesión…"

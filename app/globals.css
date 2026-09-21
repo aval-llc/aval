@@ -1922,6 +1922,7 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 /* The sentence the panel exists to be able to say. It is not a footnote. */
 .pms-session-not-permission { margin: 10px 0 0; font-size: 11px; font-weight: 600; color: var(--ink); }
 .pms-session-error { margin: 10px 0 0; font-size: 11px; color: var(--danger, #b4232b); }
+
 /* ── provider workflows ────────────────────────────────────────────────────
    An inspection surface. There is no step editor here by design, so the
    layout optimises for reading a row quickly and expanding the one that
@@ -1962,3 +1963,17 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 .pms-workflow-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .pms-workflow-locked { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-size: 11px; color: var(--quiet); }
 .pms-workflow-error { margin: 10px 0 0; font-size: 11px; color: var(--danger, #b4232b); }
+
+/* ── execution support, told apart from session health ─────────────────────
+   Four numbers rather than one green word: a session can be perfectly healthy
+   while nothing can execute, and the smallest of these is what the employee
+   can actually do. */
+.pms-session-support { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.pms-session-support > div.is-wide { grid-column: 1 / -1; }
+.pms-session-support dt { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: var(--quiet); }
+.pms-session-support dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; }
+.pms-session-support dd.is-unproven { font-size: 11px; color: var(--danger, #b4232b); }
+
+/* Not an error state: the connection worked, and the work still goes on. */
+.pms-session-unsupported { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: 11px; }
+.pms-session-unsupported > svg { flex-shrink: 0; margin-top: 1px; color: var(--quiet); }
