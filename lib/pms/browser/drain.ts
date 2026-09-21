@@ -385,7 +385,14 @@ export async function reportRunnerResult(
   if (report.kind === "not_ready") {
     // Waiting is decided by whether the state resolves on its own. A session
     // that lapsed comes back when somebody signs in; a refused role does not.
-    const waits = awaitsProvider(connection);
+    //
+    // The ceiling is checked here as well, and it is not a detail: `claim`
+    // skips rows at the attempt limit, so a write that kept deferring would
+    // stay `pending` and simply stop being claimed — invisible to every
+    // runner, never failed, never surfaced to anyone. Waiting forever is a way
+    // of losing work quietly, which is worse than failing.
+    const exhausted = row.attempts >= MAX_ATTEMPTS;
+    const waits = awaitsProvider(connection) && !exhausted;
     await trail(dbSession, organizationId, "provider_session_unavailable", `${row.provider}:${connection}`, {
       queueId: row.id, runnerId, session: report.session,
     });
@@ -394,16 +401,24 @@ export async function reportRunnerResult(
         queueId: row.id, runnerId,
       });
     }
-    await settle(dbSession, organizationId, row.id, waits ? "pending" : "abandoned", report.reason ?? "Not ready.");
+    await settle(
+      dbSession, organizationId, row.id,
+      waits ? "pending" : exhausted ? "failed" : "abandoned",
+      exhausted
+        ? `Gave up after ${MAX_ATTEMPTS} attempts. Last reason: ${report.reason ?? "the provider session was not usable."}`
+        : report.reason ?? "Not ready.",
+    );
     return {
       ...base,
-      status: waits ? "deferred" : "denied",
-      reason: report.reason,
+      status: waits ? "deferred" : exhausted ? "failed" : "denied",
+      reason: exhausted
+        ? `This write was attempted ${MAX_ATTEMPTS} times and the provider session was never usable. It needs a person.`
+        : report.reason,
       session: report.session,
       connection,
       // Both are reported. A lapsed session is work that waits *and* a person
       // who has to sign in; saying only one of those strands the other.
-      needsHuman: needsPerson(connection),
+      needsHuman: exhausted || needsPerson(connection),
     };
   }
 

@@ -352,6 +352,35 @@ export async function runBrowserWriteCases(t, { session, userA, userB, administr
       "and the handoff to a person is on the chain too");
   });
 
+  await t.test("a write that can never run fails loudly rather than waiting forever", async () => {
+    // The defect this pins: `claim` skips rows at the attempt ceiling, so a
+    // write that kept deferring would sit `pending` and simply stop being
+    // claimed — invisible to every runner, never failed, never surfaced. A
+    // desktop with no provider driver produces exactly that, on every poll.
+    // Waiting forever is a way of losing work quietly.
+    provider.reset();
+    provider.faults.timeout = true;
+    await enqueue(payloadFor("31W"), `exhaust-${randomUUID()}`);
+
+    const outcomes = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) outcomes.push(await drain());
+
+    const settled = outcomes.filter((outcome) => outcome.status !== "idle");
+    assert.ok(settled.length > 0 && settled.length <= 5, `attempts are bounded: ${settled.length}`);
+    const last = settled[settled.length - 1];
+    assert.equal(last.status, "failed", "the last attempt gives up rather than deferring again");
+    assert.equal(last.needsHuman, true, "and hands it to a person");
+    assert.match(last.reason, /attempted 5 times|needs a person/i);
+
+    // Nothing is left claimable-but-never-claimed.
+    assert.equal(outcomes[outcomes.length - 1].status, "idle", "the queue is empty afterwards");
+    const stranded = await run((s, org) => s.db.select({ status: pmsWriteQueue.status, attempts: pmsWriteQueue.attempts })
+      .from(pmsWriteQueue).where(eq(pmsWriteQueue.organizationId, org)));
+    assert.ok(!stranded.some((row) => row.status === "pending" && row.attempts >= 5),
+      "no row is left pending at the ceiling where nothing will ever pick it up");
+    delete provider.faults.timeout;
+  });
+
   await t.test("one workspace's runner cannot drain another's queue", async () => {
     provider.reset();
     await enqueue(payloadFor("4Z"), `tenancy-${randomUUID()}`);
