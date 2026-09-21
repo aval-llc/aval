@@ -22,6 +22,7 @@ import type { DbSession } from "@/db/postgres/session";
 import { integrationConnections } from "@/db/postgres/schema";
 import { type GrantSet, type PmsAction } from "./types.ts";
 import { pmsProvider } from "./providers/index.ts";
+import { browserAdapter } from "./browser/adapter.ts";
 
 const EMPTY: GrantSet = { available: [], probedAt: null, probed: false };
 
@@ -95,8 +96,17 @@ export function registerGrantProbe(providerId: string, probe: GrantProbe): void 
   PROBES.set(providerId, probe);
 }
 
+/**
+ * Whether anything can answer "what does this connection grant" for a provider.
+ *
+ * A registered probe, or a driver — a provider gains a way to be asked what it
+ * grants exactly when it gains a way to be driven, and treating those as
+ * separate registrations is how a provider ends up with a workflow it can
+ * replay and no answer to "may this login do that", which resolves to
+ * `unlearned` and looks like the workflow is missing.
+ */
 export function hasGrantProbe(providerId: string): boolean {
-  return PROBES.has(providerId);
+  return PROBES.has(providerId) || browserAdapter(providerId) !== undefined;
 }
 
 export async function discoverGrants(dbSession: DbSession, organizationId: string, providerId: string): Promise<GrantSet> {
@@ -104,13 +114,19 @@ export async function discoverGrants(dbSession: DbSession, organizationId: strin
   if (!descriptor) return { ...EMPTY, error: `No provider descriptor for "${providerId}".` };
 
   const probe = PROBES.get(providerId);
-  if (!probe) {
+  const driver = probe ? null : browserAdapter(providerId);
+  if (!probe && !driver) {
     return { ...EMPTY, error: `Grant discovery for ${descriptor.displayName} is not implemented yet.` };
   }
 
   let result: Omit<GrantSet, "probedAt" | "probed">;
   try {
-    result = await probe(dbSession, organizationId, providerId);
+    // The driver answers for itself. Filtering its manifest here would report
+    // what Aval implemented rather than what this customer's login can reach,
+    // which is the distinction the whole grant model rests on.
+    result = probe
+      ? await probe(dbSession, organizationId, providerId)
+      : await driver!.discoverCapabilities({ organizationId, providerId, runnerId: "capability-probe" });
   } catch (error) {
     // A failed probe must not look like a probe that found nothing permitted:
     // `probed: false` keeps the resolver in "unknown" rather than "denied", so

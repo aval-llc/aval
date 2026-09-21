@@ -118,8 +118,9 @@ app.whenReady().then(async () => {
   // trusted-sender check as everything else, and each name is one structured
   // provider operation rather than a browser primitive.
   for (const [channel, method] of [
-    ["supported", "supported"], ["preflight", "preflight"], ["recover-session", "recoverSession"],
-    ["health-check", "healthCheck"], ["find-existing", "findExisting"], ["execute", "execute"], ["verify", "verify"],
+    ["supported", "supported"], ["session-status", "sessionStatus"], ["recover-session", "recoverSession"],
+    ["health-check", "healthCheck"], ["discover-capabilities", "discoverCapabilities"],
+    ["reconcile", "reconcile"], ["execute", "execute"], ["verify", "verify"],
   ]) {
     ipcMain.handle(`aval:pms:${channel}`, async (event, payload) => {
       if (!isTrustedSender(event)) throw new Error("Untrusted Aval Desktop request.");

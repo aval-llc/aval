@@ -25,7 +25,7 @@ import type { PmsAction } from "../types.ts";
 import type { FlowStep } from "./steps.ts";
 import {
   asUntrusted,
-  type BrowserProviderAdapter,
+  type ProviderDriver,
   type ConnectionHealth,
   type ExecutionResult,
   type ExistingRecord,
@@ -152,8 +152,10 @@ export const DATABASE_SEARCH_SAVE: ProviderShape = {
   "Saved": { fields: [], buttons: [], captures: { "Service Request ID": "externalId" } },
 };
 
-export class BrowserSimulator implements BrowserProviderAdapter {
+export class BrowserSimulator implements ProviderDriver {
   readonly provider: string;
+  /** A simulated web app is only ever reached inside a customer's own session. */
+  readonly accessModes = ["customer_desktop_session"] as const;
   readonly faults: SimulatorFaults = {};
   private session: ProviderSessionState = "NEW";
   private readonly records = new Map<string, SimulatedRecord>();
@@ -202,11 +204,28 @@ export class BrowserSimulator implements BrowserProviderAdapter {
     for (const key of Object.keys(this.faults)) delete (this.faults as Record<string, unknown>)[key];
   }
 
-  supports(action: PmsAction): boolean {
-    return this.supported.has(action);
+  get capabilities(): readonly PmsAction[] {
+    return [...this.supported];
   }
 
-  async preflight(): Promise<PreflightResult> {
+  /**
+   * What the signed-in session can reach.
+   *
+   * The simulator answers from its own state rather than from its manifest: a
+   * permission-denied fault means this login cannot do the things this provider
+   * implements, which is exactly the difference the contract exists to keep.
+   */
+  async discoverCapabilities(): Promise<{ available: PmsAction[]; error?: string }> {
+    if (this.faults.timeout || this.faults.rateLimited) {
+      return { available: [], error: "The provider did not answer a capability probe." };
+    }
+    // Evidence about the role, not about the network: an empty list with no
+    // error is a fact, and an error with an empty list is an absence of one.
+    if (this.faults.permissionDenied) return { available: [] };
+    return { available: [...this.supported] };
+  }
+
+  async sessionStatus(): Promise<PreflightResult> {
     if (this.faults.timeout) return { ready: false, session: "EXPIRED", reason: "The provider did not respond." };
     if (this.faults.permissionDenied) {
       return { ready: false, session: "PERMISSION_DENIED", reason: "This PMS user cannot perform this action." };
@@ -259,7 +278,7 @@ export class BrowserSimulator implements BrowserProviderAdapter {
    * edited by a retry must still be recognised as the same work order, or the
    * duplicate guard protects nothing.
    */
-  async findExisting(action: PmsAction, payload: unknown): Promise<ExistingRecord | null> {
+  async reconcile(action: PmsAction, payload: unknown): Promise<ExistingRecord | null> {
     if (this.faults.timeout) throw new Error("The provider did not respond to the duplicate check.");
     const fields = asFields(payload);
     const identity = ["unit", "reference"];
@@ -394,7 +413,7 @@ export class BrowserSimulator implements BrowserProviderAdapter {
 
     const found = execution.externalId
       ? this.records.get(execution.externalId) ?? null
-      : await this.findExisting(action, payload).then((hit) => (hit ? this.records.get(hit.externalId) ?? null : null));
+      : await this.reconcile(action, payload).then((hit) => (hit ? this.records.get(hit.externalId) ?? null : null));
 
     if (!found) return { confirmed: false, detail: "No such record at the provider." };
     if (found.visibleAfterReads > 0) {

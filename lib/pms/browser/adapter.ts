@@ -31,7 +31,6 @@
 
 import type { PmsAction } from "../types.ts";
 import type { FlowStep } from "./steps.ts";
-import { registerBrowserGrantProbe } from "./discovery.ts";
 
 /**
  * Where a provider session stands.
@@ -126,47 +125,105 @@ export interface RecoveryResult {
 }
 
 /**
- * One provider's web app, driven as the customer's signed-in user.
+ * Which way a driver reaches a provider.
  *
- * Implementations live below this file and are never imported by name from
- * above it — `browserAdapter()` is the only way up.
+ * Declared per driver rather than inferred, because the resolver has to answer
+ * "can this connection do that" before anything is attempted, and a driver that
+ * only knows how to work inside a customer's signed-in session has nothing to
+ * offer an API connection.
  */
-export interface BrowserProviderAdapter {
+export type AccessMode = "customer_desktop_session" | "official_api";
+
+export interface DiscoveredCapabilities {
+  /** What this session can actually reach. Facts, never permission. */
+  available: PmsAction[];
+  /** Why discovery could not run, when it could not. Absent is not denial. */
+  error?: string;
+}
+
+/**
+ * One provider, and everything Aval needs to operate it.
+ *
+ * The production contract. Implementations live below this line and are never
+ * imported by name from above it — `providerDriver()` is the only way up — and
+ * no caller of this interface may name a provider.
+ *
+ * Four things about the shape are deliberate.
+ *
+ * **Capabilities are a list, not a predicate.** A surface that has to say
+ * "workflow support: 2" cannot ask a yes/no question two hundred times, and a
+ * driver that can only answer `supports(x)` cannot be enumerated at all.
+ *
+ * **Discovering is separate from declaring.** `capabilities` is what this
+ * driver knows how to do; `discoverCapabilities` is what *this customer's
+ * login* can actually reach. The two differ constantly — the driver can create
+ * a work order and the signed-in user may not be allowed to — and collapsing
+ * them would make a provider's implementation look like a customer's
+ * permission.
+ *
+ * **Reconciling is separate from doing.** A browser submit is the least
+ * reliable external effect Aval performs: the click lands, the provider creates
+ * the record, the laptop closes before anything is written down. The only safe
+ * way to retry that is to look first.
+ *
+ * **Verifying is separate from executing.** `execute` reports what the browser
+ * did; `verify` re-reads the provider and reports what is true. A submitted
+ * form is not proof, and a driver that returned success from `execute` alone
+ * would make the whole evidence path decorative.
+ */
+export interface ProviderDriver {
   readonly provider: string;
-  supports(action: PmsAction): boolean;
-  preflight(ctx: BrowserContext): Promise<PreflightResult>;
+  /** Which access modes this driver serves. */
+  readonly accessModes: readonly AccessMode[];
+  /** Every canonical capability this driver implements. */
+  readonly capabilities: readonly PmsAction[];
+
+  /** Whether the provider session is usable right now, and if not, why. */
+  sessionStatus(ctx: BrowserContext): Promise<PreflightResult>;
+  /** Put the provider's own sign-in in front of the person. Never types for them. */
+  recoverSession(ctx: BrowserContext): Promise<RecoveryResult>;
+  healthCheck(ctx: BrowserContext): Promise<ConnectionHealth>;
+
+  /**
+   * What this customer's login can reach.
+   *
+   * A driver answers for itself because it knows how to look: a generic prober
+   * can only report what was declared, which is the driver's own manifest read
+   * back and tells a customer nothing about their own PMS role.
+   */
+  discoverCapabilities(ctx: BrowserContext): Promise<DiscoveredCapabilities>;
+
   /**
    * Look for a record this action would create, before creating it.
    *
-   * The duplicate guard for a submit whose outcome was never written down.
-   * Returning null means "looked and did not find", which is different from an
-   * adapter that cannot look — one that cannot must throw, so the drain can
-   * refuse to proceed rather than create a second work order.
+   * Returning null means "looked and did not find", which is different from a
+   * driver that cannot look — one that cannot must throw, so the drain defers
+   * rather than creating a second work order.
    */
-  findExisting(action: PmsAction, payload: unknown, ctx: BrowserContext): Promise<ExistingRecord | null>;
+  reconcile(action: PmsAction, payload: unknown, ctx: BrowserContext): Promise<ExistingRecord | null>;
+
   execute(
     action: PmsAction,
     steps: readonly FlowStep[],
     payload: unknown,
     ctx: BrowserContext,
   ): Promise<ExecutionResult>;
+
   verify(action: PmsAction, execution: ExecutionResult, payload: unknown, ctx: BrowserContext): Promise<VerificationResult>;
-  recoverSession(ctx: BrowserContext): Promise<RecoveryResult>;
-  healthCheck(ctx: BrowserContext): Promise<ConnectionHealth>;
 }
 
-const ADAPTERS = new Map<string, BrowserProviderAdapter>();
+/** Whether a driver implements a capability. Derived, so a driver cannot disagree with itself. */
+export function driverSupports(driver: ProviderDriver, action: PmsAction): boolean {
+  return driver.capabilities.includes(action);
+}
 
-export function registerBrowserAdapter(adapter: BrowserProviderAdapter): void {
+const ADAPTERS = new Map<string, ProviderDriver>();
+
+export function registerBrowserAdapter(adapter: ProviderDriver): void {
   ADAPTERS.set(adapter.provider, adapter);
-  // A provider gains a way to be asked what it grants exactly when it gains a
-  // way to be driven. Registering these separately is how a provider ends up
-  // with a workflow it can replay and no answer to "may this login do that",
-  // which resolves to `unlearned` and looks like the workflow is missing.
-  registerBrowserGrantProbe(adapter.provider);
 }
 
-export function browserAdapter(providerId: string): BrowserProviderAdapter | undefined {
+export function browserAdapter(providerId: string): ProviderDriver | undefined {
   return ADAPTERS.get(providerId);
 }
 

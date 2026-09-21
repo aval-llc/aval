@@ -29,7 +29,7 @@
 import type { PmsAction } from "../types.ts";
 import {
   registerBrowserAdapter,
-  type BrowserProviderAdapter,
+  type ProviderDriver,
   type ConnectionHealth,
   type ExecutionResult,
   type ExistingRecord,
@@ -49,10 +49,11 @@ import type { FlowStep } from "./steps.ts";
  */
 export interface DesktopProviderBridge {
   supported(input: { provider: string }): Promise<string[]>;
-  preflight(input: { provider: string }): Promise<PreflightResult>;
+  discoverCapabilities(input: { provider: string }): Promise<{ available: string[]; error?: string }>;
+  sessionStatus(input: { provider: string }): Promise<PreflightResult>;
   recoverSession(input: { provider: string }): Promise<RecoveryResult>;
   healthCheck(input: { provider: string }): Promise<ConnectionHealth>;
-  findExisting(input: { provider: string; action: string; payload: unknown }): Promise<ExistingRecord | null>;
+  reconcile(input: { provider: string; action: string; payload: unknown }): Promise<ExistingRecord | null>;
   execute(input: {
     provider: string; action: string; steps: readonly FlowStep[]; payload: unknown;
   }): Promise<ExecutionResult>;
@@ -74,17 +75,27 @@ export function desktopBridge(): DesktopProviderBridge | null {
  * cannot tell the difference and the duplicate, verification and session rules
  * are the ones already tested.
  */
-export function bridgedAdapter(provider: string, bridge: DesktopProviderBridge, supported: readonly string[]): BrowserProviderAdapter {
-  const supports = new Set(supported);
+export function bridgedAdapter(
+  provider: string,
+  bridge: DesktopProviderBridge,
+  supported: readonly string[],
+): ProviderDriver {
   return {
     provider,
-    supports: (action: PmsAction) => supports.has(action),
-    preflight: () => bridge.preflight({ provider }),
+    // A bridged driver only ever works inside the session the customer
+    // established on this machine. It has no other way to reach a provider.
+    accessModes: ["customer_desktop_session"],
+    capabilities: supported as readonly PmsAction[],
+    sessionStatus: () => bridge.sessionStatus({ provider }),
     recoverSession: () => bridge.recoverSession({ provider }),
     healthCheck: () => bridge.healthCheck({ provider }),
-    findExisting: (action, payload) => bridge.findExisting({ provider, action, payload }),
-    execute: (action, steps, payload) => bridge.execute({ provider, action, steps, payload }),
-    verify: (action, execution, payload) => bridge.verify({ provider, action, execution, payload }),
+    discoverCapabilities: async () => {
+      const found = await bridge.discoverCapabilities({ provider });
+      return { available: found.available as PmsAction[], error: found.error };
+    },
+    reconcile: (action: PmsAction, payload: unknown) => bridge.reconcile({ provider, action, payload }),
+    execute: (action: PmsAction, steps, payload: unknown) => bridge.execute({ provider, action, steps, payload }),
+    verify: (action: PmsAction, execution, payload: unknown) => bridge.verify({ provider, action, execution, payload }),
   };
 }
 

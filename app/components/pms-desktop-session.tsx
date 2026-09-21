@@ -85,11 +85,15 @@ export function PmsDesktopSession({ provider }: { provider: string }) {
     try {
       const recovery = await bridge.recoverSession({ provider });
       const preflight = recovery.recovered
-        ? await bridge.preflight({ provider })
+        ? await bridge.sessionStatus({ provider })
         : { ready: false, session: recovery.session, reason: recovery.reason };
 
-      // Discovery only means anything against a session that is actually up.
-      const discovered = preflight.ready ? await bridge.supported({ provider }) : [];
+      // Discovery only means anything against a session that is actually up,
+      // and it asks the driver what this login reaches rather than what Aval
+      // implemented — those differ, and the difference is the customer's role.
+      const discovered = preflight.ready
+        ? (await bridge.discoverCapabilities({ provider })).available
+        : [];
 
       const response = await fetch("/api/pms/session", {
         method: "POST",

@@ -85,10 +85,23 @@ const pms = {
     return driver ? driver.supported() : [];
   },
 
-  async preflight({ provider } = {}) {
+  /**
+   * What this customer's signed-in session can actually reach.
+   *
+   * Distinct from `supported`, which is what this device knows how to drive.
+   * A driver that can create work orders says so either way; whether *this*
+   * login may is a question only the provider can answer.
+   */
+  async discoverCapabilities({ provider } = {}) {
+    const driver = driverFor(provider);
+    if (!driver) return { available: [], error: NO_DRIVER };
+    return driver.discoverCapabilities({ window: () => sessionWindow(provider) });
+  },
+
+  async sessionStatus({ provider } = {}) {
     const driver = driverFor(provider);
     if (!driver) return { ready: false, session: "BLOCKED", reason: NO_DRIVER };
-    return driver.preflight({ window: () => sessionWindow(provider) });
+    return driver.sessionStatus({ window: () => sessionWindow(provider) });
   },
 
   /**
@@ -112,13 +125,13 @@ const pms = {
     return driver.healthCheck({ window: () => sessionWindow(provider) });
   },
 
-  async findExisting({ provider, action, payload } = {}) {
+  async reconcile({ provider, action, payload } = {}) {
     const driver = driverFor(provider);
     // Throws rather than answering "none found". A duplicate check that did not
     // happen must never look like one that found nothing, or the first retry
     // after a lost outcome creates a second record.
     if (!driver) throw new Error(NO_DRIVER);
-    return driver.findExisting({ action, payload, window: () => sessionWindow(provider) });
+    return driver.reconcile({ action, payload, window: () => sessionWindow(provider) });
   },
 
   async execute({ provider, action, steps, payload } = {}) {

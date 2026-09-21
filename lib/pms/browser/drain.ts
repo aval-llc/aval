@@ -31,7 +31,7 @@ import { pmsActionFlows, pmsWriteQueue } from "@/db/postgres/schema";
 import { resolveCapability } from "../capability.ts";
 import type { PmsAction } from "../types.ts";
 import {
-  browserAdapter, UNREPLAYABLE,
+  browserAdapter, driverSupports, UNREPLAYABLE,
   type BrowserContext, type ExecutionResult, type ProviderSessionState, type VerificationResult,
 } from "./adapter.ts";
 import { flowDigest, parseFlowSteps, type FlowStep } from "./steps.ts";
@@ -550,7 +550,7 @@ export async function runInstruction(
   ctx: BrowserContext,
 ): Promise<RunnerReport> {
   const adapter = browserAdapter(instruction.provider);
-  if (!adapter || !adapter.supports(instruction.action)) {
+  if (!adapter || !driverSupports(adapter, instruction.action)) {
     return {
       queueId: instruction.queueId,
       kind: "not_ready",
@@ -561,11 +561,11 @@ export async function runInstruction(
 
   // The session is the customer's own. Where it has lapsed the runner may sign
   // back in; where the provider wants an authenticator code, a person has to.
-  let preflight = await adapter.preflight(ctx);
+  let preflight = await adapter.sessionStatus(ctx);
   if (!preflight.ready && !UNREPLAYABLE.has(preflight.session)) {
     const recovery = await adapter.recoverSession(ctx);
     preflight = recovery.recovered
-      ? await adapter.preflight(ctx)
+      ? await adapter.sessionStatus(ctx)
       : { ready: false, session: recovery.session, reason: recovery.reason };
   }
   if (!preflight.ready) {
@@ -577,7 +577,7 @@ export async function runInstruction(
   // work order. An adapter that cannot look throws, and a throw defers rather
   // than proceeding blind.
   try {
-    const existing = await adapter.findExisting(instruction.action, instruction.payload, ctx);
+    const existing = await adapter.reconcile(instruction.action, instruction.payload, ctx);
     if (existing) {
       return {
         queueId: instruction.queueId,
