@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { integrationConnections, pmsActionFlows, pmsWriteQueue } from "../../db/postgres/schema.ts";
 import { executePmsWrite } from "../../lib/pms/execute.ts";
-import { activateFlow, recordFlow } from "../../lib/pms/flows.ts";
+import { promoteFlow, recordFlow } from "../../lib/pms/flows.ts";
 import { resolveCapability } from "../../lib/pms/capability.ts";
 import { BrowserSimulator } from "../../lib/pms/browser/simulator.ts";
 import { clearBrowserAdapters, registerBrowserAdapter } from "../../lib/pms/browser/adapter.ts";
@@ -93,7 +93,10 @@ export async function runBrowserWriteCases(t, { session, userA, userB, administr
   });
 
   await t.test("recording a flow does not make it replayable; approving it does", async () => {
-    const recorded = await run((s, org) => recordFlow(s, org, PROVIDER, ACTION, STEPS, userA));
+    const recorded = await run((s, org) => recordFlow(s, org, PROVIDER, ACTION, STEPS, userA,
+      // What has actually been proven: replayed end to end against a simulator
+      // that keeps its own state. Never AppFolio.
+      { certification: "simulator_e2e_tested" }));
     flowId = recorded.id;
     assert.equal(recorded.version, 1);
 
@@ -101,7 +104,12 @@ export async function runBrowserWriteCases(t, { session, userA, userB, administr
     // deliberately different acts.
     assert.equal((await run((s, org) => resolveCapability(s, org, PROVIDER, ACTION))).state, "unlearned");
 
-    assert.equal(await run((s, org) => activateFlow(s, org, flowId)), true);
+    // A workflow reaches service through testing. It cannot go straight there.
+    const straight = await run((s, org) => promoteFlow(s, org, flowId, userA, "active"));
+    assert.equal(straight.ok, false, "a draft cannot be put into service directly");
+    await run((s, org) => promoteFlow(s, org, flowId, userA, "testing"));
+    const promoted = await run((s, org) => promoteFlow(s, org, flowId, userA, "active"));
+    assert.equal(promoted.ok, true, promoted.reason);
     const after = await run((s, org) => resolveCapability(s, org, PROVIDER, ACTION));
     assert.equal(after.state, "allow", "an approved flow is an executable path");
     assert.equal(after.mechanism, "ui");

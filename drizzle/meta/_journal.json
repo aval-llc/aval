@@ -323,6 +323,13 @@
       "when": 1789926191833,
       "tag": "0045_cool_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1789981325765,
+      "tag": "0046_happy_prowler",
+      "breakpoints": true
     }
   ]
 }

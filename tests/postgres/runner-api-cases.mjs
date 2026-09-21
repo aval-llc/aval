@@ -5,7 +5,7 @@ import { withVerifiedIdentityHeaders } from '../../lib/auth/request-identity.ts'
 import { integrationConnections, pmsWriteQueue } from '../../db/postgres/schema.ts';
 import { POST as runnerRoute } from '../../app/api/pms/runner/route.ts';
 import { executePmsWrite } from '../../lib/pms/execute.ts';
-import { activateFlow, recordFlow } from '../../lib/pms/flows.ts';
+import { promoteFlow, recordFlow } from '../../lib/pms/flows.ts';
 import { BrowserSimulator, DATABASE_SEARCH_SAVE } from '../../lib/pms/browser/simulator.ts';
 import { clearBrowserAdapters, registerBrowserAdapter } from '../../lib/pms/browser/adapter.ts';
 import { runInstruction } from '../../lib/pms/browser/drain.ts';
@@ -95,8 +95,9 @@ export async function runRunnerApiCases(t, { session, userA, userB, administrato
 
   // A new version for the other shape. The previous flow retires rather than
   // being overwritten, which is what makes a provider's UI change recoverable.
-  const flow = await run((s, organizationId) => recordFlow(s, organizationId, PROVIDER, ACTION, VOYAGER_STEPS, userA));
-  await run((s, organizationId) => activateFlow(s, organizationId, flow.id));
+  const flow = await run((s, organizationId) => recordFlow(s, organizationId, PROVIDER, ACTION, VOYAGER_STEPS, userA, { certification: 'simulator_e2e_tested' }));
+  await run((s, organizationId) => promoteFlow(s, organizationId, flow.id, userA, 'testing'));
+  await run((s, organizationId) => promoteFlow(s, organizationId, flow.id, userA, 'active'));
 
   const payload = { unit: '12C', description: 'No heat in the bedroom', database: 'live' };
   const enqueue = (key) => run((s, organizationId) => executePmsWrite(s, {

@@ -418,11 +418,10 @@ export const draftDocuments = pgTable(
     errorMessage: text("error_message"),
     sentTo: text("sent_to"),
     moduleLabel: text("module_label"),
-    personaId: text("persona_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
   },
-  (table) => [index("draft_documents_org_created_idx").on(table.organizationId, table.createdAt), index("draft_documents_org_persona_idx").on(table.organizationId, table.personaId, table.createdAt)],
+  (table) => [index("draft_documents_org_created_idx").on(table.organizationId, table.createdAt)],
 );
 
 // A structured, redacted workflow preference — never raw tenant/financial
@@ -1636,21 +1635,64 @@ export const pmsActionFlows = pgTable(
   "pms_action_flows",
   {
     id: text("id").primaryKey(),
-    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /**
+     * Null means a workflow Aval ships, which every workspace can use.
+     *
+     * The same shape as `expertise_profiles`, and for the same reason: driving
+     * AppFolio's work-order screen is Aval's problem to solve once, not a thing
+     * every customer should have to discover for themselves. A workspace may
+     * still hold its own version of a (provider, action) — `activeFlow` prefers
+     * it — which is how a customer with a non-standard configuration is served
+     * without forking the shipped one.
+     */
+    organizationId: text("organization_id").references(() => organizations.id),
     provider: text("provider").notNull(),
+    /** The canonical capability this workflow implements, e.g. maintenance.work_order.create. */
     action: text("action").notNull(),
     version: integer("version").notNull().default(1),
+    /** Which access mode this workflow drives. A `ui` flow is meaningless to an API connection. */
+    accessMode: text("access_mode").notNull().default("customer_desktop_session"),
     // Ordered, declarative steps — selectors and values, no executable code.
     // Reviewed on an approval card, so it has to be readable by a person.
     stepsJson: jsonText("steps_json").notNull(),
     // SHA-256 of stepsJson. An approval binds to this, so a flow edited after
     // approval fails to replay rather than running something unapproved.
     digest: text("digest").notNull(),
-    status: text("status").notNull().default("candidate"), // candidate | active | retired
+    /**
+     * draft | testing | active | degraded | disabled.
+     *
+     * Only `active` is replayable. `degraded` is the state a workflow falls
+     * into when the provider's screen has moved under it — distinct from
+     * `disabled`, because one is a thing that happened and the other is a
+     * decision somebody made.
+     */
+    status: text("status").notNull().default("draft"),
+    /** What the signed-in provider user must be able to do for this to work at all. */
+    requiredRole: text("required_role"),
+    /** low | medium | high | critical. Drives approval, not availability. */
+    riskClass: text("risk_class").notNull().default("medium"),
+    /** How the effect is proven: read_after_write | external_id_lookup | none. */
+    verificationStrategy: text("verification_strategy").notNull().default("read_after_write"),
+    /** How a repeat is recognised: external_id | field_match | none. */
+    reconciliationStrategy: text("reconciliation_strategy").notNull().default("field_match"),
+    /** What happens instead when this workflow cannot run: email | human_handoff | aval_native | none. */
+    fallback: text("fallback").notNull().default("human_handoff"),
+    /**
+     * How far this workflow has actually been proven, never how far we hope.
+     *
+     * unimplemented | unit_tested | simulator_e2e_tested |
+     * customer_authorized_ui_tested | sandbox_tested | live_provider_tested.
+     */
+    certification: text("certification").notNull().default("unimplemented"),
     learnedByUserId: text("learned_by_user_id"),
+    /** Who promoted it into service. Activation is an act with an author. */
+    promotedByUserId: text("promoted_by_user_id"),
+    promotedAt: timestamp("promoted_at", { withTimezone: true, mode: "date" }),
     lastReplayAt: timestamp("last_replay_at", { withTimezone: true, mode: "date" }),
     lastReplayOk: boolean("last_replay_ok"),
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    /** What is known to be wrong with it, for the surface that lists workflows. */
+    knownIssues: text("known_issues"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
   },

@@ -32,6 +32,7 @@ import { runBrowserWriteCases } from "./browser-write-cases.mjs";
 import { runRunnerApiCases } from "./runner-api-cases.mjs";
 import { runPmsJourneyCases } from "./pms-journey-cases.mjs";
 import { runPmsAdversarialCases } from "./pms-adversarial-cases.mjs";
+import { runWorkflowLifecycleCases } from "./workflow-lifecycle-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
 
 const url = process.env.AVAL_TEST_DATABASE_URL;
@@ -240,6 +241,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runBrowserWriteCases(t, { session, userA, userB, administrator });
     await runRunnerApiCases(t, { session, userA, userB, administrator, config });
     await runPmsJourneyCases(t, { session, administrator, propertyId, config });
+    await runWorkflowLifecycleCases(t, { session, userA, userB });
     await runPmsAdversarialCases(t, { session, userA, userB, administrator, config });
     await runNoPmsCases(t, { session, userA });
     await runEmployeeApiCases(t, { session, userA, userB, config });

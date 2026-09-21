@@ -45,11 +45,13 @@ export async function runPmsAdversarialCases(t, { session, userA, userB, adminis
       [queueId, orgB, `adversarial-${queueId}`],
     );
     await administrator.query(
+      // An active workflow names its promoter — the database insists, which is
+      // why this fixture has to as well.
       `INSERT INTO public.pms_action_flows
          (id, organization_id, provider, action, version, steps_json, digest, status,
-          consecutive_failures, created_at, updated_at)
-       VALUES ($1,$2,'appfolio','maintenance.work_order.create',99,'[]','deadbeef','active',0,now(),now())`,
-      [flowId, orgB],
+          promoted_by_user_id, promoted_at, consecutive_failures, created_at, updated_at)
+       VALUES ($1,$2,'appfolio','maintenance.work_order.create',99,'[]','deadbeef','active',$3,now(),0,now(),now())`,
+      [flowId, orgB, userB],
     );
 
     // Org A asks for org B's rows by their exact primary keys. Guessing the id

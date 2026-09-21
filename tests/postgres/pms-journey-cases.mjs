@@ -14,7 +14,7 @@ import { getTool } from '../../lib/agents/registry.ts';
 import { payloadHash } from '../../lib/agents/canonical-payload.ts';
 import { resolveCapability } from '../../lib/pms/capability.ts';
 import { discoverGrants } from '../../lib/pms/grants.ts';
-import { activateFlow, recordFlow } from '../../lib/pms/flows.ts';
+import { promoteFlow, recordFlow } from '../../lib/pms/flows.ts';
 import { BrowserSimulator } from '../../lib/pms/browser/simulator.ts';
 import { clearBrowserAdapters, registerBrowserAdapter } from '../../lib/pms/browser/adapter.ts';
 import { runInstruction } from '../../lib/pms/browser/drain.ts';
@@ -141,8 +141,9 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
       [randomUUID(), org, PROVIDER, ACTION, customer],
     );
 
-    const recorded = await run((s, o) => recordFlow(s, o, PROVIDER, ACTION, STEPS, customer));
-    await run((s, o) => activateFlow(s, o, recorded.id));
+    const recorded = await run((s, o) => recordFlow(s, o, PROVIDER, ACTION, STEPS, customer, { certification: 'simulator_e2e_tested' }));
+    await run((s, o) => promoteFlow(s, o, recorded.id, customer, 'testing'));
+  await run((s, o) => promoteFlow(s, o, recorded.id, customer, 'active'));
 
     const ready = await run((s, o) => resolveCapability(s, o, PROVIDER, ACTION));
     assert.equal(ready.state, 'allow');
