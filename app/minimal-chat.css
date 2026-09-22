@@ -1,23 +1,31 @@
-.aval-minimal { --chat-radius: 26px; }
-.aval-inline-chat { position: fixed; z-index: 95; right: 24px; bottom: 24px; width: min(560px, calc(100vw - 40px)); height: min(700px, calc(100dvh - 70px)); display: flex; flex-direction: column; border: 0; color: var(--ink); background: transparent; padding: 0; isolation: isolate; pointer-events: none; }
+/* Half the footprint it had. The launcher orb is deliberately untouched —
+   it is a separate 64px control and the complaint was about the panel that
+   opens from it, not the thing you press.
+
+   Type and controls come down by roughly a quarter rather than by half: a
+   panel at half size with the old 18px welcome and 62px composer reads as a
+   large chat squeezed into a small box, and halving text too would put it
+   under 10px, which is not a size anybody reads. */
+.aval-minimal { --chat-radius: 20px; }
+.aval-inline-chat { position: fixed; z-index: 95; right: 24px; bottom: 24px; width: min(280px, calc(100vw - 32px)); height: min(350px, calc(100dvh - 70px)); display: flex; flex-direction: column; border: 0; color: var(--ink); background: transparent; padding: 0; isolation: isolate; pointer-events: none; }
 .aval-inline-chat > * { pointer-events: auto; }
 .aval-inline-chat[hidden] { display: none; }
 html:has(.aval-inline-chat[data-detached="true"]), body.aval-chat-popout:has(.aval-inline-chat[data-detached="true"]), #aval-chat-window:has(.aval-inline-chat[data-detached="true"]) { background: transparent !important; }
-.aval-inline-chat[data-expanded="true"] { width: min(900px, calc(100vw - 60px)); height: calc(100dvh - 130px); }
+.aval-inline-chat[data-expanded="true"] { width: min(450px, calc(100vw - 48px)); height: min(520px, calc(100dvh - 130px)); }
 .aval-inline-chat[data-detached="true"] { position: absolute; inset: 0; width: 100%; height: 100%; padding: 38px 18px 12px; background: transparent; }
 .aval-inline-chat:has(.aval-inline-stream[data-empty="true"]) { height: auto; }
-.aval-inline-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 36px; color: var(--muted); }
+.aval-inline-controls { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-height: 30px; color: var(--muted); }
 .aval-inline-controls > span { display: none; }
-.aval-inline-controls button, .aval-inline-context button { display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); width: 30px; height: 30px; border-radius: 50%; cursor: pointer; }
+.aval-inline-controls button, .aval-inline-context button { display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); width: 26px; height: 26px; border-radius: 50%; cursor: pointer; }
 .aval-inline-controls button:hover { background: var(--surface-sunken); color: var(--ink); }
-.aval-inline-stream { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 8px 28px 4px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
-.aval-inline-welcome { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
-.aval-inline-welcome p { font-size: 18px; font-weight: 400; line-height: 1.5; color: var(--muted); margin: 0; max-width: 350px; min-height: 54px; }
+.aval-inline-stream { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 6px 18px 3px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.aval-inline-welcome { display: flex; align-items: center; gap: 9px; padding: 6px 0; }
+.aval-inline-welcome p { font-size: 14px; font-weight: 400; line-height: 1.45; color: var(--muted); margin: 0; max-width: 200px; min-height: 40px; }
 .aval-greeting-static { display: none; }
-.aval-inline-message { font-size: 14px; line-height: 1.65; margin: 0 0 25px; overflow-wrap: anywhere; }
-.aval-inline-message.user { margin-left: auto; max-width: 85%; width: fit-content; padding: 9px 15px; border-radius: 20px 20px 5px 20px; background: var(--surface-sunken); }
+.aval-inline-message { font-size: 13px; line-height: 1.6; margin: 0 0 18px; overflow-wrap: anywhere; }
+.aval-inline-message.user { margin-left: auto; max-width: 85%; width: fit-content; padding: 7px 11px; border-radius: 16px 16px 4px 16px; background: var(--surface-sunken); }
 .aval-inline-message > p { margin: 0; white-space: pre-wrap; }
-.aval-inline-answer > strong { display: block; font-size: 15px; font-weight: 550; margin-bottom: 9px; }
+.aval-inline-answer > strong { display: block; font-size: 13px; font-weight: 550; margin-bottom: 7px; }
 .aval-inline-answer .markdown-preview { padding: 0; border: 0; background: none; }
 .aval-inline-bottom { flex: none; padding-top: 8px; background: transparent; position: relative; }
 .aval-composer-beam, .aval-voice-beam { width: 100%; border-radius: var(--chat-radius); }
@@ -25,22 +33,25 @@ html:has(.aval-inline-chat[data-detached="true"]), body.aval-chat-popout:has(.av
 .aval-composer-effects::before { content: ''; position: absolute; pointer-events: none; inset: 0; border-radius: var(--chat-radius); background: radial-gradient(ellipse at 35% 115%, #68c8d32b, transparent 35%), radial-gradient(ellipse at 65% 115%, #da88d938, transparent 40%), radial-gradient(ellipse at 85% 115%, #e7b67724, transparent 30%); }
 .aval-composer-decoration { position: absolute; inset: 0; pointer-events: none; border-radius: var(--chat-radius); overflow: hidden; }
 .aval-composer-decoration > div, .aval-composer-decoration .aval-voice-beam, .aval-composer-effect-fill { height: 100%; }
-.aval-minimal-composer { position: relative; border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); border-radius: var(--chat-radius); background: color-mix(in srgb, var(--surface-raised) 38%, transparent); backdrop-filter: blur(24px) saturate(135%); -webkit-backdrop-filter: blur(24px) saturate(135%); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 4%, transparent), 0 4px 20px #00000005; padding: 18px 14px 12px; }
-.aval-minimal-composer textarea { display: block; resize: none; width: 100%; min-height: 62px; max-height: 160px; background: transparent; color: var(--ink); border: 0; outline: 0; box-shadow: none; padding: 0 4px 10px; font: inherit; font-size: 15px; line-height: 1.55; }
+/* Surface and blur come from the workspace's own chat settings. The slider
+   used to move a number nothing read; these two custom properties are what
+   make it change the thing in front of you. */
+.aval-minimal-composer { position: relative; border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); border-radius: var(--chat-radius); background: color-mix(in srgb, var(--surface-raised) var(--chat-surface, 38%), transparent); backdrop-filter: blur(var(--chat-blur, 24px)) saturate(135%); -webkit-backdrop-filter: blur(var(--chat-blur, 24px)) saturate(135%); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 4%, transparent), 0 4px 20px #00000005; padding: 12px 10px 9px; }
+.aval-minimal-composer textarea { display: block; resize: none; width: 100%; min-height: 42px; max-height: 110px; background: transparent; color: var(--ink); border: 0; outline: 0; box-shadow: none; padding: 0 3px 7px; font: inherit; font-size: 13px; line-height: 1.5; }
 .aval-minimal-composer textarea::placeholder { color: var(--quiet); }
 .aval-minimal-composer textarea:focus, .aval-minimal-composer textarea:focus-visible { outline: none !important; border: 0; box-shadow: none !important; }
 .aval-minimal-composer:focus-within { border-color: color-mix(in srgb, var(--ink) 22%, transparent); }
-.aval-minimal-toolbar { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.aval-minimal-toolbar button, .aval-minimal-mode { flex: none; height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); border-radius: 22px; color: var(--muted); background: color-mix(in srgb, var(--surface-soft) 40%, transparent); cursor: pointer; }
+.aval-minimal-toolbar { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.aval-minimal-toolbar button, .aval-minimal-mode { flex: none; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); border-radius: 18px; color: var(--muted); background: color-mix(in srgb, var(--surface-soft) 40%, transparent); cursor: pointer; }
 .aval-minimal-toolbar button:hover { color: var(--ink); background: var(--surface-sunken); }
 .aval-minimal-toolbar button:disabled { opacity: .4; cursor: default; }
-.aval-minimal-agent { padding: 0 10px; max-width: 150px; min-width: 0; font-size: 12px; }
+.aval-minimal-agent { padding: 0 8px; max-width: 108px; min-width: 0; font-size: 11px; }
 .aval-minimal-agent span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.aval-minimal-mode { position: relative; padding-right: 9px; gap: 0; font-size: 12px; }
-.aval-minimal-mode select { appearance: none; border: 0; color: inherit; background: transparent; padding: 0 3px 0 10px; font: inherit; max-width: 105px; cursor: pointer; }
-.aval-minimal-toolbar .aval-minimal-mic { width: 36px; margin-left: auto; }
+.aval-minimal-mode { position: relative; padding-right: 7px; gap: 0; font-size: 11px; }
+.aval-minimal-mode select { appearance: none; border: 0; color: inherit; background: transparent; padding: 0 2px 0 8px; font: inherit; max-width: 78px; cursor: pointer; }
+.aval-minimal-toolbar .aval-minimal-mic { width: 30px; margin-left: auto; }
 .aval-minimal-mic[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
-.aval-minimal-toolbar .aval-minimal-send { width: 36px; color: var(--inverse-ink); background: var(--ink); }
+.aval-minimal-toolbar .aval-minimal-send { width: 30px; color: var(--inverse-ink); background: var(--ink); }
 .aval-inline-hint { min-height: 36px; padding: 9px 8px 0; font-size: 10px; line-height: 1.5; color: var(--quiet); }
 .aval-thinking-orb { display: inline-flex; flex: none; vertical-align: middle; }
 .aval-orb-launcher { position: fixed; bottom: 20px; right: 24px; z-index: 96; width: 64px; height: 64px; display: grid; place-items: center; border: 0; padding: 0; border-radius: 50%; background: transparent; cursor: pointer; color: var(--ink); }

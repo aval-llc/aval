@@ -1,11 +1,12 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUp, ChevronDown, ExternalLink, Maximize2, Minimize2, Mic, Square, X, FileText, View, MessageCircle, Briefcase } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useExperience } from './experience';
 import { useAppearance } from './appearance-provider';
 import { useChatPanel } from './use-chat-panel';
+import { DEFAULT_CHAT_TRANSPARENCY } from '@/lib/appearance';
 import { useOnboarding } from './preference-context';
 import { useDesktopCodex } from './desktop-codex';
 import { AgentTaskConversation } from './agent-task-conversation';
@@ -160,7 +161,16 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
   const streamRef = useRef<HTMLDivElement>(null);
   const followScroll = useRef(true);
   const openRef = useRef(open); useEffect(() => { openRef.current = open; }, [open]);
-  const voice = useAvalVoice(text => { setInput(current => [current.trim(), text].filter(Boolean).join(' ')); inputRef.current?.focus(); });
+  // Whatever was already typed when dictation began, captured once at the
+  // start. The recognizer sends the whole utterance so far on every update, so
+  // each one replaces the last rather than appending — otherwise speaking a
+  // sentence would leave every half-heard draft of it in the box. Keeping the
+  // base separate is what preserves words the person typed themselves.
+  const dictationBase = useRef('');
+  const voice = useAvalVoice(text => {
+    setInput([dictationBase.current, text].filter(Boolean).join(' '));
+    inputRef.current?.focus();
+  });
   const voiceRef = useRef(voice); useEffect(() => { voiceRef.current = voice; }, [voice]);
   const activeEmployee = employees.find(e => e.id === employeeId);
   const actorName = activeEmployee?.name ?? t('AvalAssistant.askAval');
@@ -292,7 +302,13 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
     onCreateDraft({ title: draftTitle.trim(), instructions: input.trim(), format: draftFormat, personaId: 'general', moduleLabel: module?.label, moduleSnapshot: module?.snapshot });
     setDraft(false); setInput(''); setDraftTitle(''); notify(t('AvalAssistant.draftStartedInTasks'));
   };
-  const content = <section ref={panelRef} className="aval-inline-chat" role="dialog" aria-label={t('AvalAssistant.askAval')} data-expanded={expanded} data-detached={!!popupRoot} hidden={!open}>
+  // Style and opacity, applied to the module itself rather than only to the
+  // detached window. They were already stored and already offered in settings;
+  // the inline chat simply never read them, which is why moving the slider
+  // appeared to do nothing.
+  const chatStyle = appearance.chatWindowBackground ?? 'white';
+  const chatOpacity = 100 - (appearance.chatWindowTransparency ?? DEFAULT_CHAT_TRANSPARENCY);
+  const content = <section ref={panelRef} className="aval-inline-chat" role="dialog" aria-label={t('AvalAssistant.askAval')} data-expanded={expanded} data-detached={!!popupRoot} data-chat-style={chatStyle} style={{ '--chat-surface': `${chatOpacity}%`, '--chat-blur': chatStyle === 'glass' ? '24px' : '0px' } as CSSProperties} hidden={!open}>
     <div className="aval-inline-controls">
       <span>{currentContext}</span>
       <button type="button" aria-label={t(expanded ? 'ChatPolish.compact' : 'ChatPolish.expand')} onClick={panel.toggleExpanded}>{expanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}</button>
@@ -341,7 +357,7 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
             ]}/>
             <button className="aval-minimal-agent" type="button" disabled={busy || hasVoice} aria-expanded={picker} aria-label={t('ChatPanel.agentLabel', { agent: actorName })} onClick={() => setPicker(!picker)}><span>{actorName}</span><ChevronDown size={13}/></button>
             <label className="aval-minimal-mode"><span className="sr-only">{m('autonomy')}</span><select value={mode} disabled={busy || hasVoice || modeBusy || preferences?.busy || !preferences} onChange={e => void setMode(e.target.value as AutonomyMode)}>{(['supervised', 'assisted', 'autonomous'] as const).map(value => <option value={value} key={value}>{t('Onboarding.options.' + value)}</option>)}</select><ChevronDown size={13}/></label>
-            <button className="aval-minimal-mic" type="button" aria-label={voice.state === 'live' ? m('stopVoice') : m('startVoice')} aria-pressed={voice.state === 'live'} disabled={busy || voice.processing || voice.state === 'requesting'} onClick={() => voice.state === 'live' ? voice.stop() : void voice.start()}>{voice.state === 'live' ? <Square size={16}/> : <Mic size={18}/>}</button>
+            <button className="aval-minimal-mic" type="button" aria-label={voice.state === 'live' ? m('stopVoice') : m('startVoice')} aria-pressed={voice.state === 'live'} disabled={busy || voice.processing || voice.state === 'requesting'} onClick={() => { if (voice.state === 'live') { voice.stop(); return; } dictationBase.current = input.trim(); void voice.start(); }}>{voice.state === 'live' ? <Square size={16}/> : <Mic size={18}/>}</button>
             <button className="aval-minimal-send" type="submit" disabled={!input.trim() || busy || hasVoice || !loaded || modeBusy || preferences?.busy} aria-label={t('AvalAssistant.sendMessage')}><ArrowUp size={18}/></button>
           </div>
         </form>
