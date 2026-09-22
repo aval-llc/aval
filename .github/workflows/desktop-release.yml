@@ -162,20 +162,21 @@ jobs:
           Target: https://app.aval.llc. The matching Cloudflare
           deployment and authenticated production readiness check passed.
 
-          Includes the movable native chat title bar, theme-aware frosted glass,
-          and the live 0–100% transparency slider in Settings → Preferences.
-          Text and controls remain opaque. Includes a bundled Codex runtime.
-          Fixes interactive ChatGPT answers timing out after Codex completed
-          the answer, by matching the turn lifecycle event's nested ID.
+          Replaces the Overview use tracker with Aval's personal widget board:
+          an attributed Unsplash wallpaper picker and movable, edge-snapping
+          glass cards for time, local weather, calendar, reminders, and
+          Spotify or Apple Music. Layout and preferences persist locally.
+          Includes a bundled Codex runtime.
 
           The current hosted DMG is signed with Developer ID, notarized by Apple,
           stapled, Gatekeeper-assessed, and accompanied by SHA256SUMS.
           CODESIGN.txt records the signing identity for this build.
 
-          Assets with \`-local-\` in their names are earlier local-server builds:
-          they target http://127.0.0.1:3010, require that server, and are ad-hoc
-          signed, not notarized. Their versioned checksum files remain available.
-          Other versioned assets are retained as historical downloads.
+          The separately labelled \`-local-server-widget-board-\` assets are the
+          matching local-development build. They target http://127.0.0.1:3010,
+          require that server, are ad-hoc signed, and are not notarized. Their
+          matching versioned checksum file is published beside them. Other
+          \`-local-\` and versioned assets are retained as historical downloads.
           EOF
 
           # Move the rolling tag without deleting earlier versioned downloads.

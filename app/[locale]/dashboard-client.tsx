@@ -21,7 +21,8 @@ import type { AuthMode } from "@/app/components/auth-gate";
 import { useDraftJobs } from "@/app/components/ask-aval-tasks";
 import { AppearanceProvider } from "@/app/components/appearance-provider";
 import { ProfileAvatar } from "@/app/components/character-avatar";
-import { UsageGrid, UsageRecorder } from "@/app/components/usage-activity";
+import { UsageRecorder } from "@/app/components/usage-activity";
+import { WidgetBoard } from "@/app/components/widget-board";
 import { ConnectedInbox } from "@/app/components/connected-inbox";
 import { SettingsModule } from "@/app/components/settings-module";
 import { BrandMark } from "@/app/components/brand-mark";
@@ -163,7 +164,7 @@ function OverviewHero({ displayName, t }: { displayName: string; t: T }) {
     return () => { cancelled = true; };
   }, []);
 
-  return <><UsageGrid/><section className="overview-hero" data-reveal>
+  return <><WidgetBoard/><section className="overview-hero" data-reveal>
     <div className="overview-hero-copy">
       <p className="eyebrow">{t("Overview.heroEyebrow")}</p>
       <h1>{t("Overview.heroWelcome", { name: firstName })}</h1>
