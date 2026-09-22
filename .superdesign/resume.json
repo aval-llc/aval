@@ -203,6 +203,50 @@
         }
       },
       "updatedAt": "2026-09-11T03:31:16.326844+00:00"
+    },
+    "setup:living-configuration": {
+      "targetKind": "existing-ui",
+      "projectId": "3fcdd06f-df82-4233-9ce0-48f3a35aa0ae",
+      "baselineDraftId": "784a1c15-b3c3-43ee-8f2a-d92ea08757d6",
+      "activeDraftId": "8a4eab30-e5f2-41d3-a3ff-87dabb925782",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "d74c233b-0d1a-4f1c-9d57-c202877a62be",
+        "1394a65e-a44b-4ded-8668-d24f7410c632",
+        "eebdf672-517e-4624-a34d-263089669c7c"
+      ],
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/init/theme.md:1:22",
+        "app/components/setup-workspace.tsx",
+        "app/setup-graph.css",
+        "app/components/employee-directory.tsx",
+        "app/components/agent-avatar/AgentAvatar.tsx",
+        "app/components/agent-avatar/personas.ts"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "8585099fe271d3e94470a636384cebb291d4302c8e5fa17b41c5990bdd9dd220",
+        ".superdesign/init/theme.md": "f7a29994f6e9fdff8fc0bdab137d5db9f62ebebd245924d9c999bb081c4914e3",
+        "app/components/setup-workspace.tsx": "2f71b17597efcb04bf1777adc777648ede480123d95a287de9ea756bbc828df2",
+        "app/setup-graph.css": "82a5cfbcacb950d784d491ce23473bdae53dd10f2f867d78e62cf78a6ca792c4",
+        "app/components/employee-directory.tsx": "89701f1c418fb7252701a682aa23fa22886a3fac7779b6c41c756e22cc807b50",
+        "app/components/agent-avatar/AgentAvatar.tsx": "14f53c69df19680c1e8ab1f6da9ec8f98c4eecba8fc257c9bcf4895e61b07d75",
+        "app/components/agent-avatar/personas.ts": "9984559de27c256ece47090866a46e602bda6ecae36e499863bedd581ed76560"
+      },
+      "components": [],
+      "drafts": {
+        "784a1c15-b3c3-43ee-8f2a-d92ea08757d6": {
+          "title": "Aval Workspace Setup Baseline",
+          "visualDirection": "Faithful current Setup reproduction",
+          "currentVersion": 1
+        },
+        "8a4eab30-e5f2-41d3-a3ff-87dabb925782": {
+          "title": "Aval Living Setup — Overview",
+          "visualDirection": "Two-tab living configuration workspace with central orb, inline policy, drawers, active rails, and character library",
+          "currentVersion": 1
+        }
+      },
+      "updatedAt": "2026-09-22T08:30:21.941Z"
     }
   }
 }

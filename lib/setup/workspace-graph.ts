@@ -22,7 +22,14 @@ export async function buildEffectiveWorkspaceGraph(session: DbSession, organizat
   const [workspace] = await session.db.select({id:organizations.id,name:organizations.name}).from(organizations).where(eq(organizations.id,organizationId));
   const connections = await session.db.select({id:integrationConnections.id,provider:integrationConnections.provider,category:integrationConnections.category,status:integrationConnections.status,authMode:integrationConnections.authMode,account:integrationConnections.externalAccountName,lastSyncAt:integrationConnections.lastSyncAt}).from(integrationConnections).where(eq(integrationConnections.organizationId,organizationId));
   const enrichedConnections = await Promise.all(connections.map(async c => ({...c, label:integrationCatalog.find(p=>p.id===c.provider)?.title ?? c.provider, reportingCapabilities:c.status==='connected' ? PROVIDER_DASHBOARD_CAPABILITIES[c.provider] ?? [] : [], matrix:PMS_PROVIDERS.some(p=>p.id===c.provider) ? Object.fromEntries(await resolveMatrix(session,organizationId,c.provider)) : null})));
-  const employees = await listEmployees(session,organizationId,{search:query.search,offset:query.offset,limit:24});
+  const employees: Awaited<ReturnType<typeof listEmployees>> = [];
+  let employeeOffset=query.offset ?? 0;
+  while(true){
+    const page=await listEmployees(session,organizationId,{search:query.search,offset:employeeOffset,limit:200});
+    employees.push(...page);
+    if(page.length<200)break;
+    employeeOffset+=page.length;
+  }
   const [{total}] = await session.db.select({total:count()}).from(aiEmployees).where(eq(aiEmployees.organizationId,organizationId));
   const humans = await listMembers(session,organizationId);
   const memory = await listPreferences(session,organizationId);
