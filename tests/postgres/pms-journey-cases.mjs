@@ -6,6 +6,7 @@ import { seedWorkspaceEmployees, assignEmployeeForWork } from '../../lib/agents/
 import { intakeEvent } from '../../lib/agents/intake.ts';
 import { createTask, getTask } from '../../lib/agents/tasks.ts';
 import { listEmployees } from '../../lib/agents/employees.ts';
+import { recentAuditEntries } from '../../lib/audit/log.ts';
 import { pmsToolAvailability } from '../../lib/pms/assembly.ts';
 import { executePmsWrite } from '../../lib/pms/execute.ts';
 import { executeApprovedTool } from '../../lib/agents/executor.ts';
@@ -14,7 +15,7 @@ import { getTool } from '../../lib/agents/registry.ts';
 import { payloadHash } from '../../lib/agents/canonical-payload.ts';
 import { resolveCapability } from '../../lib/pms/capability.ts';
 import { discoverGrants } from '../../lib/pms/grants.ts';
-import { promoteFlow, recordFlow } from '../../lib/pms/flows.ts';
+import { listWorkflows, promoteFlow, recordFlow } from '../../lib/pms/flows.ts';
 import { BrowserSimulator } from '../../lib/pms/browser/simulator.ts';
 import { clearBrowserAdapters, registerBrowserAdapter } from '../../lib/pms/browser/adapter.ts';
 import { runInstruction } from '../../lib/pms/browser/drain.ts';
@@ -143,7 +144,7 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
 
     const recorded = await run((s, o) => recordFlow(s, o, PROVIDER, ACTION, STEPS, customer, { certification: 'simulator_e2e_tested' }));
     await run((s, o) => promoteFlow(s, o, recorded.id, customer, 'testing'));
-  await run((s, o) => promoteFlow(s, o, recorded.id, customer, 'active'));
+    await run((s, o) => promoteFlow(s, o, recorded.id, customer, 'active'));
 
     const ready = await run((s, o) => resolveCapability(s, o, PROVIDER, ACTION));
     assert.equal(ready.state, 'allow');
@@ -241,7 +242,71 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
       `a created work order does not finish the objective (was ${current.status})`);
   });
 
-  await t.test('10. disconnecting the PMS takes the tools, not the employee or the work', async () => {
+  await t.test('10. the provider moves its screen, and the objective survives it', async () => {
+    // The tail the directive asks for: a deterministic, non-transient failure
+    // introduced into a path that was working a moment ago. AppFolio renames
+    // the button in a release; the recorded workflow no longer matches.
+    provider.reset();
+    provider.signIn();
+    provider.faults.renameLabels = { 'Create Work Order': 'Submit Request' };
+
+    await run((s, o) => executePmsWrite(s, {
+      organizationId: o, providerId: PROVIDER, toolName: 'create_work_order',
+      payload: { unit: '12B', description: 'Second attempt at the heating failure' },
+      idempotencyKey: `broken-${randomUUID()}`, personaId: 'maintenance', approvalId: randomUUID(),
+    }));
+
+    const outcome = await runnerPass('the-customers-laptop');
+    assert.equal(outcome.status, 'failed', JSON.stringify(outcome));
+    assert.equal(outcome.session, 'PROVIDER_CHANGED', 'told apart from a session that lapsed');
+    assert.equal(outcome.needsHuman, true, 'a changed provider is a person problem, not a retry');
+    assert.equal(provider.external.length, 0, 'and nothing was created by guessing');
+
+    // The trail says which kind of failure it was, so nobody has to infer it
+    // from a reason string.
+    const entries = await run((s, o) => recentAuditEntries(s, o, 40));
+    const kinds = new Set(entries.map((entry) => entry.kind));
+    assert.ok(kinds.has('provider_flow_broken'), 'recorded as a broken workflow');
+    assert.ok(kinds.has('provider_human_handoff'), 'and as a handoff to a person');
+  });
+
+  await t.test('11. the workflow is marked degraded rather than quietly left live', async () => {
+    // A workflow that stopped working is a thing that happened, not a decision
+    // somebody made. Degraded is recoverable; it goes back for work rather
+    // than straight back into service.
+    const [live] = await run((s, o) => listWorkflows(s, o, PROVIDER))
+      .then((flows) => flows.filter((flow) => flow.status === 'active' && !flow.shipped));
+    assert.ok(live, 'the workspace had a live workflow');
+
+    const degraded = await run((s, o) => promoteFlow(s, o, live.id, customer, 'degraded'));
+    assert.equal(degraded.ok, true);
+
+    const straightBack = await run((s, o) => promoteFlow(s, o, live.id, customer, 'active'));
+    assert.equal(straightBack.ok, false, 'it does not return to service on somebody deciding it is fine');
+  });
+
+  await t.test('12. with no workflow able to run, the objective continues another way', async () => {
+    // The rule the whole fallback design exists for: an employee must not fail
+    // because one provider action became unavailable. The capability resolves
+    // away from `allow`, the work is still open, and the workflow says in
+    // words what happens instead.
+    const resolution = await run((s, o) => resolveCapability(s, o, PROVIDER, ACTION));
+    assert.notEqual(resolution.state, 'allow', 'the provider path is not available');
+
+    const objective = await run((s, o) => getTask(s, o, task.id));
+    assert.ok(!['COMPLETED', 'FAILED', 'CANCELLED'].includes(objective.status),
+      `losing a provider path does not fail the resident objective (was ${objective.status})`);
+
+    const repair = await run((s, o) => getTask(s, o, child.id));
+    assert.ok(repair, 'and the delegated work is still there to be finished another way');
+
+    const workflows = await run((s, o) => listWorkflows(s, o, PROVIDER));
+    const fallbacks = new Set(workflows.map((flow) => flow.fallback));
+    assert.ok(fallbacks.size > 0 && !fallbacks.has(undefined),
+      'every workflow says what happens instead when it cannot run');
+  });
+
+  await t.test('13. disconnecting the PMS takes the tools, not the employee or the work', async () => {
     // The inverse of step 2, and the one that decides whether a PMS is a
     // capability or an identity. Removing it must leave the employee, the
     // objective and everything Aval can do without a provider untouched.
@@ -266,7 +331,7 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
     assert.ok(repair, 'no orphaned task');
   });
 
-  await t.test('11. work queued before the disconnect cannot execute after it', async () => {
+  await t.test('14. work queued before the disconnect cannot execute after it', async () => {
     // A revoked connection must reach the queue. Anything still waiting was
     // authorized under a connection that no longer exists.
     provider.reset();
