@@ -31,6 +31,20 @@ export const PORTRAIT_IDS = [
   "personality-23-quirky",
   "personality-24-studious",
 ] as const;
+/**
+ * People on your team, as opposed to the agents above. A separate collection
+ * rather than more portrait ids: these files are named without the
+ * `-animated` suffix and live in their own folder, and keeping the kinds apart
+ * means an id is only ever valid for the loader it was drawn for.
+ */
+export const TEAM_PORTRAIT_IDS = [
+  "01-joyful", "02-skeptical", "03-curious", "04-dreamy", "05-serious",
+  "06-cozy", "07-laughing", "08-studious", "09-shy", "10-playful",
+  "11-thoughtful", "12-winky", "13-bookish", "14-serene", "15-edgy",
+  "16-sleepy", "17-bubbly", "18-focused", "19-outdoorsy", "20-delighted",
+  "21-graceful", "22-energetic", "23-grounded", "24-artsy", "25-proud",
+  "26-yawning", "27-bright", "28-reserved", "29-inquisitive", "30-confident",
+] as const;
 /** Only the Aval brand mark remains selectable from the old character family. */
 export const CHARACTER_IDS = ["general"] as const;
 const LEGACY_CHARACTER_IDS = ["general", "financial", "brokerage", "real-estate", "market-research", "maintenance", "risk-analyst", "portfolio-outlook", "lease-review"] as const;
@@ -49,7 +63,7 @@ export function currentAvatar(avatar: AvatarSelection): AvatarSelection {
     : avatar;
 }
 export const BACKGROUNDS = { paper: "#ffffff", fog: "#e8e8ec", sky: "#dceaff", mint: "#dceee5", peach: "#ffe4d5", lilac: "#eae1f6" } as const;
-export type AvatarSelection = { kind: "portrait" | "character"; id: string; background: keyof typeof BACKGROUNDS };
+export type AvatarSelection = { kind: "portrait" | "character" | "team"; id: string; background: keyof typeof BACKGROUNDS };
 export type AvatarMotion = "system" | "animated" | "still";
 export type ChatWindowBackground = "white" | "glass";
 export const DEFAULT_CHAT_TRANSPARENCY = 20;
@@ -62,6 +76,7 @@ export function isAvatarSelection(value: unknown): value is AvatarSelection {
   const item = value as AvatarSelection;
   return Object.hasOwn(BACKGROUNDS, item.background) &&
     (item.kind === "portrait" ? (PORTRAIT_IDS as readonly string[]).includes(item.id)
+      : item.kind === "team" ? (TEAM_PORTRAIT_IDS as readonly string[]).includes(item.id)
       : item.kind === "character" && (LEGACY_CHARACTER_IDS as readonly string[]).includes(item.id));
 }
 
@@ -80,6 +95,8 @@ export function parseAppearance(value: unknown): AppearancePreferences | null {
 
 export function avatarSources(avatar: AvatarSelection): { animated: string; still: string } {
   avatar = currentAvatar(avatar);
-  const base = avatar.kind === "portrait" ? `/avatars/${avatar.id}-animated` : `/personas/${avatar.id}`;
+  const base = avatar.kind === "portrait" ? `/avatars/${avatar.id}-animated`
+    : avatar.kind === "team" ? `/avatars/team/${avatar.id}`
+    : `/personas/${avatar.id}`;
   return { animated: `${base}.webp`, still: `${base}.png` };
 }

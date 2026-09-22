@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, HalfMoon, SunLight, User } from "iconoir-react";
-import { BACKGROUNDS, CHARACTER_IDS, PORTRAIT_IDS, defaultAgentAvatar, currentAvatar, type AvatarSelection, type AvatarMotion } from "@/lib/appearance";
+import { BACKGROUNDS, CHARACTER_IDS, PORTRAIT_IDS, TEAM_PORTRAIT_IDS, defaultAgentAvatar, currentAvatar, type AvatarSelection, type AvatarMotion } from "@/lib/appearance";
 import { PERSONA_IDS, PERSONA_PRESETS } from "./agent-avatar/personas";
 import { useAppearance } from "./appearance-provider";
 import { CharacterAvatar, ProfileAvatar } from "./character-avatar";
@@ -14,7 +14,7 @@ export function AppearanceSettings({ displayName }: { displayName: string }) {
   const { theme, setTheme } = useExperience();
   const { appearance, saved, setAppearance, save, loading, saving, error, isGuest, reload } = useAppearance();
   const [target, setTarget] = useState("profile");
-  const [family, setFamily] = useState<"portrait" | "character">("portrait");
+  const [family, setFamily] = useState<AvatarSelection["kind"]>("portrait");
   const [customAgents, setCustomAgents] = useState<{ id: string; label: string }[]>([]);
   const dirty = JSON.stringify(appearance) !== JSON.stringify(saved);
   const savedSelection = target === "profile" ? appearance.profile : appearance.agents[target] ?? null;
@@ -89,13 +89,14 @@ export function AppearanceSettings({ displayName }: { displayName: string }) {
           <div className="avatar-library">
             <div className="avatar-library-heading"><div className="settings-choice-group" role="group" aria-label={t("Appearance.collection")}>
               <button type="button" aria-pressed={family === "portrait"} onClick={() => setFamily("portrait")}>{t("Appearance.portraits")} <span>{PORTRAIT_IDS.length}</span></button>
+              <button type="button" aria-pressed={family === "team"} onClick={() => setFamily("team")}>{t("Appearance.teamPortraits")} <span>{TEAM_PORTRAIT_IDS.length}</span></button>
               <button type="button" aria-pressed={family === "character"} onClick={() => setFamily("character")}>{t("Appearance.avalIcon")} <span>{CHARACTER_IDS.length}</span></button>
             </div></div>
             <div className="avatar-gallery" role="group" aria-label={t("Appearance.chooseAvatar")}>
-              {(family === "portrait" ? PORTRAIT_IDS : CHARACTER_IDS).map((id) => {
+              {(family === "portrait" ? PORTRAIT_IDS : family === "team" ? TEAM_PORTRAIT_IDS : CHARACTER_IDS).map((id) => {
                 const avatar: AvatarSelection = { kind: family, id, background: selected?.background ?? "paper" };
                 const active = effectiveAvatar?.id === id && effectiveAvatar.kind === family;
-                const label = t(`Appearance.${family === "portrait" ? "portraitsList" : "charactersList"}.${id}`);
+                const label = t(`Appearance.${family === "portrait" ? "portraitsList" : family === "team" ? "teamPortraitsList" : "charactersList"}.${id}`);
                 return <button type="button" key={id} className={`avatar-option ${active ? "is-selected" : ""}`} aria-pressed={active} aria-label={label} onClick={() => choose(avatar)}>
                   <span className="avatar-option-image"><CharacterAvatar avatar={avatar} size={72} label=""/>{active && <span className="avatar-check"><Check width={12} height={12}/></span>}</span>
                   <span>{label}</span>
