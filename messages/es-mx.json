@@ -1650,6 +1650,8 @@
     "connectedCount": "{count} conectadas",
     "browse": "Explorar",
     "connected": "Conectada",
+    "connect": "Conectar",
+    "reconnect": "Reconectar",
     "search": "Buscar integraciones",
     "introTitle": "Tus herramientas en un solo lugar",
     "introDescription": "Conecta contabilidad, sistemas inmobiliarios y conversaciones para que tu equipo trabaje con la misma información.",

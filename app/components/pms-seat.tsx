@@ -67,7 +67,10 @@ export function PmsSeat() {
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/pms/seat", { cache: "no-store", signal: controller.signal })
-      .then((response) => response.json() as Promise<SeatState>)
+      .then((response) => {
+        if (!response.ok) throw new Error(t("loadError"));
+        return response.json() as Promise<SeatState>;
+      })
       .then((data) => {
         setState(data);
         setProvider((current) => current || data.providers[0]?.id || "");
@@ -96,7 +99,9 @@ export function PmsSeat() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await response.json() as { error?: string; replacedProviderId?: string | null };
+      // Parsed before the status is judged so a refusal can explain itself,
+      // but a body that is not JSON must not become the error the person reads.
+      const data = await response.json().catch(() => ({})) as { error?: string; replacedProviderId?: string | null };
       if (!response.ok) throw new Error(data.error ?? t("saveError"));
       // A domain that changed provider changes how its mail is parsed, so it is
       // said out loud rather than left to be noticed later.

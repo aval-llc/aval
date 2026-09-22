@@ -1650,6 +1650,8 @@
     "connectedCount": "{count} connected",
     "browse": "Browse",
     "connected": "Connected",
+    "connect": "Connect",
+    "reconnect": "Reconnect",
     "search": "Search integrations",
     "introTitle": "Your tools, in one workspace",
     "introDescription": "Connect accounting, property systems, and conversations to keep your team working from the same information.",

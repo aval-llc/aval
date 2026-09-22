@@ -1164,162 +1164,164 @@ progress::-webkit-progress-value {
 .integrations-catalog {
   max-width: 1250px;
 }
+/* Narrower than elsewhere so a workspace with every category still shows its
+   tabs without scrolling them. */
 .integrations-catalog .enterprise-search {
-  width: 310px;
-}
-.catalog-intro {
-  display: flex;
-  align-items: center;
-  gap: 22px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 22px;
-  margin-bottom: 28px;
-  background: var(--surface-soft);
-}
-.catalog-intro h2 {
-  font-size: 1rem;
-  font-weight: 550;
-  margin: 0 0 6px;
-}
-.catalog-intro p {
-  color: var(--muted);
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  margin: 0;
-}
-.catalog-intro > svg {
-  margin-left: auto;
-  flex: none;
-  color: var(--muted);
-}
-.catalog-brand-strip {
-  display: grid;
-  grid-template-columns: repeat(3, 32px);
-  gap: 8px;
+  width: 260px;
   flex: none;
 }
-.catalog-brand-strip > * {
-  width: 32px !important;
-  height: 32px !important;
-  border-radius: 8px !important;
-}
-.catalog-layout {
-  display: grid;
-  grid-template-columns: 172px minmax(0, 1fr);
-  gap: 32px;
-}
-.catalog-categories {
-  display: grid;
-  align-content: start;
-  gap: 4px;
-}
-.catalog-categories button {
+/* A list, not a grid of cards: name, what it does, and the one thing to press.
+   The category rail became tabs across the top for the same reason the panels
+   above it went away — this page is opened to connect something, and every
+   control that is not that is in the way. */
+.catalog-toolbar {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-end;
   justify-content: space-between;
-  text-align: left;
-  padding: 10px;
-  font-size: 0.8125rem;
-  background: none;
-  border: 0;
-  border-radius: 8px;
-  color: var(--muted);
-}
-.catalog-categories button[aria-pressed="true"] {
-  background: var(--surface-soft);
-  color: var(--ink);
-  font-weight: 500;
-}
-.catalog-categories span {
-  color: var(--quiet);
-  font-size: 0.75rem;
-}
-.catalog-apps {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 28px;
-}
-.catalog-app {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-width: 0;
-  padding: 20px 8px;
-  border: 0;
+  gap: 16px;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.catalog-tabs {
+  display: flex;
+  /* Basis 0, not auto: with `auto` the tab row's content width decides whether
+     the bar wraps, and a workspace with enough categories pushed the search
+     onto a line of its own before the tabs had a chance to scroll. */
+  flex: 1 1 0;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.catalog-tabs::-webkit-scrollbar {
+  display: none;
+}
+.catalog-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
   border-radius: 0;
   background: none;
-  text-align: left;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  cursor: pointer;
 }
-.catalog-app:hover {
+.catalog-tabs button:hover {
+  color: var(--ink);
+}
+.catalog-tabs button[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 500;
+  border-bottom-color: var(--ink);
+}
+.catalog-tabs b {
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+.catalog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.catalog-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.catalog-row:hover {
   background: var(--surface-soft);
 }
-.catalog-app > .brand-mark {
-  width: 38px;
-  height: 38px;
+.catalog-row > .brand-mark {
+  width: 34px;
+  height: 34px;
   flex: none;
 }
-.catalog-app > svg {
-  margin-top: 4px;
-  flex: none;
-  color: var(--muted);
-}
-.catalog-app-copy {
+.catalog-row-copy {
   min-width: 0;
   flex: 1;
   display: grid;
-  gap: 6px;
+  gap: 2px;
 }
-.catalog-app-copy strong {
+.catalog-row-copy strong {
   font-size: 0.875rem;
   font-weight: 550;
 }
-.catalog-app-copy small {
+.catalog-row-copy small {
   color: var(--muted);
   font-size: 0.8125rem;
-  line-height: 1.55;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.catalog-state {
+/* The one dark control on the row. Connected is filled because it is a fact;
+   everything else is outlined because it is an invitation. */
+.catalog-row-action {
+  flex: none;
+  min-width: 104px;
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.catalog-row-action:hover {
+  background: var(--surface-sunken);
+}
+.catalog-row-action[data-state="connected"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--inverse-ink);
+}
+.catalog-row-action[data-state="connected"]:hover {
+  filter: brightness(1.25);
+}
+.catalog-row-action[data-state="attention"] {
+  border-color: color-mix(in srgb, var(--viz-amber) 55%, transparent);
+  color: var(--viz-amber);
+}
+.catalog-row-action[data-state="blocked"] {
   color: var(--quiet);
-  font-size: 0.75rem;
-}
-.catalog-state.connected {
-  color: var(--viz-green);
 }
 .catalog-footnote {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 28px 0;
+  margin: 24px 0;
   font-size: 0.75rem;
   line-height: 1.6;
   color: var(--muted);
 }
-@media (max-width: 1000px) {
-  .catalog-apps {
-    grid-template-columns: 1fr;
-  }
-}
 @media (max-width: 760px) {
-  .catalog-layout {
-    grid-template-columns: 1fr;
-    gap: 12px;
+  .catalog-toolbar {
+    align-items: stretch;
   }
-  .catalog-categories {
-    display: flex;
-    overflow: auto;
+  /* Below this the search has nothing left to take, so it takes a row. */
+  .catalog-tabs {
+    flex-basis: 100%;
   }
-  .catalog-categories button {
-    white-space: nowrap;
-    flex: none;
-  }
-  .catalog-intro {
+  .catalog-row {
     flex-wrap: wrap;
   }
-  .catalog-intro > svg {
-    display: none;
+  .catalog-row-copy {
+    flex-basis: calc(100% - 152px);
   }
   .integrations-catalog .enterprise-search {
     width: 100%;
@@ -2302,6 +2304,98 @@ html.aval-desktop-runtime .demo-mode-banner {
 .usage-cell:hover .usage-tooltip, .usage-cell:focus-visible .usage-tooltip { display: block; }
 .usage-footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 14px; color: var(--muted); font-size: .7rem; line-height: 1.5; }
 .usage-footer > span:last-child { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+/* Overview widget board — a photo canvas with movable, edge-snapping glass cards. */
+.widget-board-wrap { margin: 24px 0 18px; }
+.widget-board { position: relative; min-height: clamp(540px, 58vw, 680px); overflow: hidden; border: 1px solid color-mix(in srgb, white 20%, transparent); border-radius: 26px; background-position: center; background-size: cover; box-shadow: 0 24px 70px #10182820, inset 0 1px 0 #ffffff30; isolation: isolate; }
+.widget-board::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, #0610180f 48%, #06101838); pointer-events: none; }
+.widget-board-toolbar { position: absolute; inset: 18px 18px auto; z-index: 30; display: flex; align-items: center; gap: 8px; color: white; }
+.widget-toolbar-button, .widget-toolbar-icon { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #ffffff2e; border-radius: 12px; color: white; background: #101a1c56; box-shadow: inset 0 1px 0 #ffffff20, 0 8px 24px #00000018; -webkit-backdrop-filter: blur(24px) saturate(140%); backdrop-filter: blur(24px) saturate(140%); }
+.widget-toolbar-button { padding: 0 12px; font-size: .75rem; font-weight: 550; }
+.widget-toolbar-icon { width: 36px; padding: 0; margin-left: auto; }
+.widget-board-hint { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; font-size: .68rem; color: #ffffffe0; text-shadow: 0 1px 5px #0009; }
+.wallpaper-picker { position: relative; }
+.wallpaper-menu { position: absolute; top: 44px; left: 0; width: min(420px, calc(100vw - 96px)); padding: 14px; border: 1px solid #ffffff30; border-radius: 18px; background: #101719bf; box-shadow: 0 24px 60px #0006, inset 0 1px 0 #ffffff25; -webkit-backdrop-filter: blur(34px) saturate(145%); backdrop-filter: blur(34px) saturate(145%); }
+.wallpaper-menu > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 11px; }
+.wallpaper-menu strong { font-size: .78rem; font-weight: 600; }
+.wallpaper-menu > div:first-child span { color: #ffffffa8; font-size: .63rem; }
+.wallpaper-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-height: 270px; overflow-y: auto; }
+.wallpaper-grid button { position: relative; aspect-ratio: 1.55; overflow: hidden; padding: 0; border: 1px solid transparent; border-radius: 10px; background: #ffffff12; color: white; }
+.wallpaper-grid button.is-selected { border-color: white; box-shadow: 0 0 0 2px #ffffff36; }
+.wallpaper-grid img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.wallpaper-grid button span { position: absolute; inset: auto 6px 5px; overflow: hidden; color: white; font-size: .6rem; text-align: left; text-overflow: ellipsis; text-shadow: 0 1px 5px #000; white-space: nowrap; }
+.aval-widget { position: absolute; z-index: 2; min-width: 180px; min-height: 145px; overflow: hidden; border: 1px solid #ffffff26; border-radius: 21px; color: white; background: linear-gradient(135deg, #ffffff24, #ffffff0d); box-shadow: 0 20px 44px #02090e26, inset 0 1px 0 #ffffff35; -webkit-backdrop-filter: blur(28px) saturate(140%); backdrop-filter: blur(28px) saturate(140%); transition: box-shadow 160ms var(--ease-ui), transform 160ms var(--ease-ui); }
+.aval-widget.is-dragging { z-index: 20; transform: scale(1.012); box-shadow: 0 30px 70px #02090e4d, inset 0 1px 0 #ffffff50; transition: box-shadow 120ms var(--ease-ui); }
+.aval-widget-handle { height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 15px; color: #ffffffe5; cursor: grab; touch-action: none; user-select: none; }
+.aval-widget-handle:active { cursor: grabbing; }
+.aval-widget-handle > span { display: flex; align-items: center; gap: 7px; font-size: .7rem; font-weight: 550; letter-spacing: .01em; }
+.aval-widget-handle > svg { color: #ffffff8f; }
+.aval-widget-content { height: calc(100% - 40px); min-height: 0; padding: 4px 16px 15px; }
+.aval-widget-content p { margin: 0; color: #ffffffeb; font-size: .78rem; }
+.aval-widget-content > span, .music-meta span { color: #ffffffad; font-size: .64rem; }
+.widget-time-value { margin: 0 0 2px; font-size: clamp(2.7rem, 5vw, 4.6rem); font-weight: 300; letter-spacing: -.075em; line-height: .95; font-variant-numeric: tabular-nums; }
+.aval-widget-time .aval-widget-content { display: flex; flex-direction: column; justify-content: center; }
+.widget-weather-value { display: flex; align-items: center; gap: 12px; }
+.widget-weather-value > svg { width: 40px; height: 40px; stroke-width: 1.35; }
+.widget-weather-value strong { font-size: clamp(2.4rem, 4vw, 3.6rem); font-weight: 350; letter-spacing: -.07em; }
+.widget-locate { width: 100%; height: 100%; display: grid; place-content: center; justify-items: center; gap: 5px; padding: 0; border: 0; color: white; background: transparent; text-align: center; }
+.widget-locate strong { font-size: .78rem; font-weight: 550; }
+.widget-locate span { max-width: 23ch; color: #ffffffa8; font-size: .62rem; line-height: 1.4; }
+.aval-widget-music .aval-widget-content { display: grid; grid-template-columns: 50px minmax(0, 1fr) auto; grid-template-rows: auto 1fr; align-items: center; gap: 9px 11px; }
+.music-provider-toggle { grid-column: 1 / -1; display: flex; padding: 3px; border-radius: 9px; background: #0710132b; }
+.music-provider-toggle button { flex: 1; min-height: 26px; padding: 0 6px; border: 0; border-radius: 7px; color: #ffffffa8; background: transparent; font-size: .62rem; }
+.music-provider-toggle button.active { color: #17201d; background: #fffffff0; }
+.music-art { width: 50px; height: 50px; display: grid; place-items: center; border-radius: 12px; background: linear-gradient(145deg, #66dd91, #0a513b); }
+.music-art.apple { background: linear-gradient(145deg, #ff8bac, #8b335c); }
+.music-art svg { width: 22px; height: 22px; }
+.music-meta { min-width: 0; display: grid; gap: 3px; }
+.music-meta strong { overflow: hidden; font-size: .7rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.music-open { display: inline-flex; align-items: center; gap: 4px; color: white; font-size: .62rem; text-decoration: none; }
+.widget-calendar-title { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+.widget-calendar-title strong { font-size: .9rem; font-weight: 550; }
+.widget-calendar-title span { font-size: 1.6rem; font-weight: 350; }
+.widget-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; text-align: center; }
+.widget-calendar-grid b { color: #ffffff8f; font-size: .55rem; font-weight: 500; }
+.widget-calendar-grid span { min-height: 23px; display: grid; place-items: center; border-radius: 7px; font-size: .66rem; font-variant-numeric: tabular-nums; }
+.widget-calendar-grid .is-outside { color: #ffffff54; }
+.widget-calendar-grid .is-today { color: #19201d; background: #fffffff2; box-shadow: 0 3px 12px #0002; font-weight: 650; }
+.aval-widget-reminders .aval-widget-content { display: flex; flex-direction: column; gap: 9px; }
+.widget-reminder-list { min-height: 0; overflow-y: auto; display: grid; gap: 4px; }
+.widget-reminder-list button { display: flex; align-items: center; gap: 8px; padding: 6px 7px; border: 0; border-radius: 8px; color: white; background: transparent; font-size: .68rem; text-align: left; }
+.widget-reminder-list button:hover { background: #ffffff10; }
+.widget-reminder-list i { width: 16px; height: 16px; flex: 0 0 16px; display: grid; place-items: center; border: 1px solid #ffffff7a; border-radius: 50%; }
+.widget-reminder-list .is-done { color: #ffffff84; text-decoration: line-through; }
+.widget-reminder-list .is-done i { color: #1d2823; background: #ffffffe6; border-color: transparent; }
+.widget-reminder-add { display: flex; gap: 6px; margin-top: auto; }
+.widget-reminder-add input { min-width: 0; flex: 1; height: 31px; padding: 0 10px; border: 1px solid #ffffff21; border-radius: 9px; outline: none; color: white; background: #0710132d; font-size: .66rem; }
+.widget-reminder-add input::placeholder { color: #ffffff80; }
+.widget-reminder-add button { width: 31px; display: grid; place-items: center; padding: 0; border: 1px solid #ffffff2b; border-radius: 9px; color: white; background: #ffffff12; }
+.widget-attribution { position: absolute; right: 20px; bottom: 8px; z-index: 24; color: #ffffffa8; font-size: .55rem; text-shadow: 0 1px 4px #000; }
+.widget-attribution a { color: #ffffffe0; text-decoration: none; }
+.widget-attribution a:hover { text-decoration: underline; }
+
+@media (max-width: 900px) {
+  .widget-board { min-height: 610px; }
+  .aval-widget-time { width: 40% !important; }
+  .aval-widget-weather { width: 31% !important; }
+  .widget-board-hint { display: none; }
+}
+@media (max-width: 760px) {
+  .widget-board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; min-height: 0; padding: 66px 12px 36px; }
+  .aval-widget { position: relative; inset: auto !important; width: auto !important; height: auto !important; min-width: 0; min-height: 180px; }
+  .aval-widget-time, .aval-widget-calendar, .aval-widget-reminders { grid-column: 1 / -1; }
+  .aval-widget-time { min-height: 190px; }
+  .aval-widget-calendar, .aval-widget-reminders { min-height: 250px; }
+  .aval-widget-handle { cursor: default; }
+  .wallpaper-menu { width: calc(100vw - 76px); }
+}
+@media (max-width: 520px) {
+  .widget-board { grid-template-columns: minmax(0, 1fr); border-radius: 20px; }
+  .aval-widget { grid-column: 1; min-height: 180px; }
+  .aval-widget-calendar, .aval-widget-reminders { min-height: 260px; }
+  .widget-toolbar-button span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .aval-widget { transition: none; } }
 @media (max-width: 1100px) { .portfolio-chart-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 700px) { .inbox-window { grid-template-columns: minmax(0, 1fr); height: auto; } .conversation-list { display: block; max-height: 210px; border-bottom: 1px solid var(--line); } .message-thread { height: 520px; } .usage-heading, .usage-footer { flex-direction: column; align-items: flex-start; } .usage-card { padding: 18px; } .chart-controls { margin-left: 0; } .operations-empty-note { align-items: flex-start; flex-direction: column; } }
 @media (prefers-reduced-motion: reduce) { .chart-reveal, .chart-loading > span { animation: none; } }
