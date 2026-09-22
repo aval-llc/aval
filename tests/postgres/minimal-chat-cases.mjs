@@ -44,6 +44,29 @@ export async function runMinimalChatCases(t, { session, config }) {
     const rows = await (await route(GET, new Request('https://aval.test/api/assistant/history'))).json();
     assert.deepEqual(rows.messages.find(m => m.id === entry.id), { id: entry.id, role: 'assistant', text: 'Ready' });
   });
+  await t.test('a failed turn leaves nothing behind for a reload to find', async () => {
+    // History is append only, so a stored failure could never be replaced by
+    // the answer a retry produced — every attempt would survive and reloading
+    // would bring back a column of "couldn't finish" orbs beside one question.
+    // The rule the cleanup migration applies, asserted on rows rather than on
+    // the sentence describing it.
+    const failed = randomUUID(); const answered = randomUUID();
+    await session(user, async s => {
+      await s.db.execute(sql`insert into assistant_chat_entries(organization_id,user_id,id,payload)
+        values (${s.identity.organizationId},${user},${failed},${JSON.stringify({ id: failed, role: 'assistant', error: "Couldn't finish" })}::jsonb)`);
+      await s.db.execute(sql`insert into assistant_chat_entries(organization_id,user_id,id,payload)
+        values (${s.identity.organizationId},${user},${answered},${JSON.stringify({ id: answered, role: 'assistant', text: 'Here is the answer' })}::jsonb)`);
+
+      await s.db.execute(sql`delete from public.assistant_chat_entries
+        where payload ->> 'error' is not null and payload ->> 'role' = 'assistant'`);
+
+      assert.equal((await s.db.execute(sql`select 1 from assistant_chat_entries where id=${failed}`)).rows.length, 0,
+        'the failure is forgotten');
+      assert.equal((await s.db.execute(sql`select 1 from assistant_chat_entries where id=${answered}`)).rows.length, 1,
+        'and nothing that answered anything is touched');
+    });
+  });
+
   await t.test('voice rejects invalid uploads without contacting a provider', async () => {
     const response = await route(transcribe, request('/api/assistant/transcribe', { audio: 'invalid' }));
     assert.equal(response.status, 400);

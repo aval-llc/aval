@@ -237,8 +237,19 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
     };
     target.addEventListener('keydown', escape); return () => target.removeEventListener('keydown', escape);
   }, [open, picker, draft, popupRoot]);
-  const append = async (message: ChatMessage) => {
+  /**
+   * Show a message, and file it unless it is a failure.
+   *
+   * History is append only — a stored entry is never rewritten, which is what
+   * stops a client revising the record of what happened. That makes writing a
+   * failed attempt a mistake rather than a detail: the row could never be
+   * replaced by the answer a retry produced, so every attempt would survive
+   * and a reload would bring back a column of "couldn't finish" orbs. A
+   * failure is shown while it is true and forgotten when the turn succeeds.
+   */
+  const append = async (message: ChatMessage, persist = true) => {
     setMessages(current => [...current.filter(row => row.id !== message.id), message]);
+    if (!persist) return;
     const response = await fetch('/api/assistant/history', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(message) });
     if (!response.ok) { setHistoryError(m('saveError')); throw Error(m('saveError')); }
   };
@@ -300,7 +311,7 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
       retryTurn.current = null;
     } catch {
       setInput(current => current || text);
-      await append({ id: replyId, role: 'assistant', error: m('requestFailed'), activity: steps, startedAt: start, finishedAt: Date.now() }).catch(() => {});
+      await append({ id: replyId, role: 'assistant', error: m('requestFailed'), activity: steps, startedAt: start, finishedAt: Date.now() }, false).catch(() => {});
     } finally { submitting.current = false; setBusy(false); }
   };
   const startDraft = (event: FormEvent) => {
