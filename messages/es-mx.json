@@ -2465,7 +2465,21 @@
     "status_archived": "Archivado",
     "status_no_access": "Esperando acceso",
     "status_WAITING_FOR_PROVIDER": "Esperando al proveedor",
-    "status_WAITING_FOR_HUMAN": "Esperando a una persona"
+    "status_WAITING_FOR_HUMAN": "Esperando a una persona",
+    "teamMembers": "Miembros del equipo",
+    "people": "Personas",
+    "you": "Tú",
+    "manage": "Administrar",
+    "connect": "Conectar",
+    "notConnected": "Sin conectar",
+    "online": "En línea",
+    "offline": "Sin conexión",
+    "emailMessaging": "Correo y mensajería",
+    "propertySystem": "Sistema de propiedades",
+    "connectPms": "Conecta un PMS",
+    "addChannel": "Agregar canal",
+    "modeHint": "Arrastra para elegir · suelta para fijar",
+    "memberCount": "{count, plural, one {# miembro} other {# miembros}}"
   },
   "DashboardState": {
     "preview": "Vista previa · Esperando datos",

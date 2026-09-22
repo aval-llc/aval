@@ -1779,12 +1779,35 @@ progress::-webkit-progress-value {
 .app-shell.sidebar-is-collapsed {
   grid-template-columns: 80px minmax(0, 1fr);
 }
+/* The logo is the sidebar toggle. It has to stay visible when collapsed —
+   with the separate button gone it is the only way back — so the rule that
+   hid it there now shows it instead. */
 .sidebar-is-collapsed .brand-lockup .brand-symbol {
+  display: grid;
+}
+button.brand-lockup {
+  width: calc(100% - 16px);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.brand-lockup:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.brand-lockup-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.sidebar-is-collapsed .brand-lockup-copy {
   display: none;
 }
-.sidebar-is-collapsed .sidebar-collapse {
-  display: grid;
-  margin: 0;
+@media (max-width: 1180px) {
+  .brand-lockup-copy {
+    display: none;
+  }
 }
 .sidebar-is-collapsed .workspace-card > .character-avatar {
   display: inline-flex;

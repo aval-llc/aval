@@ -2465,7 +2465,21 @@
     "status_archived": "Archived",
     "status_no_access": "Waiting for access",
     "status_WAITING_FOR_PROVIDER": "Waiting for provider",
-    "status_WAITING_FOR_HUMAN": "Waiting for a person"
+    "status_WAITING_FOR_HUMAN": "Waiting for a person",
+    "teamMembers": "Team members",
+    "people": "People",
+    "you": "You",
+    "manage": "Manage",
+    "connect": "Connect",
+    "notConnected": "Not connected",
+    "online": "Online",
+    "offline": "Offline",
+    "emailMessaging": "Email & messaging",
+    "propertySystem": "Property system",
+    "connectPms": "Connect a PMS",
+    "addChannel": "Add channel",
+    "modeHint": "Drag to choose · release to lock",
+    "memberCount": "{count, plural, one {# member} other {# members}}"
   },
   "DashboardState": {
     "preview": "Preview · Waiting for data",

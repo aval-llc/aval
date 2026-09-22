@@ -10,5 +10,7 @@ export const GET = withApiSession(async (session,request) => {
   const offset=Number(params.get('offset')??0);
   const guest=isGuestIdentity(identity);
   const graph=await buildEffectiveWorkspaceGraph(session,identity.organizationId,identity.userId,{search:params.get('search')??undefined,offset:Number.isFinite(offset)?Math.max(0,offset):0,employeeId:params.get('employeeId')??undefined,isGuest:guest});
-  return Response.json({...graph,canManage:identity.role==='owner'&&!guest},{headers:{'cache-control':'no-store'}});
+  // `viewerId` is the caller's own id, so the map can put them first and say
+  // "You" — it reveals nothing the caller does not already know.
+  return Response.json({...graph,canManage:identity.role==='owner'&&!guest,viewerId:identity.userId},{headers:{'cache-control':'no-store'}});
 });

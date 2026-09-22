@@ -75,7 +75,7 @@ export function SignInScreen({ recoveryError = false }: { recoveryError?: boolea
       <div className="auth-gate-card">
         <div className="auth-gate-brand">
           <span className="brand-symbol">a</span>
-          <strong>aval</strong>
+          <strong>Aval</strong>
         </div>
         <h1>{formMode === "signin" ? t("AuthGate.signInTitle") : formMode === "signup" ? t("AuthGate.signUpTitle") : t("AuthGate.forgotTitle")}</h1>
         <p>{formMode === "signin" ? t("AuthGate.signInSubtitle") : formMode === "signup" ? t("AuthGate.signUpSubtitle") : t("AuthGate.forgotSubtitle")}</p>
@@ -161,7 +161,7 @@ export function PasswordRecoveryScreen() {
     finally { setSubmitting(false); }
   };
   return <div className="auth-gate"><div className="auth-gate-card">
-    <div className="auth-gate-brand"><span className="brand-symbol">a</span><strong>aval</strong></div>
+    <div className="auth-gate-brand"><span className="brand-symbol">a</span><strong>Aval</strong></div>
     <h1>{t("AuthGate.choosePasswordTitle")}</h1><p>{t("AuthGate.choosePasswordSubtitle")}</p>
     <form onSubmit={submit}>
       <label>{t("AuthGate.newPasswordLabel")}<input type="password" required minLength={8} value={password} onChange={event => setPassword(event.target.value)} autoComplete="new-password" /></label>

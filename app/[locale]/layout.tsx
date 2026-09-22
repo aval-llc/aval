@@ -10,6 +10,7 @@ import "../enterprise.css";
 import "../agent-library.css";
 import "../setup-graph.css";
 import "../setup-library.css";
+import "../setup-canvas.css";
 import { routing } from "./routing";
 
 // Inter's variable font — one file covers the full 100-900 weight range
