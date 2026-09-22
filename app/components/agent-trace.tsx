@@ -461,7 +461,7 @@ export function AgentTrace({ agentFilter, employeeFilter = false, agentLabel, mo
       const response = await fetch("/api/agents/tasks", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ goal: trimmed, agentId }),
+        body: JSON.stringify({ goal: trimmed, ...(employeeFilter?{employeeId:agentFilter}:{agentId}) }),
       });
       const data = (await response.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!response.ok || data.error) { setNotice(data.error ?? t("AgentTrace.startFailed")); return; }
@@ -526,7 +526,7 @@ export function AgentTrace({ agentFilter, employeeFilter = false, agentLabel, mo
         </div>
       )}
 
-      {!employeeFilter && (mode === "all" || mode === "work") && <div className="agent-goal-form">
+      {(mode === "all" || mode === "work") && <div className="agent-goal-form">
         <label className="agent-goal-field">
           <Sparks width={16} height={16}/>
           <input

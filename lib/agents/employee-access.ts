@@ -7,6 +7,12 @@ import { isPmsWriteTool } from '@/lib/pms/tool-map';
 import { pmsToolAvailability } from '@/lib/pms/assembly';
 import { SEND_PROVIDERS } from '@/lib/communications/providers';
 
+const COMMUNICATION_CAPABILITIES = new Set([
+ 'get_communication_channels', 'list_conversations', 'read_conversation',
+ 'read_maintenance_context', 'create_maintenance_work_order',
+ 'send_external_message', 'place_call',
+]);
+
 /** Read by assembly and again before execution. Revocation is never a UI cache. */
 export async function effectiveEmployeeAccess(session:DbSession,org:string,id:string) {
  const employee=await getEmployee(session,org,id);
@@ -18,6 +24,7 @@ export async function effectiveEmployeeAccess(session:DbSession,org:string,id:st
  const pms=await pmsToolAvailability(session,org);
  const capabilities=(employee?.status==='active'?scopes.capability??[]:[]).filter(name=>{
   if(!allowed.has(name))return false;
+  if(COMMUNICATION_CAPABILITIES.has(name)&&!connections.some(c=>(SEND_PROVIDERS as readonly string[]).includes(c.provider)))return false;
   if(name==='send_external_message')return connections.some(c=>(SEND_PROVIDERS as readonly string[]).includes(c.provider));
   if(name==='place_call')return connections.some(c=>c.provider==='twilio');
   if(name==='publish_listing')return connections.some(c=>c.provider==='meta');

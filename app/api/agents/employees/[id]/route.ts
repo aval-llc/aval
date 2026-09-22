@@ -19,7 +19,10 @@ import {
   EmployeeHasOpenWorkError, InvalidEmployeeInputError,
   type EmployeeScope, type EmployeePatch, type EmployeeStatus,
 } from "@/lib/agents/employees";
-import { employeeCandidates } from "@/lib/agents/expertise";
+import { and,eq } from "drizzle-orm";
+import { employeeExpertise, integrationConnections } from "@/db/postgres/schema";
+import { getTool } from "@/lib/agents/registry";
+import { grantExpertise, listExpertiseCatalogue, employeeCandidates } from "@/lib/agents/expertise";
 
 const ACTION_STATUS: Record<string, EmployeeStatus> = {
   activate: "active", pause: "paused", resume: "active", archive: "archived",
@@ -56,6 +59,7 @@ async function PATCHWithSession(dbSession: DbSession, request: Request) {
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   await ensureOrganization(dbSession, identity);
 
+  if(identity.role!=="owner")return Response.json({error:"Only workspace owners can configure employee access and policy."},{status:403});
   const id = employeeId(request);
   const body = await request.json().catch(() => ({})) as EmployeePatch;
   try {
@@ -78,14 +82,28 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   await ensureOrganization(dbSession, identity);
 
+  if(identity.role!=="owner")return Response.json({error:"Only workspace owners can configure employee access and policy."},{status:403});
   const id = employeeId(request);
   const body = await request.json().catch(() => ({})) as {
-    action?: string; scope?: EmployeeScope; toEmployeeId?: string;
+    action?: string; expertiseId?: string; scope?: EmployeeScope; toEmployeeId?: string;
   };
   const employee = await getEmployee(dbSession, identity.organizationId, id);
   if (!employee) return Response.json({ error: "No such employee" }, { status: 404 });
 
   try {
+    if((body.action==='grant_expertise'||body.action==='revoke_expertise')&&body.expertiseId){
+      const catalogue=await listExpertiseCatalogue(dbSession,identity.organizationId);
+      if(!catalogue.some(e=>e.id===body.expertiseId))return Response.json({error:'No such expertise in this workspace.'},{status:404});
+      if(body.action==='grant_expertise')await grantExpertise(dbSession,identity.organizationId,id,body.expertiseId,identity.userId);
+      else await dbSession.db.delete(employeeExpertise).where(and(eq(employeeExpertise.organizationId,identity.organizationId),eq(employeeExpertise.employeeId,id),eq(employeeExpertise.expertiseId,body.expertiseId)));
+      await appendAuditEvents(dbSession,identity.organizationId,[{kind:'employee_updated',label:body.action,payloadDigest:await digestPayload({id,expertiseId:body.expertiseId}),count:0}]);
+      return Response.json({expertise:await employeeCandidates(dbSession,identity.organizationId,id)});
+    }
+    if(body.action==='grant'&&body.scope?.kind==='connection'){
+      const [connection]=await dbSession.db.select({id:integrationConnections.id}).from(integrationConnections).where(and(eq(integrationConnections.organizationId,identity.organizationId),eq(integrationConnections.id,body.scope.value))).limit(1);
+      if(!connection)return Response.json({error:'No such connection in this workspace.'},{status:404});
+    }
+    if(body.action==='grant'&&body.scope?.kind==='capability'&&(!getTool(body.scope.value)||getTool(body.scope.value)?.unimplemented))return Response.json({error:'This capability is not implemented.'},{status:400});
     if (body.action === "grant" && body.scope) {
       await grantScope(dbSession, identity.organizationId, id, identity.userId, body.scope);
       await appendAuditEvents(dbSession, identity.organizationId, [{

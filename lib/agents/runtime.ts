@@ -589,7 +589,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
     if(owner){
       const effective=await effectiveEmployeeAccess(dbSession,organizationId,owner.id);
       const required:string[]=contract.kind==='evidence'?contract.tools:[];
-      if(!effective.capabilities.length||required.some(name=>!effective.capabilities.includes(name)))return finish('WAITING_FOR_PROVIDER',{error:'Employee access is unavailable. Configure its connections and capabilities in Setup; this work will retry automatically.',nextAttemptAt:new Date(Date.now()+60000)});
+      if(!effective.capabilities.length||required.some((name: string)=>!effective.capabilities.includes(name)))return finish('WAITING_FOR_PROVIDER',{error:'Employee access is unavailable. Configure its connections and capabilities in Setup; this work will retry automatically.',nextAttemptAt:new Date(Date.now()+60000)});
     }
     // Answer the proposal the run parked on, before asking the model anything
     // else. Until this happens the transcript ends on an unanswered tool_use,

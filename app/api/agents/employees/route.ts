@@ -59,6 +59,7 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   await ensureOrganization(dbSession, identity);
 
+  if(identity.role!=="owner")return Response.json({error:"Only workspace owners can create and configure employees."},{status:403});
   const body = await request.json().catch(() => ({})) as Partial<CreateEmployeeInput>;
   try {
     const employee = await createEmployee(dbSession, identity.organizationId, identity.userId, {
