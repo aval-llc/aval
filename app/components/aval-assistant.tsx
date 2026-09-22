@@ -261,6 +261,12 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
     const steps: SafeStep[] = [];
     const user: ChatMessage = { id: retryTurn.current?.text === text ? retryTurn.current.id : crypto.randomUUID(), role: 'user', text };
     retryTurn.current = { id: user.id, text };
+    // One turn, one reply — whatever it took to get there. The reply's id is
+    // derived from the question rather than minted fresh, so a retry replaces
+    // the attempt that failed instead of stacking beside it. Without this a
+    // couple of failures left a couple of saved replies, and reloading the page
+    // brought them all back as a row of orbs.
+    const replyId = `${user.id}:reply`;
     try {
       await append(user); setInput('');
       if (intent === 'task' || employeeId) {
@@ -288,13 +294,13 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
           answer = { ...data, metrics: data.metrics ?? [] } as Answer;
         }
         if (!isAnswerShaped(answer)) throw Error(m('requestFailed'));
-        await append({ id: crypto.randomUUID(), role: 'assistant', answer: { ...answer, metrics: answer.metrics ?? [] }, activity: steps, startedAt: start, finishedAt: Date.now() });
+        await append({ id: replyId, role: 'assistant', answer: { ...answer, metrics: answer.metrics ?? [] }, activity: steps, startedAt: start, finishedAt: Date.now() });
         if (!openRef.current) setUnread(true);
       }
       retryTurn.current = null;
     } catch {
       setInput(current => current || text);
-      await append({ id: crypto.randomUUID(), role: 'assistant', error: m('requestFailed'), activity: steps, startedAt: start, finishedAt: Date.now() }).catch(() => {});
+      await append({ id: replyId, role: 'assistant', error: m('requestFailed'), activity: steps, startedAt: start, finishedAt: Date.now() }).catch(() => {});
     } finally { submitting.current = false; setBusy(false); }
   };
   const startDraft = (event: FormEvent) => {

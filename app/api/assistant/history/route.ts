@@ -20,7 +20,10 @@ async function POSTWithSession(session: DbSession, request: Request) {
   if (!message || typeof message.id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(message.id) || !['user', 'assistant'].includes(String(message.role))) return Response.json({ error: 'Invalid message' }, { status: 400 });
   // Explicit public UI fields only. Never copy runtime transcripts or model notes.
   const payload = Object.fromEntries(['id', 'role', 'text', 'answer', 'taskId', 'taskAgentId', 'error', 'startedAt', 'finishedAt', 'activity'].filter(key => message[key] !== undefined).map(key => [key, message[key]]));
-  await session.db.execute(sql`insert into assistant_chat_entries(organization_id,user_id,id,payload) values (${identity.organizationId},${identity.userId},${message.id},${JSON.stringify(payload)}::jsonb) on conflict do nothing`);
+  // Upsert rather than ignore. A turn's reply keeps one id however many
+  // attempts it took, so a retry has to overwrite what failed — `do nothing`
+  // kept the first failure and quietly threw away the answer that worked.
+  await session.db.execute(sql`insert into assistant_chat_entries(organization_id,user_id,id,payload) values (${identity.organizationId},${identity.userId},${message.id},${JSON.stringify(payload)}::jsonb) on conflict (organization_id,user_id,id) do update set payload = excluded.payload`);
   return Response.json({ saved: true }, { headers });
 }
 export const GET = withApiSession(GETWithSession);

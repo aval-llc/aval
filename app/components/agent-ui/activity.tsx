@@ -17,7 +17,11 @@ export function AvalActivityTrace({ status, steps, startedAt, finishedAt }: { st
   const rows = expanded ? summary.steps : [];
   return <div className="aval-activity-rail" data-status={status}>
     <button type="button" className="aval-activity-summary" aria-expanded={expanded} onClick={() => setDisclosure({ terminal: done, open: !expanded })}>
-      <AvalThinkingOrb size={64} activity={visualActivity({ status, steps })} paused={done || waiting}/><span>{label}{!done && !waiting && elapsed >= 3 ? ` · ${elapsed}s` : ''}{done && summary.lookups > 0 ? ` · ${t('lookups', { count: summary.lookups })}` : ''}{done && summary.actions > 0 ? ` · ${t('actions', { count: summary.actions })}` : ''}</span><span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+      {/* A status glyph beside the label, not a second hero orb. One of these
+          is rendered per assistant turn, so at hero size a couple of failed
+          attempts fill the panel with orbs and read as duplicates of the
+          launcher rather than as a mark against each turn. */}
+      <AvalThinkingOrb size={20} activity={visualActivity({ status, steps })} paused={done || waiting}/><span>{label}{!done && !waiting && elapsed >= 3 ? ` · ${elapsed}s` : ''}{done && summary.lookups > 0 ? ` · ${t('lookups', { count: summary.lookups })}` : ''}{done && summary.actions > 0 ? ` · ${t('actions', { count: summary.actions })}` : ''}</span><span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
     </button>
     <div className="sr-only" role="status">{label}</div>
     {rows.length > 0 && <ol>{rows.map(step => <li key={step.id}>{(step.kind === 'tool_call' && step.policy !== 'deny' || step.kind === 'approval_decided' && step.policy === 'allow') && step.tool && t.has(`tools.${step.tool}`) ? t(`tools.${step.tool}`) : step.kind === 'tool_call' && step.mutates && step.policy !== 'deny' ? t('actionCompleted') : t.has(`step.${step.kind}`) ? t(`step.${step.kind}`) : t('working')}{step.repetitions > 1 ? ` ×${step.repetitions}` : ''}</li>)}</ol>}
