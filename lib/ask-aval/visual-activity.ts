@@ -1,7 +1,8 @@
 import type { AskProgress } from './progress.ts';
 
 export type VisualActivity = 'idle' | 'listening' | 'connecting' | 'searching' | 'working' | 'solving' | 'weaving' | 'composing' | 'finalizing';
-export const getThinkingOrbState = (activity: VisualActivity) => ({ idle: 'breathing', listening: 'listening', connecting: 'connecting', searching: 'searching', working: 'working', solving: 'solving', weaving: 'weaving', composing: 'composing', finalizing: 'shaping' } as const)[activity];
+// Keep runtime states distinct; the visual language is deliberately simpler.
+export const getThinkingOrbState = (activity: VisualActivity) => activity === 'idle' ? 'solving' : activity === 'listening' ? 'listening' : 'searching';
 export type SafeStep = { id: string; kind: string; tool?: string | null; mutates?: boolean; at?: string | number; policy?: string | null };
 export const settledRun = (status: string) => ['COMPLETED', 'FAILED', 'CANCELLED'].includes(status);
 export function visualActivity(input: { voice?: string; busy?: boolean; progress?: AskProgress; status?: string; steps?: SafeStep[] }): VisualActivity {

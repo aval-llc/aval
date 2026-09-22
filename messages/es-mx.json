@@ -15,7 +15,7 @@
       "read_memory": "Se consultó la memoria",
       "write_memory": "Se actualizó la memoria"
     },
-    "welcome": "¿En qué te ayudo a avanzar?",
+    "welcome": "¿Tienes alguna pregunta sobre tu portafolio?",
     "welcomeDetail": "Pregunta por tu portafolio o dale una tarea a Aval.",
     "placeholder": "Pregunta por tu portafolio…",
     "worked": "Trabajó durante {seconds}s",

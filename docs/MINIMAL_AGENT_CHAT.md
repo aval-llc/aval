@@ -39,6 +39,15 @@ are separate from the real composer so their clipping cannot hide the plus menu.
 Reduced motion pauses effects; the orb library observes visibility. Error
 boundaries preserve the functional controls if decoration fails.
 
+The resting chat opens with a 64px `solving` orb and a fast-typed portfolio
+greeting. Active work uses `searching`; live voice remains `listening`.
+Reduced motion reveals the greeting immediately. The conversation surface is
+transparent in every layout; only the composer has a blurred translucent glass
+fill. Its border beam runs at rest as well as during work, except for voice,
+reduced motion and hidden-document states. Keyboard focus uses the rounded
+composer border, never a rectangular outline around the textarea. Active public
+activity grows along a single vertical rail; terminal runs collapse by default.
+
 ## Voice
 
 Audio stays in memory, is capped at 60 seconds / 8 MB, and is released on stop,

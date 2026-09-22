@@ -14,7 +14,7 @@ import type { CreateDraftInput, DraftFormat } from './ask-aval-tasks';
 import { readAskStream, type AskProgress } from '@/lib/ask-aval/progress';
 import { autonomyMode, type AutonomyMode } from '@/lib/agents/autonomy';
 import { visualActivity, settledRun, type VisualActivity, type SafeStep } from '@/lib/ask-aval/visual-activity';
-import { AvalThinkingOrb, AvalComposerEffects, AvalLiquidActions } from './agent-ui/effects';
+import { AvalThinkingOrb, AvalComposerEffects, AvalLiquidActions, AvalGreeting } from './agent-ui/effects';
 import { AvalActivityTrace } from './agent-ui/activity';
 import { useAvalVoice } from './agent-ui/use-voice';
 
@@ -128,7 +128,7 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
   const desktop = useDesktopCodex(); const preferences = useOnboarding();
   const panel = useChatPanel(() => notify(t('ChatPanel.popupBlocked'), t('ChatPanel.popupHelp')), appearance.chatWindowBackground ?? 'white', theme, appearance.chatWindowTransparency);
   const { popupRoot, expanded, panelRef } = panel;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [input, setInput] = useState('');
   const [focused, setFocused] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -299,9 +299,9 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
       <button type="button" aria-label={t(popupRoot ? 'ChatPanel.reattach' : 'ChatPanel.detach')} onClick={() => { voice.cancel(); if (popupRoot) panel.reattach(); else panel.detach(); }}><ExternalLink size={16}/></button>
       <button type="button" aria-label={t('AvalAssistant.closeAssistant')} onClick={close}><X size={18}/></button>
     </div>
-    <div className="aval-inline-stream" ref={streamRef} onScroll={event => { const e = event.currentTarget; followScroll.current = e.scrollHeight - e.scrollTop - e.clientHeight < 80; }}>
+    <div className="aval-inline-stream" data-empty={messages.length === 0} ref={streamRef} onScroll={event => { const e = event.currentTarget; followScroll.current = e.scrollHeight - e.scrollTop - e.clientHeight < 80; }}>
       {before && <button type="button" className="text-button" onClick={() => void loadHistory(before)}>{m('older')}</button>}
-      {messages.length === 0 && <div className="aval-inline-welcome"><AvalThinkingOrb size={64}/><p>{m('welcome')}</p><span>{m('welcomeDetail')}</span></div>}
+      {open && messages.length === 0 && <div className="aval-inline-welcome"><AvalThinkingOrb size={64} activity={activity}/><AvalGreeting key={locale} text={m('welcome')}/></div>}
       {messages.map(message => <div className={'aval-inline-message ' + message.role} key={message.id}>
         {message.text && <p>{message.text}</p>}
         {message.taskId && <><AgentTaskConversation taskId={message.taskId} onActivity={onTaskActivity}/><a className="aval-work-link" href={`/${locale}?view=agents&agent=${encodeURIComponent(message.taskAgentId ?? 'general')}`}>{t('Independence.viewTask')}</a></>}

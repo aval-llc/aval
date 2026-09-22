@@ -24,12 +24,31 @@ class EffectFallback extends Component<{ children: ReactNode; fallback: ReactNod
 }
 export function AvalThinkingOrb({ activity = 'idle', size = 20, paused = false }: { activity?: VisualActivity; size?: 20 | 64; paused?: boolean }) {
   const calm = useCalmMotion();
-  return <span className="aval-thinking-orb" aria-hidden="true"><EffectFallback fallback={<span className="aval-orb-fallback">✦</span>}><ThinkingOrb size={size} state={getThinkingOrbState(activity)} theme="auto" paused={calm || paused} /></EffectFallback></span>;
+  return <span className="aval-thinking-orb" data-orb-state={getThinkingOrbState(activity)} aria-hidden="true"><EffectFallback fallback={<span className="aval-orb-fallback">✦</span>}><ThinkingOrb size={size} state={getThinkingOrbState(activity)} theme="auto" paused={calm || paused} /></EffectFallback></span>;
+}
+export function AvalGreeting({ text }: { text: string }) {
+  const [length, setLength] = useState(0);
+  useEffect(() => {
+    const media = matchMedia('(prefers-reduced-motion: reduce)');
+    let timer: ReturnType<typeof setInterval>;
+    const start = () => {
+      clearInterval(timer);
+      let count = 0;
+      timer = setInterval(() => {
+        count = media.matches ? text.length : Math.min(text.length, count + 3);
+        setLength(count);
+        if (count === text.length) clearInterval(timer);
+      }, 12);
+    };
+    start(); media.addEventListener('change', start);
+    return () => { clearInterval(timer); media.removeEventListener('change', start); };
+  }, [text]);
+  return <p className="aval-greeting"><span className="sr-only">{text}</span><span className="aval-greeting-typed" aria-hidden="true">{text.slice(0, length)}</span><span className="aval-greeting-static" aria-hidden="true">{text}</span></p>;
 }
 export function AvalComposerEffects({ children, active, stream, processing, dark }: { children: ReactNode; active: boolean; stream: MediaStream | null; processing: boolean; dark: boolean }) {
   const paused = useCalmMotion();
   const voice = !!stream || processing;
-  return <div className="aval-composer-effects">{children}<div className="aval-composer-decoration" aria-hidden="true"><EffectFallback fallback={null}><BorderBeam className="aval-composer-beam" size="line" colorVariant="ocean" borderRadius={26} strength={voice ? 0 : active ? .35 : .12} active={active && !voice && !paused} theme={dark ? 'dark' : 'light'}>
+  return <div className="aval-composer-effects">{children}<div className="aval-composer-decoration" aria-hidden="true"><EffectFallback fallback={null}><BorderBeam className="aval-composer-beam" size="line" colorVariant="colorful" borderRadius={26} strength={voice ? 0 : active ? 1 : .85} brightness={1.6} active={!voice && !paused} duration={4} theme={dark ? 'dark' : 'light'}>
     <VoiceBeam className="aval-voice-beam" stream={stream} processing={processing} active={voice} paused={paused} colorVariant="ice" theme={dark ? 'dark' : 'light'} strength={.45}><div className="aval-composer-effect-fill"/></VoiceBeam>
   </BorderBeam></EffectFallback></div></div>;
 }

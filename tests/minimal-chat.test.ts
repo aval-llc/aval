@@ -3,7 +3,9 @@ import test from 'node:test';
 import { getThinkingOrbState, visualActivity, summarizeActivity, settledRun } from '../lib/ask-aval/visual-activity.ts';
 
 test('voice, verification, tool activity and terminal states map without simulated progress', () => {
-  assert.equal(getThinkingOrbState(visualActivity({})), 'breathing');
+  assert.equal(getThinkingOrbState(visualActivity({})), 'solving');
+  for (const activity of ['connecting', 'searching', 'working', 'solving', 'weaving', 'composing', 'finalizing'] as const) assert.equal(getThinkingOrbState(activity), 'searching');
+  assert.equal(getThinkingOrbState('listening'), 'listening');
   assert.equal(visualActivity({ voice: 'live', status: 'RUNNING' }), 'listening');
   assert.equal(visualActivity({ voice: 'processing' }), 'solving');
   assert.equal(visualActivity({ status: 'WAITING_FOR_APPROVAL', busy: true }), 'idle');

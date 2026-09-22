@@ -15,7 +15,7 @@
       "read_memory": "Consulted workspace memory",
       "write_memory": "Updated workspace memory"
     },
-    "welcome": "What can I help you move forward?",
+    "welcome": "Do you have any questions about your portfolio?",
     "welcomeDetail": "Ask about your portfolio, or give Aval a task to handle.",
     "placeholder": "Ask about your portfolio…",
     "worked": "Worked for {seconds}s",

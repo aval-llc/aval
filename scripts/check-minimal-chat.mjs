@@ -21,7 +21,7 @@ import {DEFAULT_ONBOARDING} from './lib/onboarding/preferences';
 function Harness(){const [state,setState]=useState(DEFAULT_ONBOARDING);return <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC"><ExperienceProvider><AppearanceProvider isGuest><PreferenceContext.Provider value={{state,busy:false,error:'',edit(){},help(){},async setMode(mode){await fetch('/api/preferences',{method:'PUT',body:JSON.stringify({mode})});setState({...state,preferences:{...state.preferences,autonomy:[mode]}});}}}><main style={{padding:40}}><h1>Portfolio overview</h1><p>Controlled component test</p></main><AvalAssistant view="overview" onCreateDraft={()=>{}}/></PreferenceContext.Provider></AppearanceProvider></ExperienceProvider></NextIntlClientProvider>};
 createRoot(document.getElementById('root')).render(<Harness/>);`, resolveDir: root, loader: 'tsx' }, bundle: true, outfile: join(output, 'app.js'), platform: 'browser', format: 'esm', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'silent' });
 const js = await readFile(join(output, 'app.js'));
-const css = ':root{--font-inter:Arial}body,button,input,select,textarea{font-family:Arial,sans-serif}*{box-sizing:border-box}button,input,textarea,select{font:inherit}' + (await readFile('app/globals.css', 'utf8')).replace(/^@import.*$/gm, '') + await readFile('app/minimal-chat.css', 'utf8');
+const css = ':root{--font-inter:Arial}body,button,input,select,textarea{font-family:Arial,sans-serif}*{box-sizing:border-box}button,input,textarea,select{font:inherit}' + (await readFile('app/globals.css', 'utf8')).replace(/^@import.*$/gm, '') + await readFile('app/minimal-chat.css', 'utf8') + await readFile('app/enterprise.css', 'utf8');
 const server = createServer((req, res) => {
   if (req.url === '/app.js') { res.setHeader('content-type', 'text/javascript'); res.end(js); }
   else if (req.url === '/style.css') { res.setHeader('content-type', 'text/css'); res.end(css); }
@@ -48,9 +48,18 @@ await context.route('**/api/**', async route => {
 });
 try {
   await page.goto('http://127.0.0.1:'+server.address().port);
-  const launcher = page.locator('.aval-orb-launcher'); await launcher.waitFor();
+  const launcher = page.locator('.aval-orb-launcher');
+  await page.waitForFunction(()=>document.querySelector('.aval-greeting-typed')?.textContent === 'Do you have any questions about your portfolio?');
+  assert.equal(await page.locator('.aval-inline-welcome .aval-thinking-orb').getAttribute('data-orb-state'),'solving');
+  assert.equal(await page.locator('.aval-inline-chat').evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)');
+  await page.locator('.aval-composer-beam[data-active]').waitFor();
+  await page.waitForTimeout(900);
+  console.log(await page.locator('.aval-composer-beam').evaluate(el=>({beamHeight:el.getBoundingClientRect().height,after:getComputedStyle(el,'::after').opacity,before:getComputedStyle(el,'::before').opacity})));
+  await page.screenshot({path:join(output,'resting.png')});
+  await page.keyboard.press('Escape');
   await page.screenshot({ path:join(output,'closed.png') });
   await launcher.click(); await page.locator('.aval-minimal-composer textarea').fill('Review my portfolio');
+  assert.equal(await page.locator('textarea').evaluate(el=>getComputedStyle(el).outlineStyle),'none');
   await page.screenshot({ path:join(output,'composer.png') });
   await page.locator('.aval-minimal-agent').click(); await page.getByRole('button',{name:'Maya Resident operations'}).click();
   await page.locator('.aval-minimal-mode select').selectOption('supervised');
@@ -59,6 +68,7 @@ try {
   await page.getByRole('button',{name:'Send message',exact:true}).click();
   await page.getByText('Review my portfolio',{exact:true}).waitFor();
   await page.locator('.aval-activity-rail[data-status="RUNNING"]').waitFor();
+  assert.equal(await page.locator('.aval-activity-rail .aval-thinking-orb').getAttribute('data-orb-state'),'searching');
   assert.equal(lastTask.employeeId,'maya');
   await page.screenshot({ path:join(output,'running.png') });
   await page.keyboard.press('Escape'); assert.equal(await page.locator('.aval-inline-chat').isVisible(),false);
@@ -69,7 +79,7 @@ try {
   await page.screenshot({ path:join(output,'completed.png') });
   await summary.click(); assert.equal(await page.locator('.aval-activity-rail ol').isVisible(),true);
   await page.screenshot({ path:join(output,'expanded.png') });
-  await page.reload(); await launcher.click(); await page.getByText('Portfolio review ready').waitFor();
+  await page.reload(); await page.getByText('Portfolio review ready').waitFor();
   await page.getByRole('button',{name:'Tools',exact:true}).click();
   await page.getByRole('button',{name:'Use current page context',exact:true}).hover();
   await page.screenshot({ path:join(output,'plus.png') });
@@ -82,6 +92,15 @@ try {
   await page.screenshot({path:join(output,'mobile.png')});
   assert.ok(await page.locator('.aval-minimal-send').isVisible());
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
+  history = [];
+  await page.evaluate(()=>localStorage.setItem('aval.theme','dark'));
+  await page.reload();
+  await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+  await page.locator('.aval-inline-welcome').waitFor();
+  await page.screenshot({path:join(output,'dark-mobile.png')});
+  await page.emulateMedia({reducedMotion:'no-preference'}); await page.setViewportSize({width:1280,height:900});
+  await page.locator('.aval-composer-beam[data-active]').waitFor(); await page.waitForTimeout(1000);
+  await page.screenshot({path:join(output,'dark-resting.png')});
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({passed:true,output,checks:['employee routing','persisted policy mutation','minimize without cancellation','completion unread','accurate collapsed summary','trace expansion','history reload','plus Escape','controlled microphone transcript','mobile reduced motion'],providerLiveValidated:false}));
 } catch (error) {
