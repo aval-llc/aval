@@ -7,6 +7,7 @@ import { POST as startTask } from '../../app/api/agents/tasks/route.ts';
 import { createEmployee } from '../../lib/agents/employees.ts';
 import { getTask } from '../../lib/agents/tasks.ts';
 import { withVerifiedIdentityHeaders } from '../../lib/auth/request-identity.ts';
+import { replyTurnId, runTurnId } from '../../lib/ask-aval/chat-turn.ts';
 import { env } from 'cloudflare:workers';
 
 export async function runMinimalChatCases(t, { session, config }) {
@@ -44,6 +45,25 @@ export async function runMinimalChatCases(t, { session, config }) {
     const rows = await (await route(GET, new Request('https://aval.test/api/assistant/history'))).json();
     assert.deepEqual(rows.messages.find(m => m.id === entry.id), { id: entry.id, role: 'assistant', text: 'Ready' });
   });
+  await t.test('the store accepts every id the panel mints for a turn', async () => {
+    // Not a shape test for its own sake. A reply id built with a separator the
+    // route rejects came back 400, the save threw, and the answer the model
+    // had already produced was replaced on screen by "couldn't finish" — a
+    // success reported as a failure. Both sides now derive the id from
+    // `chat-turn.ts`; this asserts the store agrees with what it produces.
+    const turn = randomUUID();
+    for (const entry of [
+      { id: turn, role: 'user', text: 'Check my portfolio' },
+      { id: replyTurnId(turn), role: 'assistant', text: 'Occupancy is steady' },
+      { id: runTurnId(turn), role: 'assistant', taskId: randomUUID() },
+    ]) {
+      assert.equal((await route(POST, request('/api/assistant/history', entry))).status, 200, entry.id);
+    }
+    const saved = (await (await route(GET, new Request('https://aval.test/api/assistant/history'))).json()).messages;
+    assert.deepEqual(saved.filter(m => m.id.startsWith(turn)).map(m => m.id).sort(),
+      [turn, replyTurnId(turn), runTurnId(turn)].sort());
+  });
+
   await t.test('a failed turn leaves nothing behind for a reload to find', async () => {
     // History is append only, so a stored failure could never be replaced by
     // the answer a retry produced — every attempt would survive and reloading

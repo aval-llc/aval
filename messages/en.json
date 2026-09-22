@@ -44,6 +44,7 @@
     "unread": "New result",
     "retry": "Retry",
     "older": "Earlier messages",
+    "previous": "Earlier conversation",
     "format": "Document format",
     "closeDraft": "Close document controls",
     "mode": {

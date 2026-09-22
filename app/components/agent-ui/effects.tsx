@@ -55,10 +55,10 @@ export function AvalComposerEffects({ children, active, stream, processing, dark
 export function AvalLiquidActions({ label, actions }: { label: string; actions: { label: string; icon: ReactNode; run: () => void; disabled?: boolean }[] }) {
   const [open, setOpen] = useState(false);
   const paused = useCalmMotion();
-  const itemStyle = { position: 'absolute' as const, top: 0, left: 0, width: 36, height: 36 };
+  const itemStyle = { position: 'absolute' as const, top: 0, left: 0, width: 30, height: 30 };
   const buttons = <>{actions.map((action, i) => <Liquid.Item style={itemStyle} key={action.label} x={open ? i * 50 : 0} y={open ? -118 : 0} transition={paused ? { duration: 0 } : 'bouncy'} delay={paused ? 0 : i * 35}>
     <button type="button" className="aval-liquid-action" disabled={action.disabled} tabIndex={open ? 0 : -1} aria-hidden={!open} style={{ visibility: open ? 'visible' : 'hidden' }} title={action.label} aria-label={action.label} onClick={() => { setOpen(false); action.run(); }}>{action.icon}</button>
-  </Liquid.Item>)}<Liquid.Item style={itemStyle}><button type="button" className="aval-liquid-action" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Plus size={20}/></button></Liquid.Item></>;
+  </Liquid.Item>)}<Liquid.Item style={itemStyle}><button type="button" className="aval-liquid-action" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Plus size={18}/></button></Liquid.Item></>;
   return <div className="aval-liquid-actions" role="toolbar" aria-label={label} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false); }} onKeyDown={e => { if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); e.currentTarget.querySelector<HTMLButtonElement>('button[aria-expanded]')?.focus(); } }}>
     <EffectFallback fallback={<details><summary>{label}</summary>{actions.map(a => <button type="button" key={a.label} disabled={a.disabled} onClick={a.run}>{a.label}</button>)}</details>}><Liquid blur={6} contrast={18} fill="var(--surface-raised)" shadow="0 3px 12px rgba(0,0,0,.08)" filterPadding={90}>{buttons}</Liquid></EffectFallback>
   </div>;

@@ -2,6 +2,8 @@ import { sql } from 'drizzle-orm';
 import { withApiSession } from '@/lib/api/with-session';
 import type { DbSession } from '@/db/postgres/session';
 import { getApiIdentity, isGuestIdentity } from '@/lib/integrations/session';
+// The same definition the panel mints its ids from, so the two cannot drift.
+import { STORABLE_TURN_ID } from '@/lib/ask-aval/chat-turn';
 const headers = { 'cache-control': 'no-store' };
 async function GETWithSession(session: DbSession, request: Request) {
   const identity = await getApiIdentity(session, request);
@@ -17,7 +19,7 @@ async function POSTWithSession(session: DbSession, request: Request) {
   if (request.headers.get('origin') && request.headers.get('origin') !== new URL(request.url).origin) return Response.json({ error: 'Invalid origin' }, { status: 403 });
   const raw = await request.text(); if (raw.length > 90000) return Response.json({ error: 'Too large' }, { status: 413 });
   let message: Record<string, unknown>; try { message = JSON.parse(raw); } catch { return Response.json({ error: 'Invalid message' }, { status: 400 }); }
-  if (!message || typeof message.id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(message.id) || !['user', 'assistant'].includes(String(message.role))) return Response.json({ error: 'Invalid message' }, { status: 400 });
+  if (!message || typeof message.id !== 'string' || !STORABLE_TURN_ID.test(message.id) || !['user', 'assistant'].includes(String(message.role))) return Response.json({ error: 'Invalid message' }, { status: 400 });
   // Explicit public UI fields only. Never copy runtime transcripts or model notes.
   const payload = Object.fromEntries(['id', 'role', 'text', 'answer', 'taskId', 'taskAgentId', 'error', 'startedAt', 'finishedAt', 'activity'].filter(key => message[key] !== undefined).map(key => [key, message[key]]));
   // Append only: a stored entry is never rewritten by a later request, so a

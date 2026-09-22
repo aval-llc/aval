@@ -13,6 +13,7 @@ import { AgentTaskConversation } from './agent-task-conversation';
 import { MarkdownPreview } from './markdown-preview';
 import type { CreateDraftInput, DraftFormat } from './ask-aval-tasks';
 import { readAskStream, type AskProgress } from '@/lib/ask-aval/progress';
+import { joinEarlierTurns, replyTurnId } from '@/lib/ask-aval/chat-turn';
 import { autonomyMode, type AutonomyMode } from '@/lib/agents/autonomy';
 import { visualActivity, settledRun, type VisualActivity, type SafeStep } from '@/lib/ask-aval/visual-activity';
 import { AvalThinkingOrb, AvalComposerEffects, AvalLiquidActions, AvalGreeting } from './agent-ui/effects';
@@ -133,7 +134,7 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
   const [input, setInput] = useState('');
   const [focused, setFocused] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [restored, setRestored] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const [before, setBefore] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -187,19 +188,27 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
       return { ...current, [id]: { activity, status } };
     });
   }, []);
+  /**
+   * Bring an earlier conversation back, when it is asked for.
+   *
+   * The panel no longer replays one on open. What was dispatched from here is
+   * filed with the agent that ran it and is read there; what stayed in the
+   * panel was a copy of it, and a copy of a turn that has already settled —
+   * an answer given days ago, a question that could not be answered at all —
+   * was occupying a window that is now deliberately small. Nothing is
+   * discarded: the record is append only and still whole, one press away.
+   * What changed is that the chat opens on the next question rather than on
+   * the last one.
+   */
   const loadHistory = useCallback(async (cursor?: string) => {
     try {
       const response = await fetch('/api/assistant/history' + (cursor ? '?before=' + encodeURIComponent(cursor) : ''), { cache: 'no-store' });
       if (!response.ok) throw Error(m('historyError'));
       const data = await response.json() as { messages: ChatMessage[]; before: string | null };
-      setMessages(current => {
-        const combined = cursor ? [...data.messages, ...current] : [...current, ...data.messages];
-        return [...new Map(combined.map(message => [message.id, message])).values()];
-      });
-      setBefore(data.before); setHistoryError(''); setLoaded(true);
+      setMessages(current => joinEarlierTurns(data.messages, current));
+      setBefore(data.before); setHistoryError(''); setRestored(true);
     } catch { setHistoryError(m('historyError')); }
   }, [m]);
-  useEffect(() => { const timer = setTimeout(() => void loadHistory(), 0); return () => clearTimeout(timer); }, [loadHistory]);
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(async () => {
@@ -266,18 +275,16 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
   };
   const submit = async (question = input) => {
     const text = question.trim();
-    if (!text || submitting.current || hasVoice || !loaded || modeBusy || preferences?.busy) return;
+    if (!text || submitting.current || hasVoice || modeBusy || preferences?.busy) return;
     submitting.current = true; setBusy(true); followScroll.current = true;
     const start = Date.now(); setStartedAt(start); setProgress({ phase: 'thinking' }); setActiveSteps([]);
     const steps: SafeStep[] = [];
     const user: ChatMessage = { id: retryTurn.current?.text === text ? retryTurn.current.id : crypto.randomUUID(), role: 'user', text };
     retryTurn.current = { id: user.id, text };
-    // One turn, one reply — whatever it took to get there. The reply's id is
-    // derived from the question rather than minted fresh, so a retry replaces
-    // the attempt that failed instead of stacking beside it. Without this a
-    // couple of failures left a couple of saved replies, and reloading the page
-    // brought them all back as a row of orbs.
-    const replyId = `${user.id}:reply`;
+    // One turn, one reply — whatever it took to get there. See `chat-turn.ts`
+    // for why the id is derived from the question and why its exact shape is
+    // not this file's to choose.
+    const replyId = replyTurnId(user.id);
     try {
       await append(user); setInput('');
       if (intent === 'task' || employeeId) {
@@ -333,7 +340,9 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
       <button type="button" aria-label={t('AvalAssistant.closeAssistant')} onClick={close}><X size={18}/></button>
     </div>
     <div className="aval-inline-stream" data-empty={messages.length === 0} ref={streamRef} onScroll={event => { const e = event.currentTarget; followScroll.current = e.scrollHeight - e.scrollTop - e.clientHeight < 80; }}>
-      {before && <button type="button" className="text-button" onClick={() => void loadHistory(before)}>{m('older')}</button>}
+      {restored
+        ? before && <button type="button" className="text-button" onClick={() => void loadHistory(before)}>{m('older')}</button>
+        : <button type="button" className="text-button" onClick={() => void loadHistory()}>{m('previous')}</button>}
       {open && messages.length === 0 && <div className="aval-inline-welcome"><AvalThinkingOrb size={64} activity={activity}/><AvalGreeting key={locale} text={m('welcome')}/></div>}
       {messages.map(message => <div className={'aval-inline-message ' + message.role} key={message.id}>
         {message.text && <p>{message.text}</p>}
@@ -375,7 +384,7 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
             <button className="aval-minimal-agent" type="button" disabled={busy || hasVoice} aria-expanded={picker} aria-label={t('ChatPanel.agentLabel', { agent: actorName })} onClick={() => setPicker(!picker)}><span>{actorName}</span><ChevronDown size={13}/></button>
             <label className="aval-minimal-mode"><span className="sr-only">{m('autonomy')}</span><select value={mode} disabled={busy || hasVoice || modeBusy || preferences?.busy || !preferences} onChange={e => void setMode(e.target.value as AutonomyMode)}>{(['supervised', 'assisted', 'autonomous'] as const).map(value => <option value={value} key={value}>{t('Onboarding.options.' + value)}</option>)}</select><ChevronDown size={13}/></label>
             <button className="aval-minimal-mic" type="button" aria-label={voice.state === 'live' ? m('stopVoice') : m('startVoice')} aria-pressed={voice.state === 'live'} disabled={busy || voice.processing || voice.state === 'requesting'} onClick={() => { if (voice.state === 'live') { voice.stop(); return; } dictationBase.current = input.trim(); void voice.start(); }}>{voice.state === 'live' ? <Square size={16}/> : <Mic size={18}/>}</button>
-            <button className="aval-minimal-send" type="submit" disabled={!input.trim() || busy || hasVoice || !loaded || modeBusy || preferences?.busy} aria-label={t('AvalAssistant.sendMessage')}><ArrowUp size={18}/></button>
+            <button className="aval-minimal-send" type="submit" disabled={!input.trim() || busy || hasVoice || modeBusy || preferences?.busy} aria-label={t('AvalAssistant.sendMessage')}><ArrowUp size={18}/></button>
           </div>
         </form>
       </AvalComposerEffects>
