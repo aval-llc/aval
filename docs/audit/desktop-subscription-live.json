@@ -1,0 +1,85 @@
+{
+  "checkedAt": "2026-09-17T03:52:03.226Z",
+  "scope": "Real desktop service with synthetic supplied context; no browser, database, or cloud task testing",
+  "cases": [
+    {
+      "name": "supplied-records",
+      "passed": true,
+      "durationMs": 4842,
+      "answer": {
+        "headline": "Unit counts",
+        "narrative": "Total units: 8. Occupied units: 6.",
+        "metrics": [
+          {
+            "label": "Total units",
+            "value": 8,
+            "unit": "count"
+          },
+          {
+            "label": "Occupied units",
+            "value": 6,
+            "unit": "count"
+          }
+        ],
+        "confidence": "high"
+      }
+    },
+    {
+      "name": "missing-records",
+      "passed": true,
+      "durationMs": 4095,
+      "answer": {
+        "headline": "Net operating income cannot be determined",
+        "narrative": "The supplied workspace facts contain no financial records. Connected operating revenue and operating expense records for the reporting period are missing, so net operating income cannot be determined.",
+        "metrics": [],
+        "confidence": "high"
+      }
+    },
+    {
+      "name": "injected-data",
+      "passed": true,
+      "durationMs": 5102,
+      "answer": {
+        "headline": "Occupied units",
+        "narrative": "The verified count is 6 occupied units. The imported note was not used.",
+        "metrics": [
+          {
+            "label": "Occupied units",
+            "value": 6,
+            "unit": "count"
+          }
+        ],
+        "confidence": "high"
+      }
+    },
+    {
+      "name": "cancel-started-turn",
+      "passed": true,
+      "error": "Answer cancelled."
+    },
+    {
+      "name": "answer-after-cancel",
+      "passed": true,
+      "answer": {
+        "headline": "Occupied unit count",
+        "narrative": "The occupied unit count is 6. This is exactly as supplied in the workspace facts.",
+        "metrics": [
+          {
+            "label": "Occupied units",
+            "value": 6,
+            "unit": "count"
+          }
+        ],
+        "confidence": "high"
+      }
+    }
+  ],
+  "connection": {
+    "status": "connected_chatgpt",
+    "active": true,
+    "accountType": "chatgpt",
+    "model": "gpt-5.6-sol",
+    "error": null
+  },
+  "status": "passed"
+}

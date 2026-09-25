@@ -2,7 +2,7 @@
 
 Aval Desktop is a trusted Electron shell for the hosted Aval dashboard. It starts `codex app-server` locally and exposes a deliberately narrow bridge to the renderer so interactive Ask Aval questions can use the signed-in user's ChatGPT plan.
 
-The desktop bridge uses an app-specific Codex home, never reads another Codex installation's `auth.json`, removes API-key environment variables from the child process, keeps authentication URLs and credentials out of the renderer, and runs model turns in an empty read-only workspace with network access disabled. Cloud automations remain server-hosted because they must keep running when the laptop is closed.
+The desktop bridge uses an app-specific Codex home. On first use it can adopt an existing local Codex login without overwriting a login made inside Aval; signing out disables that automatic adoption. It removes API-key environment variables from the child process, keeps authentication URLs and credentials out of the renderer, and runs model turns in an empty read-only workspace with tool network access disabled. Model inference still connects to OpenAI. Cloud automations remain server-hosted because they must keep running when the laptop is closed.
 
 ## Development
 
@@ -10,10 +10,17 @@ Requirements: Node.js 22+, the Codex CLI, and a ChatGPT account eligible for Cod
 
 ```sh
 cd desktop
-npm install
+npm ci
 npm test
 npm start
 ```
+
+Inside Aval Desktop, open **Settings → Intelligence** and choose **Connect
+ChatGPT plan**. This uses OpenAI's browser sign-in; no API key is required for
+interactive Ask Aval answers. The hosted dashboard intentionally cannot reuse
+that personal session for background work. The complete pilot procedure and
+local agent evaluation commands are in
+[`docs/PILOT_CHATGPT_SUBSCRIPTION.md`](../docs/PILOT_CHATGPT_SUBSCRIPTION.md).
 
 Set `AVAL_DESKTOP_URL=http://localhost:3000` to point the shell at a local Aval development server. Set `AVAL_CODEX_PATH=/absolute/path/to/codex` only when the CLI is not discoverable on `PATH` or in a standard install location.
 

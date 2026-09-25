@@ -2,7 +2,7 @@ import { createCipheriv, createHash, publicEncrypt, randomBytes } from 'node:cry
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdtemp, writeFile, rm, mkdir, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname, isAbsolute } from 'node:path';
+import { join, dirname, isAbsolute, basename } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
@@ -16,12 +16,17 @@ export function postgresEnvironment(url) {
 }
 export async function command(program, args, env = process.env) {
   if (env.AVAL_POSTGRES_CLIENT_IMAGE && ['pg_dump','pg_restore'].includes(program)) {
-    if (env.AVAL_POSTGRES_CLIENT_IMAGE !== 'postgres:17') throw new Error('Unsupported PostgreSQL client image');
+    if (!['postgres:17', 'postgres:17-alpine'].includes(env.AVAL_POSTGRES_CLIENT_IMAGE)) throw new Error('Unsupported PostgreSQL client image');
     const fileIndex = args.indexOf('--file');
     const file = program === 'pg_dump' ? args[fileIndex + 1] : args.at(-1);
     if (!file || !isAbsolute(file) || !dirname(file).startsWith(join(tmpdir(),'aval-'))) throw new Error('Backup container must mount an isolated backup directory');
     const mount = dirname(file);
-    args = ['run','--rm','--network','host','--user',`${process.getuid()}:${process.getgid()}`,'--volume',`${mount}:${mount}`,
+    const containerFile = `/backup/${basename(file)}`;
+    if (program === 'pg_dump') args[fileIndex + 1] = containerFile;
+    else args[args.length - 1] = containerFile;
+    const user = typeof process.getuid === 'function' && typeof process.getgid === 'function'
+      ? ['--user', `${process.getuid()}:${process.getgid()}`] : [];
+    args = ['run','--rm','--network','host',...user,'--mount',`type=bind,source=${mount},target=/backup`,
       ...['PGHOST','PGPORT','PGUSER','PGPASSWORD','PGDATABASE','PGSSLMODE'].flatMap(name => ['--env',name]),
       env.AVAL_POSTGRES_CLIENT_IMAGE,program,...args];
     program = 'docker';

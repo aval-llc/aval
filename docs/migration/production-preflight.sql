@@ -4,6 +4,8 @@ SELECT name, type, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER B
 
 SELECT 'access_grants' AS table_name, count(*) AS row_count FROM "access_grants"
 UNION ALL
+SELECT 'action_evidence' AS table_name, count(*) AS row_count FROM "action_evidence"
+UNION ALL
 SELECT 'agent_approval_decisions' AS table_name, count(*) AS row_count FROM "agent_approval_decisions"
 UNION ALL
 SELECT 'agent_approvals' AS table_name, count(*) AS row_count FROM "agent_approvals"
@@ -32,11 +34,17 @@ SELECT 'agent_tasks' AS table_name, count(*) AS row_count FROM "agent_tasks"
 UNION ALL
 SELECT 'agent_worker_runs' AS table_name, count(*) AS row_count FROM "agent_worker_runs"
 UNION ALL
+SELECT 'ai_employee_scopes' AS table_name, count(*) AS row_count FROM "ai_employee_scopes"
+UNION ALL
+SELECT 'ai_employees' AS table_name, count(*) AS row_count FROM "ai_employees"
+UNION ALL
 SELECT 'ai_usage' AS table_name, count(*) AS row_count FROM "ai_usage"
 UNION ALL
 SELECT 'answer_audit_log' AS table_name, count(*) AS row_count FROM "answer_audit_log"
 UNION ALL
 SELECT 'approval_authorities' AS table_name, count(*) AS row_count FROM "approval_authorities"
+UNION ALL
+SELECT 'attempt_policies' AS table_name, count(*) AS row_count FROM "attempt_policies"
 UNION ALL
 SELECT 'automation_runs' AS table_name, count(*) AS row_count FROM "automation_runs"
 UNION ALL
@@ -53,6 +61,12 @@ UNION ALL
 SELECT 'documents' AS table_name, count(*) AS row_count FROM "documents"
 UNION ALL
 SELECT 'draft_documents' AS table_name, count(*) AS row_count FROM "draft_documents"
+UNION ALL
+SELECT 'employee_expertise' AS table_name, count(*) AS row_count FROM "employee_expertise"
+UNION ALL
+SELECT 'expertise_profiles' AS table_name, count(*) AS row_count FROM "expertise_profiles"
+UNION ALL
+SELECT 'expertise_selections' AS table_name, count(*) AS row_count FROM "expertise_selections"
 UNION ALL
 SELECT 'funnel_snapshots' AS table_name, count(*) AS row_count FROM "funnel_snapshots"
 UNION ALL
@@ -84,6 +98,8 @@ SELECT 'messages' AS table_name, count(*) AS row_count FROM "messages"
 UNION ALL
 SELECT 'oauth_states' AS table_name, count(*) AS row_count FROM "oauth_states"
 UNION ALL
+SELECT 'operational_facts' AS table_name, count(*) AS row_count FROM "operational_facts"
+UNION ALL
 SELECT 'operations_conflicts' AS table_name, count(*) AS row_count FROM "operations_conflicts"
 UNION ALL
 SELECT 'organization_invitations' AS table_name, count(*) AS row_count FROM "organization_invitations"
@@ -103,6 +119,8 @@ UNION ALL
 SELECT 'pms_action_flows' AS table_name, count(*) AS row_count FROM "pms_action_flows"
 UNION ALL
 SELECT 'pms_seat_messages' AS table_name, count(*) AS row_count FROM "pms_seat_messages"
+UNION ALL
+SELECT 'pms_seat_sender_addresses' AS table_name, count(*) AS row_count FROM "pms_seat_sender_addresses"
 UNION ALL
 SELECT 'pms_seat_senders' AS table_name, count(*) AS row_count FROM "pms_seat_senders"
 UNION ALL
@@ -146,6 +164,8 @@ SELECT 'utility_meters' AS table_name, count(*) AS row_count FROM "utility_meter
 UNION ALL
 SELECT 'vendors' AS table_name, count(*) AS row_count FROM "vendors"
 UNION ALL
+SELECT 'work_attempts' AS table_name, count(*) AS row_count FROM "work_attempts"
+UNION ALL
 SELECT 'work_orders' AS table_name, count(*) AS row_count FROM "work_orders"
 UNION ALL
 SELECT 'workspace_usage' AS table_name, count(*) AS row_count FROM "workspace_usage";
@@ -181,6 +201,10 @@ SELECT 'agent_tasks' AS table_name, status, count(*) AS row_count FROM "agent_ta
 SELECT 'agent_tasks' AS table_name, 'max_tokens' AS column_name, CAST(sum("max_tokens") AS TEXT) AS total FROM "agent_tasks";
 
 SELECT 'agent_worker_runs' AS table_name, status, count(*) AS row_count FROM "agent_worker_runs" GROUP BY status;
+
+SELECT 'ai_employees' AS table_name, status, count(*) AS row_count FROM "ai_employees" GROUP BY status;
+
+SELECT 'ai_employees' AS table_name, 'spend_limit_cents' AS column_name, CAST(sum("spend_limit_cents") AS TEXT) AS total FROM "ai_employees";
 
 SELECT 'ai_usage' AS table_name, 'input_tokens' AS column_name, CAST(sum("input_tokens") AS TEXT) AS total FROM "ai_usage";
 
@@ -245,6 +269,8 @@ SELECT 'units' AS table_name, status, count(*) AS row_count FROM "units" GROUP B
 SELECT 'units' AS table_name, 'market_rent_cents' AS column_name, CAST(sum("market_rent_cents") AS TEXT) AS total FROM "units";
 
 SELECT 'utility_bills' AS table_name, 'cost_cents' AS column_name, CAST(sum("cost_cents") AS TEXT) AS total FROM "utility_bills";
+
+SELECT 'work_attempts' AS table_name, 'cost_cents' AS column_name, CAST(sum("cost_cents") AS TEXT) AS total FROM "work_attempts";
 
 SELECT 'work_orders' AS table_name, status, count(*) AS row_count FROM "work_orders" GROUP BY status;
 

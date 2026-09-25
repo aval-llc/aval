@@ -53,8 +53,9 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   if (!encryptionKey) return Response.json({ error: "Credential encryption is not configured" }, { status: 500 });
   if (!connection.accessTokenCiphertext) return Response.json({ error: "No credential is stored for this provider." }, { status: 409 });
   try {
-    const credentials = JSON.parse(await decryptSecret(connection.accessTokenCiphertext, encryptionKey)) as { apiKey?: string; model?: string };
+    const credentials = JSON.parse(await decryptSecret(connection.accessTokenCiphertext, encryptionKey)) as { apiKey?: string; model?: string; reasoningEffort?: string };
     credentials.model = model || undefined;
+    credentials.reasoningEffort = reasoningEffort || undefined;
     const accessTokenCiphertext = await encryptSecret(JSON.stringify(credentials), encryptionKey);
     await db.update(integrationConnections).set({ accessTokenCiphertext, updatedAt: now }).where(eq(integrationConnections.id, connection.id));
     return Response.json({ provider: body.provider, model: model || null, reasoningEffort: reasoningEffort || null });

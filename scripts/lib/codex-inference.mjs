@@ -50,7 +50,18 @@ export async function startCodexInference() {
   mkdirSync(privateHome, { mode: 0o700 });
   mkdirSync(workspace, { mode: 0o700 });
   let child, rpc;
-  const close = () => { rpc?.close(); child?.kill(); rmSync(directory, { recursive: true, force: true }); };
+  const close = async () => {
+    rpc?.close();
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise(resolve => child.once('exit', resolve));
+      child.kill();
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2000))]);
+    }
+    // Windows keeps the copied auth file open briefly while Codex exits.
+    // Retrying here is preferable to either crashing a successful check or
+    // leaving subscription credentials in the temporary directory.
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  };
   try {
     // Same one-shot login adoption as Aval Desktop. No token is logged, sent to
     // Aval's server, or stored in the repository. User settings remain untouched.
@@ -128,5 +139,5 @@ export async function startCodexInference() {
       } catch (error) { error.diagnostics = diagnostics(); throw error; }
     };
     return { model, call, close };
-  } catch (error) { close(); throw error; }
+  } catch (error) { await close(); throw error; }
 }

@@ -29,12 +29,13 @@ export interface MessagesResponse {
 
 /** Provider-neutral transport error retained across all model adapters. */
 export class ModelProviderError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly retryable: boolean,
-  ) {
+  readonly status: number;
+  readonly retryable: boolean;
+
+  constructor(message: string, status: number, retryable: boolean) {
     super(message);
     this.name = "ModelProviderError";
+    this.status = status;
+    this.retryable = retryable;
   }
 }
