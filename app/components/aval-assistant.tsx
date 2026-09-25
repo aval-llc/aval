@@ -391,7 +391,7 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
       <div className="aval-inline-hint" role="status">{voice.error || (voice.state === 'live' ? m('listening') : voice.processing ? m('transcribing') : m('mode.' + mode))}</div>
     </div>
   </section>;
-  return <div className="aval-assistant aval-minimal" data-open={open}>
+  return <div className="aval-assistant aval-minimal" data-open={open} data-detached={!!popupRoot}>
     {popupRoot ? createPortal(content, popupRoot) : content}
     <button ref={launcherRef} className="aval-orb-launcher" type="button" data-tour-target="chat" aria-label={open ? t('AvalAssistant.closeAssistant') : t('AvalAssistant.askAval')} aria-expanded={open} onClick={() => open ? close() : setOpen(true)}><AvalThinkingOrb size={64} activity={activity}/>{unread && <span className="aval-unread" aria-label={m('unread')}/>}</button>
   </div>;
