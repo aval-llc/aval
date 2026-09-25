@@ -110,3 +110,14 @@ html:has(.aval-inline-chat[data-detached="true"]), body.aval-chat-popout:has(.av
 }
 @media (prefers-reduced-motion: reduce) { .aval-inline-chat *, .aval-orb-launcher * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 @media (prefers-reduced-motion: reduce) { .aval-greeting-typed { display: none; } .aval-greeting-static { display: inline; } }
+/* A blank right-hand rail on every module, so the chat has its own column
+   instead of floating over the page's content. The rail is reserved with
+   shell padding rather than a third grid column: several breakpoints and the
+   collapsed sidebar each rewrite the shell's columns, and padding leaves every
+   one of them untouched. `:has` scopes it to shells that mount the assistant. */
+@media (min-width: 1181px) {
+  .app-shell:has(> .aval-minimal) { --chat-rail-w: 320px; padding-right: var(--chat-rail-w); }
+  .app-shell:has(> .aval-minimal) .aval-inline-chat:not([data-detached="true"]) { right: 20px; bottom: 20px; width: calc(var(--chat-rail-w) - 40px); max-height: calc(100dvh - 40px); }
+  .app-shell:has(> .aval-minimal) .aval-inline-chat[data-expanded="true"]:not([data-detached="true"]) { width: min(450px, calc(100vw - 48px)); }
+  .app-shell:has(> .aval-minimal) .aval-orb-launcher { right: calc((var(--chat-rail-w) - 64px) / 2); }
+}
