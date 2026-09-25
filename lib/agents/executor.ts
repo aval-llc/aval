@@ -39,7 +39,7 @@ import { reserveMutation } from "./tasks.ts";
 import type { ToolDescriptor } from "./registry.ts";
 import { redactArguments } from "./redaction.ts";
 import { evaluateFinancialProposal, type FinancialProposalDecision } from "./execution-policy.ts";
-import { recordFinancialToolResult, reserveFinancialOperation } from "./financial-operations.ts";
+import { recordFinancialToolResult, recordLedgerWriteResult, reserveFinancialOperation } from "./financial-operations.ts";
 
 export interface ExecutionRequest {
   toolName: string;
@@ -339,7 +339,9 @@ async function runWithRetries(dbSession: DbSession,
         audit.push({ kind: "tool_call", label: `${tool.name}:truncated`, payloadDigest: await digestPayload(bounded.originalChars), count: bounded.originalChars });
       }
       if (financialOperationId) {
-        const recorded = await recordFinancialToolResult(dbSession, financialOperationId, request.subject.organizationId, bounded.json);
+        const recorded = tool.financial?.destination === "ledger"
+          ? await recordLedgerWriteResult(dbSession, financialOperationId, request.subject.organizationId, bounded.json)
+          : await recordFinancialToolResult(dbSession, financialOperationId, request.subject.organizationId, bounded.json);
         if (!recorded.ok) {
           audit.push({ kind: "tool_error", label: `${tool.name}:reconciliation_required`, payloadDigest: await digestPayload(recorded.reason), count: attempt });
           return { result: { status: "failed", reason: `${recorded.reason} The operation is marked unknown and requires reconciliation; it will not be retried.`, attempts: attempt, tool }, audit };

@@ -81,9 +81,21 @@ export interface ToolDescriptor {
     amountField: string;
     /** Argument holding the ISO-4217 code. */
     currencyField: string;
-    /** Provider-owned destination/account identifier. It is validated against
-     * an org allowlist and only a one-way fingerprint is persisted. */
+    /** The destination identifier. Only a one-way fingerprint is persisted. */
     accountField: string;
+    /**
+     * What the destination is, which decides how it is authorized.
+     *
+     * `external_account` (the default): money leaves to an account outside
+     * the workspace, so the destination must be on the owner-approved
+     * allowlist. `ledger`: an entry in a lease ledger this workspace owns, so
+     * the lease must be a record of this workspace — an allowlist of every
+     * lease would be meaningless, and a lease from anywhere else is refused.
+     * Every other control — owner-approved policy, currency, hard ceiling,
+     * rolling daily limit, approval tier, reservation, idempotency and the
+     * operation's audit trail — applies to both.
+     */
+    destination?: "external_account" | "ledger";
     /** Currencies this tool accepts. Anything else is denied before any policy threshold is consulted. */
     allowedCurrencies: readonly string[];
   };
@@ -192,8 +204,13 @@ const DESCRIPTORS: ToolDescriptor[] = [
   // Arrears: a payment plan is a commitment about someone's housing, and a
   // posting lands in a trust ledger. `critical` puts both behind the elevated
   // approval tier (two distinct approvers) rather than a single sign-off.
-  { name: "create_payment_plan", summary: "Record a payment plan against a delinquent account.", riskLevel: "critical", mutates: true, externalEffect: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
-  { name: "post_payment", summary: "Post a payment to a resident ledger in the connected PMS.", riskLevel: "critical", mutates: true, externalEffect: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true },
+  // Both are money in a trust ledger, so both carry the financial contract:
+  // the same owner-approved policy, ceiling, daily limit, approval tier and
+  // reserved, idempotent operation as any other money-moving tool.
+  { name: "create_payment_plan", summary: "Record a payment plan against a delinquent account.", riskLevel: "critical", mutates: true, externalEffect: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true,
+    financial: { amountField: "total_minor", currencyField: "currency", accountField: "lease_id", destination: "ledger", allowedCurrencies: ["USD", "MXN"] } },
+  { name: "post_payment", summary: "Post a payment to a resident ledger in the connected PMS.", riskLevel: "critical", mutates: true, externalEffect: true, requiredPermission: "pms.arrears.write", timeoutMs: 30_000, maxRetries: 0, idempotent: true, requiresApproval: true,
+    financial: { amountField: "amount_minor", currencyField: "currency", accountField: "lease_id", destination: "ledger", allowedCurrencies: ["USD", "MXN"] } },
   // Leasing: the two applicant-facing tools are also in
   // MANDATORY_HUMAN_CHECKPOINT, which is enforced independently of this flag so
   // that no future edit here can make them autonomous.
