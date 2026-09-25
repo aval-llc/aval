@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /** Generate the exhaustive default-deny RLS migration from the schema inventory. */
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { writeMigration } from "./write-migration.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -189,5 +190,5 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA aval_private TO aval_app;
 `);
 
 const output = path.join(root, "supabase/migrations/20260910000200_default_deny_rls.sql");
-await writeFile(output, blocks.join("\n").replaceAll("\r\n", "\n"));
-console.log(JSON.stringify({ tenantTables: tenantTables.length, propertyScoped: propertyScoped.size, output: path.relative(root, output) }));
+const outcome = await writeMigration(output, blocks.join("\n"));
+console.log(JSON.stringify({ tenantTables: tenantTables.length, propertyScoped: propertyScoped.size, output: path.relative(root, output), outcome }));

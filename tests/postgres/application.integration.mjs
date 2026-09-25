@@ -11,9 +11,29 @@ import { runAuditCases } from "./audit-cases.mjs";
 import { runMaintenanceCases } from "./maintenance-cases.mjs";
 import { runConversationCases } from "./conversation-cases.mjs";
 import { runPlannerCases } from "./planner-cases.mjs";
+import { runReplanCases } from "./replan-cases.mjs";
 import { runAuthRouteCases } from "./auth-route-cases.mjs";
 import { runPilotCases } from "./pilot-cases.mjs";
 import { runBackupCases } from "./backup-cases.mjs";
+import { runIntakeCases } from "./intake-cases.mjs";
+import { runVerificationCases } from "./verification-cases.mjs";
+import { runPmsWriteCases } from "./pms-write-cases.mjs";
+import { runCrashResumeCases } from "./crash-resume-cases.mjs";
+import { runSetupGraphCases } from "./setup-graph-cases.mjs";
+import { runMinimalChatCases } from './minimal-chat-cases.mjs';
+import { runEmployeeFolderCases } from "./employee-folder-cases.mjs";
+import { runEmployeeCases } from "./employee-cases.mjs";
+import { runExpertiseCases } from "./expertise-cases.mjs";
+import { runNoPmsCases } from "./no-pms-cases.mjs";
+import { runEmployeeApiCases } from "./employee-api-cases.mjs";
+import { runFactsEvidenceCases } from "./facts-evidence-cases.mjs";
+import { runReadModelCases } from "./read-model-cases.mjs";
+import { runSeatSenderCases } from "./seat-sender-cases.mjs";
+import { runBrowserWriteCases } from "./browser-write-cases.mjs";
+import { runRunnerApiCases } from "./runner-api-cases.mjs";
+import { runPmsJourneyCases } from "./pms-journey-cases.mjs";
+import { runPmsAdversarialCases } from "./pms-adversarial-cases.mjs";
+import { runWorkflowLifecycleCases } from "./workflow-lifecycle-cases.mjs";
 import { applySupabaseMigrations } from "../../scripts/migration/apply-supabase-migrations.mjs";
 
 const url = process.env.AVAL_TEST_DATABASE_URL;
@@ -125,6 +145,34 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
       assert.equal(invisible.length, 0, "another organization cannot read the row");
     });
 
+    await t.test("every tenant table the worker can reach has a worker policy", async () => {
+      // Worker policies are generated once, by looping over the tables that
+      // existed when `20260911000200_worker_role.sql` ran. Table *privileges*
+      // carry forward to later tables through ALTER DEFAULT PRIVILEGES; policies
+      // do not, because a policy has to name a table that already exists.
+      //
+      // The failure mode is invisible at migration time and only appears on the
+      // worker path: the cron runtime is `aval_worker`, so a write that succeeds
+      // from a request is refused in the background. Four tables had already
+      // drifted this way before this guard existed.
+      const { rows } = await administrator.query(`
+        SELECT c.relname AS table_name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN information_schema.columns col
+          ON col.table_schema = 'public' AND col.table_name = c.relname
+         AND col.column_name = 'organization_id'
+        WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_policies p
+            WHERE p.schemaname = 'public' AND p.tablename = c.relname
+              AND 'aval_worker' = ANY (p.roles)
+          )
+        ORDER BY c.relname`);
+      assert.deepEqual(rows.map((row) => row.table_name), [],
+        "these tenant tables have RLS but no aval_worker policy, so the background runtime cannot write to them");
+    });
+
     await t.test("planning saves current epoch-millisecond dates", async () => {
       const now = Date.now();
       await session(userA, async (dbSession) => {
@@ -179,9 +227,29 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runMaintenanceCases(t, { session, userA, userB, propertyId });
     await runConversationCases(t, { session, userA, userB });
     await runPilotCases(t, { session, userA, userB, config, administrator });
+    await runReplanCases(t, { config, administrator });
     await runPlannerCases(t, { config, administrator });
     await runAuthRouteCases(t, { config });
     await runAuditCases(t, { config, administrator, userId: userA, invitedUserId: userB, organizationId: personalOrganization(userA) });
+    await runIntakeCases(t, { session, userA, organizationId: personalOrganization(userA) });
+    await runVerificationCases(t, { session, userA });
+    await runPmsWriteCases(t, { session, userA, propertyId, administrator });
+    await runCrashResumeCases(t, { session, userA, propertyId, administrator });
+    await runEmployeeFolderCases(t, { session, userA, userB });
+    await runEmployeeCases(t, { session, userA, userB, administrator });
+    await runExpertiseCases(t, { session, userA, userB });
+    await runSeatSenderCases(t, { session, userA, userB });
+    await runBrowserWriteCases(t, { session, userA, userB, administrator });
+    await runRunnerApiCases(t, { session, userA, userB, administrator, config });
+    await runPmsJourneyCases(t, { session, administrator, propertyId, config });
+    await runWorkflowLifecycleCases(t, { session, userA, userB, config });
+    await runPmsAdversarialCases(t, { session, userA, userB, administrator, config });
+    await runNoPmsCases(t, { session, userA });
+    await runEmployeeApiCases(t, { session, userA, userB, config });
+    await runFactsEvidenceCases(t, { session, userA });
+    await runReadModelCases(t, { session, userA });
+    await runSetupGraphCases(t, {session,config});
+    await runMinimalChatCases(t, {session,config});
     await runBackupCases(t, url);
   } finally {
     if (roleCreated) {

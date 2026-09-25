@@ -7,7 +7,7 @@ type AppearanceContextValue = {
   appearance: AppearancePreferences;
   saved: AppearancePreferences;
   setAppearance: (next: AppearancePreferences) => void;
-  save: () => Promise<void>;
+  save: (next?: AppearancePreferences) => Promise<void>;
   reload: () => void;
   loading: boolean;
   saving: boolean;
@@ -50,17 +50,17 @@ export function AppearanceProvider({ children, isGuest }: { children: ReactNode;
     return () => { live = false; };
   }, [isGuest, revision]);
 
-  const save = async () => {
+  const save = async (next = appearance) => {
     if (saving || loading || error === "load") return;
     setSaving(true);
     setError(null);
     try {
-      if (isGuest) window.localStorage.setItem(GUEST_KEY, JSON.stringify(appearance));
+      if (isGuest) window.localStorage.setItem(GUEST_KEY, JSON.stringify(next));
       else {
-        const response = await fetch("/api/appearance", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(appearance) });
+        const response = await fetch("/api/appearance", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(next) });
         if (!response.ok) throw new Error("save");
       }
-      setSaved(appearance);
+      setSaved(next);
     } catch { setError("save"); }
     finally { setSaving(false); }
   };

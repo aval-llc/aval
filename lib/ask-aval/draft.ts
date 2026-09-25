@@ -20,7 +20,8 @@ import { DRAFT_TOOLS } from "./tools";
 import { runAskAvalLoop, json } from "./loop";
 import { getPreferenceContext } from "./preferences";
 import { getUsagePatternContext } from "./usage-patterns";
-import { resolvePersona, personaTools } from "./personas";
+import { resolvePersona } from "./personas";
+import { assembleToolset } from "@/lib/agents/toolset";
 
 const MAX_TITLE_CHARS = 140;
 const MAX_INSTRUCTIONS_CHARS = 1200;
@@ -87,12 +88,24 @@ export async function handleAskAvalDraft(dbSession: DbSession,
   // Drafting a full document takes longer per call than a quick chat answer
   // (more output tokens, same tool-round budget) — the default 25s timeout
   // is tuned for /ask and is too tight here.
+  // Assembled by the same function as the chat and durable paths. A drafting
+  // turn is not a lesser turn: it reads the same tools and is bounded by the
+  // same envelope.
+  const { tools } = await assembleToolset(dbSession, {
+    organizationId: session.orgId,
+    subject: { organizationId: session.orgId, userId: session.userId, isGuest },
+    agentId: persona.id,
+    persona,
+    baseTools: DRAFT_TOOLS,
+    finalToolName: "compose_document",
+  });
+
   return runAskAvalLoop(dbSession,
     env,
     session,
     SYSTEM + persona.systemPromptAddition + preferenceContext + usagePatternContext,
     messages,
-    personaTools(DRAFT_TOOLS, persona, "compose_document"),
+    tools,
     "compose_document",
     4096,
     55_000,

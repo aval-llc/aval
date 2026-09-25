@@ -21,9 +21,10 @@ import { runAskAvalLoop, json } from "./loop";
 import { getPreferenceContext } from "./preferences";
 import { getUsagePatternContext } from "./usage-patterns";
 import { TOOLS } from "./tools";
-import { resolvePersona, personaTools } from "./personas";
+import { resolvePersona } from "./personas";
 import { onboardingContext } from "@/lib/onboarding/storage";
 import { routeToPersona } from "./agent-router.ts";
+import { assembleToolset } from "@/lib/agents/toolset";
 
 export type { AskAvalSession } from "./usage";
 
@@ -84,18 +85,29 @@ export async function handleAskAval(dbSession: DbSession,
   // preferenceContext is appended for every persona, specialized or not — a
   // standing instruction the workspace has taught applies to whichever agent
   // takes the turn, not only to the general one.
-  // The persona is passed to the loop as *authority*, not framing: it resolves
-  // to a permission envelope the policy engine checks on every tool call
-  // (lib/agents/permissions.ts). `personaTools` below still narrows what the
-  // model is offered; the envelope is the ceiling neither it nor the model can
-  // raise. `isGuest` matters because every signed-out visitor shares one
-  // workspace, so a write by any of them is a write on behalf of all of them.
+  //
+  // The toolset is assembled by the same function the durable runtime uses.
+  // Before that it was `personaTools` alone, and the default persona declares
+  // no subset, so this path offered the model every schema in the registry —
+  // PMS writes included. They could not execute, but a model should not be
+  // carrying the knowledge that it must not call them. `isGuest` matters
+  // because every signed-out visitor shares one workspace, so a write by any of
+  // them is a write on behalf of all of them.
+  const { tools } = await assembleToolset(dbSession, {
+    organizationId: session.orgId,
+    subject: { organizationId: session.orgId, userId: session.userId, isGuest },
+    agentId: persona.id,
+    persona,
+    baseTools: TOOLS,
+    finalToolName: "render_answer",
+  });
+
   const response = await runAskAvalLoop(dbSession,
     env,
     session,
     SYSTEM + persona.systemPromptAddition + preferenceContext + usagePatternContext + userContext,
     messages,
-    personaTools(TOOLS, persona, "render_answer"),
+    tools,
     "render_answer",
     2048,
     undefined,

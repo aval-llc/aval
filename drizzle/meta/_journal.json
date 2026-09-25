@@ -232,6 +232,104 @@
       "when": 1789149151312,
       "tag": "0032_enterprise_identity_hierarchy",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1789671749607,
+      "tag": "0033_productive_zuras",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1789678406703,
+      "tag": "0034_silent_kang",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1789695129015,
+      "tag": "0035_mute_firebird",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1789696318055,
+      "tag": "0036_safe_jazinda",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1789698756350,
+      "tag": "0037_bouncy_matthew_murdock",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1789811796486,
+      "tag": "0038_left_ink",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1789847306113,
+      "tag": "0039_medical_caretaker",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1789848077128,
+      "tag": "0040_soft_kingpin",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1789848311466,
+      "tag": "0041_hesitant_star_brand",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1789862134275,
+      "tag": "0042_equal_mongoose",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1789862385338,
+      "tag": "0043_loose_jasper_sitwell",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1789862583262,
+      "tag": "0044_melodic_gabe_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1789926191833,
+      "tag": "0045_cool_red_ghost",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1789981325765,
+      "tag": "0046_happy_prowler",
+      "breakpoints": true
     }
   ]
 }

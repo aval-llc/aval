@@ -4,6 +4,7 @@ import { evaluate, allowedToolNames, MAX_DELEGATION_DEPTH } from "../lib/agents/
 import { AGENT_PERMISSIONS, roleForPersona, hasPermission } from "../lib/agents/permissions.ts";
 import { TOOL_REGISTRY, implementedTools } from "../lib/agents/registry.ts";
 import { PERSONAS, type PersonaId } from "../lib/ask-aval/personas.ts";
+import { PMS_WRITE_TOOL_NAMES } from "../lib/pms/tool-map.ts";
 
 /**
  * The policy engine is the deterministic half of "agents reason, the backend
@@ -43,7 +44,10 @@ test("a final-answer tool is never executable as a capability", () => {
 });
 
 test("declared-but-unwired tools are denied, so declaring one grants nothing", () => {
-  for (const name of ["issue_payment", "execute_lease", "dispatch_vendor"]) {
+  // `dispatch_vendor` left this list when the PMS write path gave it a real
+  // executor. It is still denied for most agents — just by permission and by the
+  // capability matrix now, rather than by being unwired.
+  for (const name of ["issue_payment", "execute_lease", "authorize_vendor_spend"]) {
     const decision = evaluate(name, { amount_cents: 100, currency: "USD" }, OWNER, { personaId: "general" });
     assert.equal(decision.effect, "deny", `${name} should be denied`);
     assert.equal(decision.effect === "deny" && decision.code, "not_implemented");
@@ -101,9 +105,17 @@ test("every tool a persona can be offered is registered", () => {
   }
 });
 
-test("the general agent can reach every implemented tool, and the risk analyst can only write task coordination state", () => {
+test("the general agent can reach every implemented tool except the specialist PMS writes, and the risk analyst can only write task coordination state", () => {
   const general = new Set(allowedToolNames("general", { isGuest: false }));
   for (const tool of implementedTools()) {
+    // Writes into a customer's system of record are deliberately specialist-only:
+    // the unspecialized assistant should not be able to post to a resident
+    // ledger because someone asked it a broad question. Each PMS write permission
+    // belongs to the one role whose job it is (see AGENT_PERMISSIONS).
+    if ((PMS_WRITE_TOOL_NAMES as readonly string[]).includes(tool.name)) {
+      assert.equal(general.has(tool.name), false, `general agent should not reach "${tool.name}"`);
+      continue;
+    }
     if (tool.name === "create_maintenance_work_order") {
       assert.equal(hasPermission("general", tool.requiredPermission), false);
       assert.equal(hasPermission("maintenance", tool.requiredPermission), true);

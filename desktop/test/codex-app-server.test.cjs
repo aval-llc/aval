@@ -149,8 +149,10 @@ test("service handles real completion envelopes after the start acknowledgement"
       }
       child.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
       if (message.method === "turn/start") {
-        // Deliver after the start acknowledgement, as a real subprocess does.
+        // Real notifications arrive after the turn/start response has set the
+        // active turn ID. A microtask here incorrectly hid completion matching bugs.
         setImmediate(() => {
+          child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "previous-turn", status: "failed", items: [], error: { message: "Stale turn must be ignored" } } } })}\n`);
           child.stdout.write(`${JSON.stringify({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", delta: '{"headline":"Verified","narrative":"The supplied facts support this.","metrics":[],"confidence":"high"}' } })}\n`);
           child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "unrelated-turn", status: "failed", error: { message: "Wrong turn" } } } })}\n`);
           child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: completionStatus, items: [], error: completionStatus === "failed" ? { message: "Invalid output schema" } : null } } })}\n`);

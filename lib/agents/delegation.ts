@@ -9,8 +9,9 @@ import { agentTasks } from "@/db/postgres/schema";
  * they can be tested directly. This module is the half that writes a row.
  */
 
-import { checkDelegation, type DelegationRefusal } from "./delegation-rules.ts";
+import { checkDelegation, roleForDelegation, type DelegationRefusal } from "./delegation-rules.ts";
 import { createTask, getTask, type TaskRecord } from "./tasks.ts";
+import { employeeScopes } from "./employees.ts";
 
 export * from "./delegation-rules.ts";
 
@@ -59,4 +60,78 @@ export async function delegate(dbSession: DbSession, parent: TaskRecord, toPerso
     delegationDepth: parent.delegationDepth + 1,
   });
   return { ok: true, task };
+}
+
+/* ── who may open work under whom ─────────────────────────────────────────── */
+
+/** How far back the ancestry is walked before it is treated as malformed. */
+const MAX_ANCESTRY = 16;
+
+/**
+ * Every actor already in this work's ancestry, including the parent itself.
+ *
+ * "Actor" is the employee where there is one and the persona otherwise, because
+ * that is what the cycle would be between. Bounded rather than trusting the
+ * depth cap: a corrupted chain should end this walk, not hang it.
+ */
+export async function ancestorActors(
+  dbSession: DbSession,
+  organizationId: string,
+  taskId: string,
+): Promise<Set<string>> {
+  const actors = new Set<string>();
+  let current: string | null = taskId;
+  for (let step = 0; step < MAX_ANCESTRY && current; step++) {
+    const task: TaskRecord | null = await getTask(dbSession, organizationId, current);
+    if (!task) break;
+    actors.add(task.employeeId ?? task.agentId);
+    current = task.parentTaskId ?? null;
+  }
+  return actors;
+}
+
+/**
+ * Why this delegation may not happen, or null when it may.
+ *
+ * Two questions the live path never asked. Whether the actor is allowed to
+ * delegate to this one at all — declared as `delegate_to` scopes where an
+ * employee owns the work, and by the static graph otherwise. And whether the
+ * delegation would close a loop.
+ *
+ * Nothing prevented a loop before this. `MAX_DELEGATION_DEPTH` bounded how long
+ * a cycle could run, which is not the same as refusing one: A delegating to B
+ * delegating back to A was legal, and merely shallow.
+ */
+export async function delegationRefusal(
+  dbSession: DbSession,
+  organizationId: string,
+  parent: TaskRecord,
+  child: { agentId: string; employeeId?: string | null },
+): Promise<string | null> {
+  const childActor = child.employeeId ?? child.agentId;
+  const parentActor = parent.employeeId ?? parent.agentId;
+
+  const ancestry = await ancestorActors(dbSession, organizationId, parent.id);
+  if (ancestry.has(childActor)) {
+    return `${childActor} is already working on this, further up the chain. Delegating to it again would close a loop.`;
+  }
+
+  if (parent.employeeId) {
+    // An employee delegates only to those it was explicitly granted. Absence of
+    // a grant is never permission, so an employee with no `delegate_to` scopes
+    // delegates to nobody.
+    const scopes = await employeeScopes(dbSession, organizationId, parent.employeeId);
+    const permitted = scopes.delegate_to ?? [];
+    if (!permitted.includes(childActor)) {
+      return `This employee was not granted delegation to ${childActor}.`;
+    }
+    return null;
+  }
+
+  const from = roleForDelegation(parentActor);
+  const to = roleForDelegation(childActor);
+  if (!from.allowed.includes(to.role)) {
+    return `"${from.role}" may not delegate to "${to.role}".`;
+  }
+  return null;
 }

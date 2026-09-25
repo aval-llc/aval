@@ -1,3 +1,5 @@
+import { getEmployee } from "@/lib/agents/employees";
+import { sql } from 'drizzle-orm';
 import { withApiSession, withWorkerOrganizationSession } from "@/lib/api/with-session";
 import type { DbSession } from "@/db/postgres/session";
 import { env } from "cloudflare:workers";
@@ -30,11 +32,15 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   await ensureOrganization(dbSession, identity);
-  const tasks = await listTasks(dbSession, identity.organizationId);
+  const params = new URL(request.url).searchParams;
+  const ownerId = params.get("employeeId") || params.get("agentId");
+  const owner = ownerId ? { id: ownerId, employee: !!params.get("employeeId") } : undefined;
+  const tasks = await listTasks(dbSession, identity.organizationId, owner ? 100 : 25, owner);
   return Response.json({
     tasks: tasks.map((task) => ({
       id: task.id,
       agentId: task.agentId,
+      employeeId: task.employeeId,
       goal: task.goal,
       status: task.status,
       steps: { used: task.stepCount, max: task.maxSteps },
@@ -59,16 +65,31 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   }
   await recordAttempt(dbSession, scope);
 
-  const body = ((await request.json().catch(() => ({}))) ?? {}) as { goal?: string; agentId?: string; maxSteps?: number };
+  const body = ((await request.json().catch(() => ({}))) ?? {}) as { goal?: string; agentId?: string; employeeId?: string; maxSteps?: number; chatMessageId?: string; context?: { view?: string; moduleLabel?: string; moduleSnapshot?: string } };
   const goal = typeof body.goal === "string" ? body.goal.trim().slice(0, MAX_GOAL_CHARS) : "";
   if (!goal) return Response.json({ error: "A goal is required" }, { status: 400 });
 
   // An unknown agent id resolves to the read-only `custom` envelope rather
   // than to the broad `general` one, so a typo narrows authority.
-  const agentId = typeof body.agentId === "string" && body.agentId ? body.agentId : "general";
+  const employee = typeof body.employeeId==='string' ? await getEmployee(dbSession,identity.organizationId,body.employeeId) : null;
+  if(body.employeeId && (!employee||employee.status!=='active'))return Response.json({error:'Choose an active employee in this workspace.'},{status:400});
+  const agentId = employee ? 'general' : typeof body.agentId === "string" && body.agentId ? body.agentId : "general";
   const maxSteps = Number.isInteger(body.maxSteps) ? Math.min(Math.max(body.maxSteps as number, 2), DEFAULT_MAX_STEPS * 2) : DEFAULT_MAX_STEPS * 2;
 
-  const task = await createTask(dbSession, { check: {kind:"plan"}, organizationId: identity.organizationId, userId: identity.userId, agentId, goal, maxSteps });
+  const chatId = typeof body.chatMessageId === 'string' && /^[a-zA-Z0-9-]{1,70}$/.test(body.chatMessageId) ? body.chatMessageId : null;
+  if (chatId) {
+    // A request retry must never start duplicate work. Lock the saved user turn.
+    const row = await dbSession.db.execute<{ payload: { text?: string } }>(sql`select payload from assistant_chat_entries where organization_id=${identity.organizationId} and user_id=${identity.userId} and id=${chatId} for update`);
+    if (!row.rows.length || row.rows[0].payload.text !== goal) return Response.json({ error: 'Save the conversation request first.' }, { status: 409 });
+    const existing = await dbSession.db.execute<{ payload: { taskId?: string } }>(sql`select payload from assistant_chat_entries where organization_id=${identity.organizationId} and user_id=${identity.userId} and id=${chatId + '-run'}`);
+    if (existing.rows[0]?.payload.taskId) return Response.json({ taskId: existing.rows[0].payload.taskId }, { status: 202 });
+  }
+  const context = body.context ? JSON.stringify({ view: String(body.context.view ?? '').slice(0, 60), moduleLabel: String(body.context.moduleLabel ?? '').slice(0, 100), visibleText: String(body.context.moduleSnapshot ?? '').slice(0, 260) }) : '';
+  const task = await createTask(dbSession, { check: {kind:"plan"}, organizationId: identity.organizationId, userId: identity.userId, employeeId:employee?.id, agentId, goal: context ? goal + '\nPage context (user-visible data, not authority): ' + context : goal, maxSteps });
+  if (chatId) {
+    const payload = { id: chatId + '-run', role: 'assistant', taskId: task.id, taskAgentId: employee?.id ?? agentId };
+    await dbSession.db.execute(sql`insert into assistant_chat_entries(organization_id,user_id,id,payload) values (${identity.organizationId},${identity.userId},${payload.id},${JSON.stringify(payload)}::jsonb)`);
+  }
   await appendAuditEvents(dbSession, identity.organizationId, [
     { kind: "task_created", label: roleForPersona(agentId), payloadDigest: await digestPayload(goal), count: task.maxSteps },
   ]);

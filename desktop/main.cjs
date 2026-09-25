@@ -2,7 +2,8 @@
  
 
 const path = require("node:path");
-const { app, BrowserWindow, ipcMain, shell, session, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, session, nativeTheme, dialog, systemPreferences } = require("electron");
+const { pms: pmsProvider } = require("./pms-provider.cjs");
 const { CodexAppServerService } = require("./codex-app-server.cjs");
 
 const { isChatWindowRequest, applyChatBackground, parseChatAppearance } = require("./chat-window.cjs");
@@ -95,7 +96,26 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  const microphoneGrants = new Set();
+  const trustedMicrophone = (contents, permission, details) => {
+    try { return permission === 'media' && new URL(contents.getURL()).origin === allowedOrigin && new URL(details.requestingUrl || details.securityOrigin || contents.getURL()).origin === allowedOrigin && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio'; } catch { return false; }
+  };
+  session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) => {
+    return !!contents && permission === 'media' && origin === allowedOrigin && details.mediaType === 'audio' && microphoneGrants.has(contents.id);
+  });
+  session.defaultSession.setPermissionRequestHandler(async (contents, permission, callback, details) => {
+    if (!trustedMicrophone(contents, permission, details)) { callback(false); return; }
+    try {
+      if (!microphoneGrants.has(contents.id)) {
+        const choice = await dialog.showMessageBox(BrowserWindow.fromWebContents(contents), { type: 'question', buttons: ['Allow microphone', 'Cancel'], defaultId: 1, cancelId: 1, title: 'Aval microphone', message: 'Allow Aval to record your voice request?', detail: 'Audio is sent to your workspace’s connected transcription provider when you stop. Aval does not retain the recording.' });
+        if (choice.response !== 0 || contents.isDestroyed()) { callback(false); return; }
+        if (process.platform === 'darwin' && !await systemPreferences.askForMediaAccess('microphone')) { callback(false); return; }
+        microphoneGrants.add(contents.id);
+        contents.once('destroyed', () => microphoneGrants.delete(contents.id));
+      }
+      callback(true);
+    } catch { callback(false); }
+  });
   service = new CodexAppServerService({
     userDataDir: app.getPath("userData"),
     version: app.getVersion(),
@@ -113,6 +133,19 @@ app.whenReady().then(async () => {
   registerIpc("set-active", ({ active } = {}) => service.setActive(active === true));
   registerIpc("set-model", ({ modelId } = {}) => service.setModel(modelId));
   registerIpc("ask", (payload) => service.ask(payload));
+  // The customer-authorized provider surface. Registered through the same
+  // trusted-sender check as everything else, and each name is one structured
+  // provider operation rather than a browser primitive.
+  for (const [channel, method] of [
+    ["supported", "supported"], ["session-status", "sessionStatus"], ["recover-session", "recoverSession"],
+    ["health-check", "healthCheck"], ["discover-capabilities", "discoverCapabilities"],
+    ["reconcile", "reconcile"], ["execute", "execute"], ["verify", "verify"],
+  ]) {
+    ipcMain.handle(`aval:pms:${channel}`, async (event, payload) => {
+      if (!isTrustedSender(event)) throw new Error("Untrusted Aval Desktop request.");
+      return pmsProvider[method](payload || {});
+    });
+  }
   registerIpc("cancel-turn", async (payload) => { await service.cancelTurn(payload || {}); return null; });
   ipcMain.handle('aval:chat:background', (event, payload) => {
     if (event.sender !== mainWindow?.webContents || !isTrustedSender(event)) throw new Error('Untrusted chat appearance request.');

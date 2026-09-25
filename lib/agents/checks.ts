@@ -19,7 +19,7 @@ export type TaskCheck = {
 } | {
     kind: 'plan';
 };
-export const MAX_CHECK_REPAIRS = 2;
+/** The repair budget is resolved policy now — see DEFAULT_ATTEMPT_POLICIES.check_repair. */
 export const EVIDENCE_TOOL_NAMES = implementedTools().filter(t => !t.mutates && !['plan_goal', 'get_goal_plan', 'read_memory', 'read_task_history', 'request_execution_plan'].includes(t.name)).map(t => t.name);
 /** Shared model-facing shape; parseTaskCheck remains the runtime authority. */
 export const TASK_CHECK_SCHEMA = {

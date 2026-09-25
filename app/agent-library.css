@@ -1,0 +1,96 @@
+/* Agent folders share Aval's surfaces and type, with color confined to covers. */
+.setup-view > .agent-library { padding: 0; border: 0; box-shadow: none; background: transparent; }
+.agent-library .panel-heading { align-items: center; }
+.library-subtitle { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.library-create { display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
+.library-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 25px 0 22px; }
+.library-filters { display: flex; gap: 5px; padding: 4px; background: var(--surface-soft); border-radius: 10px; }
+.library-filters button { border: 0; border-radius: 7px; background: transparent; padding: 8px 12px; font: inherit; font-size: 11px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.library-filters button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 4px #0000000b; }
+.library-toolbar .employee-search { flex: 0 1 270px; background: var(--surface); border-radius: 9px; }
+.agent-folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 24px 20px; }
+.agent-folder { --folder-a: #aac7e8; --folder-b: #384d72; --folder-c: #eff2fd; position: relative; display: flex; flex-direction: column; padding: 0; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); color: var(--ink); font: inherit; text-align: left; cursor: pointer; min-width: 0; isolation: isolate; box-shadow: 0 3px 6px #18223304, 0 10px 24px #18223305; transition: transform .2s ease, box-shadow .2s ease; }
+.agent-folder:hover { transform: translateY(-3px); box-shadow: 0 8px 24px #18223314; }
+.folder-color-1 { --folder-a: #c2b5e0; --folder-b: #65528e; --folder-c: #ece5fb; }
+.folder-color-2 { --folder-a: #a2cac4; --folder-b: #326d71; --folder-c: #e4f4ea; }
+.folder-color-3 { --folder-a: #deb59f; --folder-b: #905649; --folder-c: #ffebd7; }
+.folder-color-4 { --folder-a: #b4c3cf; --folder-b: #425b77; --folder-c: #e2eef7; }
+.folder-color-5 { --folder-a: #c1caa4; --folder-b: #5c7257; --folder-c: #f2f3dc; }
+.folder-cover { height: 99px; position: relative; border-radius: 19px 19px 0 0; overflow: hidden; background: radial-gradient(ellipse at 23% -20%, var(--folder-c) 0%, transparent 57%), radial-gradient(ellipse at 87% 115%, var(--folder-c) 0%, transparent 44%), linear-gradient(125deg, var(--folder-a) 3%, var(--folder-b) 57%, var(--folder-a) 100%); }
+.folder-cover::after { content: ''; position: absolute; inset: -60%; transform: rotate(-25deg); background: linear-gradient(90deg, transparent 35%, #ffffff55 48%, transparent 56%); filter: blur(10px); }
+.folder-badge { position: absolute; right: 14px; top: 14px; z-index: 1; background: #ffffffcf; color: #354147; border: 1px solid #ffffff70; font-size: 9px; padding: 4px 8px; border-radius: 6px; }
+.folder-front { position: relative; flex: 1; display: flex; flex-direction: column; padding: 18px 19px 0; border-radius: 0 17px 19px 19px; background: var(--surface); }
+.folder-front::before { content: ''; position: absolute; top: -17px; left: -1px; width: 51%; height: 19px; background: var(--surface); clip-path: polygon(0 100%, 0 65%, 3% 22%, 8% 0, 79% 0, 85% 9%, 96% 90%, 100% 100%); }
+.folder-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.folder-identity > span:last-child { min-width: 0; }
+.folder-identity strong { display: block; font-size: 14px; letter-spacing: -.025em; line-height: 1.4; overflow-wrap: anywhere; }
+.folder-identity small { display: block; margin-top: 3px; font-size: 10px; color: var(--muted); }
+.folder-location { display: flex; align-items: center; gap: 6px; margin: 17px 0 13px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.folder-location span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-location svg, .folder-check svg { flex-shrink: 0; }
+.folder-work { display: grid; align-content: start; gap: 9px; min-height: 66px; margin-bottom: 17px; }
+.folder-check { display: flex; align-items: flex-start; gap: 7px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.folder-check > svg { margin-top: 2px; color: var(--quiet); }
+.folder-check.is-done > svg { color: #478170; }
+.folder-check > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.folder-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding: 13px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.folder-footer > span { display: flex; align-items: center; gap: 7px; }
+.library-empty { padding: 50px 15px; text-align: center; font-size: 12px; color: var(--muted); }
+.agent-library-dialog { position: fixed; z-index: 150; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(900px, calc(100vw - 40px)); max-height: calc(100dvh - 60px); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); color: var(--ink); box-shadow: 0 30px 100px #0003; padding: 30px; }
+.agent-create-dialog { width: min(580px, calc(100vw - 32px)); }
+.library-dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.library-dialog-heading h2 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -.04em; }
+.library-dialog-heading p, .agent-create-dialog > p { font-size: 12px; color: var(--muted); line-height: 1.7; }
+.agent-create-dialog .employee-form { padding: 0; margin-top: 23px; border: 0; background: transparent; gap: 18px; }
+.agent-create-dialog label { display: grid; gap: 8px; font-size: 11px; font-weight: 500; }
+.agent-create-dialog input, .agent-create-dialog textarea { width: 100%; padding: 12px; font: inherit; font-size: 12px; line-height: 1.6; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); resize: vertical; }
+.library-templates summary, .execution-disclosure summary, .memory-explainer summary { cursor: pointer; font-size: 11px; color: var(--muted); }
+.library-templates .employee-templates { margin-top: 12px; }
+.agent-create-dialog .employee-form-actions { justify-content: flex-end; padding-top: 10px; }
+.library-lifecycle { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 0 20px; }
+.library-objective { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.library-agent-label { font-size: 11px; color: var(--muted); }
+.execution-disclosure { margin: 5px 0 18px; }
+.execution-disclosure[open] summary { margin-bottom: 18px; }
+.agent-work-dialog .agent-trace-card { margin: 15px 0 0; padding: 22px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; box-shadow: none; }
+.agent-trace-card { background: var(--surface); border-radius: 16px; }
+.agent-trace-card .ask-aval-tasks-heading p { max-width: 620px; font-size: 12px; line-height: 1.7; }
+.agent-trace-card .agent-goal-form { margin: 22px 0; }
+.agent-trace-card .agent-goal-field { border-radius: 10px; }
+.agent-trace-card .agent-goal-field input { padding: 13px 0; }
+.agent-trace-card .empty-column { border: 0; border-radius: 12px; background: var(--surface-soft); min-height: 160px; font-size: 12px; padding: 35px; text-align: center; }
+.setup-view .memory-panel { box-shadow: none; }
+.memory-panel .teach-box { padding: 0; border: 0; background: transparent; }
+.memory-panel .teach-input { border-radius: 10px; font-size: 12px; }
+.memory-panel .teach-hint { font-size: 10px; }
+.memory-panel .teach-suggestions { border: 0; padding-top: 0; }
+.memory-panel .teach-suggestions > summary { cursor: pointer; font-size: 11px; color: var(--muted); }
+.memory-panel .teach-suggestions-head { margin-top: 12px; }
+.memory-panel .teach-suggestions-head > span { display: none; }
+.memory-panel .memory-grid { grid-template-columns: 1fr; gap: 0; margin-top: 25px; }
+.memory-panel .memory-card { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 17px 0; border: 0; border-top: 1px solid var(--line); background: transparent; border-radius: 0; }
+.memory-panel .memory-card-head strong { font-size: 12px; }
+.memory-panel .memory-card-head small { font-size: 11px; }
+.memory-panel .memory-card .status-pill { display: none; }
+.memory-panel .memory-card-actions .text-button { text-decoration: none; font-size: 11px; }
+.memory-panel .memory-options { grid-column: 1 / -1; }
+.memory-explainer { border-top: 1px solid var(--line); padding-top: 15px; }
+.memory-explainer p { font-size: 11px; color: var(--muted); line-height: 1.7; max-width: 740px; }
+.agent-folder:focus-visible, .library-filters button:focus-visible, .agent-library-dialog :focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+@media (min-width: 1500px) { .agent-folder-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 650px) { .library-toolbar { align-items: stretch; flex-direction: column; gap: 12px; } .library-toolbar .employee-search { flex-basis: auto; } .library-filters { align-self: flex-start; } .agent-folder-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; } .agent-library .panel-heading { gap: 14px; flex-wrap: wrap; } .agent-library-dialog { padding: 22px; } .memory-panel .memory-card { grid-template-columns: 1fr; gap: 10px; } }
+@media (prefers-reduced-motion: reduce) { .agent-folder { transition: none; } .agent-folder:hover { transform: none; } }
+/* Use Aval's local Inter family even for native select/textarea controls. */
+.agent-library, .agent-library-dialog, .appearance-settings,
+.agent-library button, .agent-library-dialog input, .agent-library-dialog textarea,
+.agent-library-dialog select, .appearance-settings button, .appearance-settings select { font-family: var(--font-sans); }
+.library-document-output { overflow-x: auto; font-size: 12px; line-height: 1.8; }
+.library-document-output .soft-button { margin-top: 16px; text-decoration: none; }
+.employee-work-tabs { margin: 22px 0 6px; width: fit-content; flex-wrap: wrap; }
+.employee-review-count { margin-left: 6px; padding: 2px 5px; border-radius: 5px; background: var(--ink); color: var(--inverse-ink); font-size: 10px; }
+.employee-workspace > .ask-aval-tasks { margin-top: 20px; border: 0; background: transparent; box-shadow: none; padding: 0; }
+.employee-workspace .draft-task-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.employee-workspace [data-reveal] { opacity: 1; transform: none; }
+/* Draft dialogs are portaled above the employee folder dialog. */
+.employee-draft-overlay { z-index: 160; }
+.employee-draft-dialog { z-index: 161; max-height: calc(100dvh - 40px); overflow-y: auto; }

@@ -6,7 +6,7 @@ import { THEMES, type ThemeId } from "./themes";
 import { renderShapeLayer } from "./render-shape";
 import { useOptionalAppearance } from "../appearance-provider";
 import { CharacterAvatar } from "../character-avatar";
-import { CHARACTER_IDS, type AvatarSelection } from "@/lib/appearance";
+import { defaultAgentAvatar, currentAvatar } from "@/lib/appearance";
 
 export interface AvalAgentAvatarProps {
   personaId?: string;
@@ -59,11 +59,10 @@ export function AvalAgentAvatar({ shape, theme: themeId, size = 40, selected = f
   const theme = THEMES[themeId];
   const iconContainerClassName = ["aval-agent-avatar", "aval-agent-avatar-icon", interactive && "aval-agent-avatar-interactive", selected && "aval-agent-avatar-selected", className].filter(Boolean).join(" ");
 
-  if (customAvatar) return <CharacterAvatar avatar={customAvatar} size={size} label={label} className={iconContainerClassName}/>;
+  if (customAvatar) return <CharacterAvatar avatar={currentAvatar(customAvatar)} size={size} label={label} className={iconContainerClassName}/>;
   const originalId = icon?.match(/^\/personas\/([a-z-]+)\.webp$/)?.[1];
-  if (originalId && (CHARACTER_IDS as readonly string[]).includes(originalId)) {
-    const avatar: AvatarSelection = { kind: "character", id: originalId, background: "paper" };
-    return <CharacterAvatar avatar={avatar} size={size} label={label} className={iconContainerClassName}/>;
+  if (personaId || originalId) {
+    return <CharacterAvatar avatar={defaultAgentAvatar(personaId ?? originalId!)} size={size} label={label} className={iconContainerClassName}/>;
   }
 
   if (icon) {

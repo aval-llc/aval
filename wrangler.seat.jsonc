@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The Aval seat's inbound mailbox — a Worker of its own, not part of the main
+  // `aval` Worker (wrangler.deploy.jsonc). Deliberate separation:
+  //
+  //   - An Email Worker has no fetch handler and no public HTTP surface. Folding
+  //     it into the app Worker would put unverified inbound mail in the same
+  //     isolate as the authenticated app.
+  //   - It has one binding, and that binding is write-only in practice. The app
+  //     Worker's D1 and secrets have no business being reachable from a handler
+  //     whose input is whatever a stranger sent to aval.llc.
+  //   - It deploys on its own cadence. Routing points at a Worker *name*; the
+  //     app redeploying should not be able to disturb the mail path.
+  //
+  // Deploy:  npx wrangler deploy --config wrangler.seat.jsonc
+  "name": "aval-pms-seat-inbound",
+  "main": "worker/pms-seat-inbound.ts",
+  "compatibility_date": "2026-05-22",
+  "account_id": "3d090d893daad1536ed1dff3368d59b8",
+
+  // No public HTTP endpoint. This Worker has only an `email` handler, so a
+  // workers.dev URL serves nothing — but wrangler enables one by default, and
+  // the first deploy did: aval-pms-seat-inbound.evalxnder.workers.dev answered
+  // with error 1101. Harmless while there is no fetch handler, and exactly the
+  // kind of surface that stops being harmless the moment someone adds one.
+  // Mail reaches this Worker through an Email Routing rule, never over HTTP.
+  "workers_dev": false,
+
+  // The only filter between the apex catch-all and stored mail is this Worker's
+  // own recipient check, so its logs are the evidence that the check is working.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  "r2_buckets": [
+    {
+      "binding": "PMS_SEAT_INBOX",
+      "bucket_name": "aval-pms-seat-inbox"
+    }
+  ]
+}

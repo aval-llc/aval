@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { agentTasks, organizationInvitations } from '../../db/postgres/schema.ts';
 import { requestApproval, decideApproval, getApproval } from '../../lib/agents/approvals.ts';
 import { getTool } from '../../lib/agents/registry.ts';
+import { attemptHistory } from '../../lib/agents/work-attempts.ts';
 import { withDbSession } from '../../db/postgres/session.ts';
 import { createTask, claimTask, getTask, heartbeat, updateTask, requestCancel, appendStep } from '../../lib/agents/tasks.ts';
 import { appendAuditEvents, verifyOrganizationChain } from '../../lib/audit/log.ts';
@@ -250,14 +251,27 @@ export async function runAuditCases(t, { config, administrator, userId, invitedU
     await t.test('agent workflow: missing evidence cannot produce a final answer', async () => {
       const created = await task(); script(conclusion());
       const result = await advance(created);
-      assert.equal(result.status, 'FAILED', JSON.stringify(result));
-      assert.equal((await run(s => getTask(s, organizationId, created.id))).resultJson, null);
+      // Not FAILED: the objective is still worth reaching, and the run only
+      // proved that this approach could not evidence it. The work is handed to
+      // a person in a non-terminal state so it can be finished rather than
+      // restarted — but the unsupported answer is still withheld.
+      assert.equal(result.status, 'WAITING_FOR_HUMAN', JSON.stringify(result));
+      const saved = await run(s => getTask(s, organizationId, created.id));
+      assert.equal(saved.resultJson, null, 'an answer that failed its own check is never published');
+      assert.equal(saved.goal, created.goal, 'the objective survives the handoff');
+      assert.match(saved.error, /preserved/);
     });
     await t.test('agent workflow: reviewer rejection is bounded and withholds the result', async () => {
       const created = await task(); script(reply('get_portfolio_metrics', {}), conclusion()); rejectReview = true;
       const result = await advance(created);
-      assert.equal(result.status, 'FAILED', JSON.stringify(result));
-      assert.equal((await run(s => getTask(s, organizationId, created.id))).resultJson, null);
+      assert.equal(result.status, 'WAITING_FOR_HUMAN', JSON.stringify(result));
+      const saved = await run(s => getTask(s, organizationId, created.id));
+      assert.equal(saved.resultJson, null, 'a rejected result stays withheld');
+      // The repair budget was spent, and spending it is recorded rather than
+      // inferred, so the attempt history survives a restart.
+      const attempts = await run(s => attemptHistory(s, organizationId, created.id, 'check_repair'));
+      assert.ok(attempts.length >= 1, 'the exhausted repair budget is on the record');
+      assert.equal(attempts.at(-1).outcome, 'failed');
     });
     await t.test('agent workflow: cancellation during inference prevents proposed actions', async () => {
       const created = await task();

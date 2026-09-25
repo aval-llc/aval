@@ -45,6 +45,10 @@ export type AuditEntryKind =
   | "approval_decided"
   | "delegation"
   | "task_completed"
+  // An external effect was accepted but not proven. Recorded because the
+  // difference between "we did it" and "we asked and it was accepted" is
+  // exactly what an audit reader needs to see.
+  | "task_pending_verification"
   | "task_failed"
   | "task_cancelled"
   // workspace membership — who can see this tenant's data, and who can
@@ -53,7 +57,37 @@ export type AuditEntryKind =
   | "membership_changed"
   | "invitation_issued"
   | "invitation_accepted"
-  | "invitation_revoked";
+  | "invitation_revoked"
+  // AI employees — who was created, what they were allowed to do, and which
+  // expertise was loaded for a piece of work. An employee is an actor in this
+  // workspace, so the record of what it was permitted to become belongs beside
+  // the record of what it did.
+  | "employee_created"
+  | "employee_updated"
+  | "employee_activated"
+  | "employee_paused"
+  | "employee_archived"
+  | "employee_scope_granted"
+  | "employee_scope_revoked"
+  | "employee_assigned_to_work"
+  | "expertise_selected"
+  | "expertise_overridden"
+  | "toolset_assembled"
+  | "tool_authorization_denied"
+  // Customer-authorized provider execution. A browser write happens on somebody
+  // else's machine, inside somebody else's session, against a system Aval does
+  // not control — which is exactly why the trail has to be legible without it.
+  // Each of these is a moment an auditor would otherwise have to infer.
+  | "provider_work_claimed"
+  | "provider_session_unavailable"
+  | "provider_execution_completed"
+  | "provider_execution_failed"
+  | "provider_verification_confirmed"
+  | "provider_verification_contradicted"
+  | "provider_verification_inconclusive"
+  | "provider_flow_broken"
+  | "provider_duplicate_reconciled"
+  | "provider_human_handoff";
 
 /** One link, before it is chained. */
 export interface AuditEvent {

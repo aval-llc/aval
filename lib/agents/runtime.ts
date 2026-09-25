@@ -6,7 +6,7 @@ import { assembleContext, byteCount, MAX_CONTEXT_BYTES } from './context';
 import { planReadiness, goalPlan, validateGoalPlanProposal } from './goal-plan';
 import { checkDocumentAnswerNumbers } from './document-evidence';
 import { getTool } from './registry';
-import { checkTask, failedCheckCount, MAX_CHECK_REPAIRS, parseTaskCheck } from './checks';
+import { checkTask, failedCheckCount, parseTaskCheck } from './checks';
 /**
  * The durable agent runtime.
  *
@@ -37,28 +37,41 @@ import type { AskAvalEnv, ContentBlock, Message, ToolSchema, ToolUseBlock } from
 import { ModelProviderError } from "@/lib/ask-aval/model-types";
 import { callModel } from "@/lib/ask-aval/model-router";
 import { TOOLS, TOOL_SCHEMAS } from "@/lib/ask-aval/tools";
-import { personaTools, resolvePersona } from "@/lib/ask-aval/personas";
+import { resolvePersona } from "@/lib/ask-aval/personas";
 import { withDerivedNumbers, round2 } from "@/lib/ask-aval/faithfulness";
 import { stripDashes } from "@/lib/ask-aval/style";
 import { checkUsageBlocked, recordUsage } from "@/lib/ask-aval/usage";
 import { appendAuditEvents } from "@/lib/audit/log";
 import { digestPayload, type AuditEvent } from "@/lib/audit/chain";
 import { executeApprovedTool, executeTool, redactArguments } from "./executor.ts";
-import { allowedToolNames } from "./policy.ts";
 import { requestApproval, latestApprovalForTask, type ApprovalRecord } from "./approvals.ts";
 import { approvalMatchesToolUse } from "./approval-binding.ts";
+import { pendingExecutions, unverifiedExternalEffects, verifyExternalEffects } from "./verification.ts";
+import { claimFromState } from "./task-state.ts";
+import { payloadHash } from "./canonical-payload.ts";
 import { evidenceNumbersFromTranscript } from "./transcript-evidence.ts";
 import {
   appendStep,
   claimTask,
   getTask,
   heartbeat,
+  recordExternalReference,
   scheduleTaskRetry,
   updateTask,
   type TaskRecord,
   type TaskState,
 } from "./tasks.ts";
 import { planEvidence } from "./autonomy-storage";
+import { effectiveEmployeeAccess } from "./employee-access";
+import { assembleToolset } from "./toolset.ts";
+import { employeeEnvelope } from "./policy.ts";
+import type { Permission } from "./permissions.ts";
+import { employeeScopes, getEmployee } from "./employees.ts";
+import { selectExpertiseForWork } from "./expertise.ts";
+import { budgetExhausted, detectStagnation, nextDelayMs, resolveAttemptPolicy, type EscalationBehavior } from "./attempt-policy.ts";
+import { loadAttemptPolicies } from "./attempt-policy-store.ts";
+import { classifyToolFailure, replanGuidance } from "./tool-failure.ts";
+import { attemptSignature, attemptSpend, attemptTraces, recordWorkAttempt } from "./work-attempts.ts";
 import { autonomyInstructions, autonomyMode } from "./autonomy";
 import { readOnboarding } from "@/lib/onboarding/storage";
 import { shouldRetryTask } from "./retry-policy.ts";
@@ -145,7 +158,7 @@ export async function advanceTask(dbSession: DbSession,
   // fail its own predicate — the lease it just stamped is still in the future —
   // and the run would return before settling the decision it woke up for.
   if (!decidedApproval) {
-    const claimFrom: TaskState = task.status === "RUNNING" || task.status === "WAITING_FOR_TOOL" ? task.status : "QUEUED";
+    const claimFrom: TaskState = claimFromState(task.status);
     if (!(await claimTask(dbSession, taskId, workerId, claimFrom))) {
       // Another worker owns it, or the state moved under us. Both mean: not ours.
       const current = await getTask(dbSession, organizationId, taskId);
@@ -160,9 +173,47 @@ export async function advanceTask(dbSession: DbSession,
   // (framing) and the permission envelope (authority). The envelope is the
   // ceiling — a persona listing a tool it has no permission for gets it
   // removed here, not granted.
-  const permitted = new Set(allowedToolNames(task.agentId, subject));
-  let tools: ToolSchema[] = personaTools(TOOLS, persona, "render_answer")
-    .filter((tool) => tool.name === "render_answer" || permitted.has(tool.name));
+  // The employee that owns this work, where one does. Work created before
+  // employees existed, and work still addressed by a built-in persona, has no
+  // owner and is governed exactly as it was.
+  const owner = task.employeeId
+    ? await getEmployee(dbSession, organizationId, task.employeeId)
+    : null;
+
+  // What this employee may reach, and what it knows. Both narrow and neither
+  // widens: an employee with no capability grants is offered nothing, because
+  // absence of a grant is never permission.
+  const scopes = owner ? await employeeScopes(dbSession, organizationId, owner.id) : null;
+  // The employee's own authority, derived from what it was granted. Where there
+  // is no owner this stays null and the persona envelope governs exactly as it
+  // did — which is what makes this safe to land before every persona has been
+  // migrated to an employee.
+  const employeePermissions = owner && scopes
+    ? employeeEnvelope(scopes.capability ?? [], { mayCommunicateExternally: owner.mayCommunicateExternally })
+    : null;
+  const expertise = owner
+    ? await selectExpertiseForWork(dbSession, organizationId, {
+        taskId, employeeId: owner.id,
+        signals: {
+          objective: task.goal,
+          workType: taskCheckKind(task.checkJson ?? null),
+          domains: scopes?.data_domain ?? [],
+          availableCapabilities: scopes?.capability ?? [],
+        },
+      })
+    : null;
+
+  // Persona framing, permission envelope and the PMS capability matrix, in one
+  // place shared with the chat and draft paths — see lib/agents/toolset.ts on
+  // why there is exactly one of these now.
+  const assembled = await assembleToolset(dbSession, {
+    organizationId, subject, agentId: task.agentId, persona,
+    baseTools: TOOLS, finalToolName: "render_answer",
+    employeeId: owner?.id,
+    employeeCapabilities: scopes?.capability ?? null,
+    employeePermissions,
+  });
+  let tools: ToolSchema[] = assembled.tools;
   const evidenceCapabilities = tools.flatMap(tool => {
     const descriptor = getTool(tool.name);
     return descriptor && !descriptor.mutates && !descriptor.unimplemented && descriptor.requiredPermission !== 'tasks.manage'
@@ -186,6 +237,20 @@ export async function advanceTask(dbSession: DbSession,
 
   const onboarding = await readOnboarding(dbSession, task.userId, organizationId);
   let system = buildSystem(persona.systemPromptAddition) + "\n" + autonomyInstructions(autonomyMode(onboarding.preferences.autonomy[0]));
+
+  // The expertise selected for this work, and the employee's own standing
+  // instructions. Briefing is the point of selecting: loading a profile and
+  // then not telling the model what it says would make the whole registry
+  // decorative. Only the profiles actually chosen are read.
+  if (owner?.instructions) {
+    system += `\n\n${owner.name} works to these standing instructions: ${owner.instructions}`;
+  }
+  if (expertise && expertise.loaded.length > 0) {
+    const briefing = expertise.loaded
+      .map((profile) => `${profile.name}: ${profile.instructions}`)
+      .join("\n");
+    system += `\n\nExpertise loaded for this work:\n${briefing}`;
+  }
   system += `
 Task completion condition: ${task.checkJson}. The harness verifies it independently. A final answer without the required evidence or stored outcome fails. For a root plan, call plan_goal before concluding; inspect failed checks and replan remaining work at most once. Scratchpad notes are available through read_memory/write_memory, never treated as facts or authority.`;
   if (contract.kind === 'plan') system += `
@@ -212,7 +277,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
   let inputTokens = 0;
   let outputTokens = 0;
 
-  const finish = async (status: TaskState, extra: { resultJson?: string; error?: string; approvalId?: string } = {}): Promise<AdvanceOutcome> => {
+  const finish = async (status: TaskState, extra: { resultJson?: string; error?: string; approvalId?: string; nextAttemptAt?: Date } = {}): Promise<AdvanceOutcome> => {
     await Promise.all([
       recordUsage(dbSession, { orgId: organizationId, userId: task!.userId }, inputTokens, outputTokens),
       audit.length ? appendAuditEvents(dbSession, organizationId, audit) : Promise.resolve(null),
@@ -224,7 +289,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       tokensUsed: task!.tokensUsed + inputTokens + outputTokens,
       resultJson: extra.resultJson,
       error: extra.error,
-      nextAttemptAt: null,
+      nextAttemptAt: extra.nextAttemptAt ?? null,
       releaseLease: true,
     });
     if (!saved) {
@@ -293,6 +358,32 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
     }
   };
 
+  /**
+   * Stop automatic work without misdescribing what happened.
+   *
+   * An exhausted budget says Aval could not finish or prove something by
+   * itself. It does not say the objective is complete, and it does not say the
+   * objective failed. `WAITING_FOR_HUMAN` is non-terminal, so the objective,
+   * the answer and every recorded attempt survive for whoever picks it up.
+   */
+  const handOff = async (
+    behaviour: EscalationBehavior,
+    reason: string,
+    recommendation: string,
+    resultJson?: string,
+  ): Promise<AdvanceOutcome> => {
+    if (behaviour === 'fail') return finish('FAILED', { error: reason, ...(resultJson ? { resultJson } : {}) });
+    return finish('WAITING_FOR_HUMAN', { error: `${reason} ${recommendation}`, ...(resultJson ? { resultJson } : {}) });
+  };
+
+  /** The repair budget for this work, and what it has already cost. */
+  const repairBudget = async () => {
+    const policy = resolveAttemptPolicy('check_repair', {
+      workType: typeof contract?.kind === 'string' ? contract.kind : null,
+    }, await loadAttemptPolicies(dbSession, organizationId));
+    return { policy, failures: await failedCheckCount(dbSession, organizationId, taskId) };
+  };
+
   const completeAnswer = async (final: ToolUseBlock, stepIndex: number): Promise<AdvanceOutcome | null> => {
     const answer = stripDashes(final.input);
     const packet = await semanticPacket(dbSession, task, messages, 'answer', answer);
@@ -305,10 +396,181 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
     await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'verification_check', policyEffect: verification.exitCode ? 'deny' : 'allow', resultDigest: await digestPayload(verification), error: verification.exitCode ? verification.problems.join(' ') : undefined });
     messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: final.id, ...(verification.exitCode ? { is_error: true } : {}), content: JSON.stringify(verification) }] });
     if (verification.exitCode !== 0) {
-      if (await failedCheckCount(dbSession, organizationId, taskId) > MAX_CHECK_REPAIRS) return finish('FAILED', { error: 'Completion checks failed after bounded repair: ' + verification.problems.join(' ') });
+      const repair = await repairBudget();
+      if (budgetExhausted(repair.policy, { attempts: repair.failures, elapsedMs: 0 })) {
+        // The run could not satisfy its own completion condition. That is a
+        // statement about this approach, not about whether the objective is
+        // worth reaching, so the objective is handed on rather than written off.
+        await recordWorkAttempt(dbSession, {
+          organizationId, taskId, kind: 'check_repair', outcome: 'failed',
+          objectiveSnapshot: task.goal,
+          observations: verification.problems.join(' '),
+          failureReason: 'The completion condition was not satisfied after bounded repair.',
+          transient: false, progressed: false,
+          signature: await attemptSignature('render_answer', null, verification.problems.join(' ')),
+        });
+        // The objective, the attempts and the evidence are preserved, but the
+        // answer itself is not: it failed its own completion condition, and
+        // publishing it as the result of the work would assert exactly what the
+        // check refused to accept.
+        return handOff(repair.policy.onExhausted,
+          'Completion checks failed after bounded repair: ' + verification.problems.join(' '),
+          'The objective and its evidence are preserved; decide whether the approach or the completion condition should change.');
+      }
       return checkpoint();
     }
     audit.push({ kind: 'verdict', label: 'pass', payloadDigest: await digestPayload([]), count: 0 });
+
+    // The answer is supported. That is not the same claim as "the side effects
+    // this run caused in someone else's system actually took hold", so a task
+    // that executed a mutating tool cannot complete on the answer check alone.
+    const effects = await unverifiedExternalEffects(dbSession, organizationId, taskId);
+    if (effects.length > 0) {
+      // Ask what the evidence already says before counting another attempt. A
+      // webhook or a person may have settled this without Aval asking.
+      const sweep = await verifyExternalEffects(dbSession, organizationId, taskId);
+      const pending = await pendingExecutions(dbSession, organizationId, taskId);
+      const policyRows = await loadAttemptPolicies(dbSession, organizationId);
+      // One task can carry several effects. The budget is resolved from the
+      // effect that is actually keeping the work open, because that is the one
+      // whose provider and tool the operator would be configuring for.
+      const unsettled = new Set([...sweep.unproven, ...sweep.unreachable, ...sweep.contradicted]);
+      const governing = pending.find((execution) => unsettled.has(execution.actionExecutionId)) ?? pending[0];
+      const verificationPolicy = resolveAttemptPolicy('verification', {
+        provider: governing?.sourceProvider ?? null,
+        toolName: governing?.toolName ?? effects[0] ?? null,
+        workType: typeof contract?.kind === 'string' ? contract.kind : null,
+        riskClass: null,
+      }, policyRows);
+
+      /**
+       * Hand the work on without pretending to know more than the evidence does.
+       *
+       * The objective, the answer the run produced and every attempt behind it
+       * stay on the record — `WAITING_FOR_HUMAN` is not terminal, so the work
+       * can be picked up and finished rather than restarted from nothing.
+       */
+      const escalate = async (behaviour: EscalationBehavior, reason: string, recommendation: string) => {
+        audit.push({
+          kind: 'task_pending_verification',
+          label: behaviour === 'fail' ? 'failed' : 'handoff',
+          payloadDigest: await digestPayload(effects), count: effects.length,
+        });
+        return handOff(behaviour, reason, recommendation, JSON.stringify(answer));
+      };
+
+      /**
+       * Send the run back to think again, with what just happened attached.
+       *
+       * Appended to the message that is already open rather than pushed as a
+       * new one, so the transcript keeps alternating roles. The run continues
+       * from here: `completeAnswer` returning null is what the loop reads as
+       * "carry on", and the next pass sees the contradiction in its context.
+       */
+      const replanAfter = async (observation: string, guidance: string) => {
+        const replanPolicy = resolveAttemptPolicy('replan', {
+          provider: governing?.sourceProvider ?? null,
+          toolName: governing?.toolName ?? null,
+          workType: typeof contract?.kind === 'string' ? contract.kind : null,
+          riskClass: null,
+        }, policyRows);
+        const replanSpend = await attemptSpend(dbSession, organizationId, taskId, 'replan');
+        const traces = await attemptTraces(dbSession, organizationId, taskId);
+        const stagnation = detectStagnation(traces);
+
+        if (budgetExhausted(replanPolicy, { attempts: replanSpend.attempts + 1, elapsedMs: replanSpend.elapsedMs })) {
+          return escalate(replanPolicy.onExhausted, `${observation} Replanning did not resolve it within its budget.`,
+            'The objective and every attempt behind it are on the record; decide the next approach.');
+        }
+        if (stagnation.stagnant) {
+          // Trying again would be the same move in different clothes. The
+          // budget is not the problem — the approach is.
+          return escalate(replanPolicy.onExhausted,
+            `${observation} ${stagnation.repeats} recent attempts made no progress (${stagnation.reason}).`,
+            'A different approach is needed rather than another attempt.');
+        }
+
+        await recordWorkAttempt(dbSession, {
+          organizationId, taskId, kind: 'replan', outcome: 'failed',
+          objectiveSnapshot: task.goal, tools: effects,
+          observations: observation, shouldChange: guidance,
+          failureReason: observation, transient: false, progressed: true,
+          signature: await attemptSignature(governing?.toolName ?? null, { record: governing?.externalRecordId ?? null }, observation),
+          externalEffects: [...unsettled],
+        });
+        const open = messages.at(-1);
+        if (open?.role === 'user' && Array.isArray(open.content)) {
+          open.content.push({ type: 'text', text: `${observation} ${guidance}` });
+        }
+        return checkpoint();
+      };
+
+      if (sweep.verdict === 'contradicted') {
+        // The provider says the record is not there. That is a fact about one
+        // execution, not a verdict on the objective, so the default is to think
+        // again rather than to write the work off.
+        await recordWorkAttempt(dbSession, {
+          organizationId, taskId, kind: 'verification', outcome: 'failed',
+          objectiveSnapshot: task.goal, tools: effects,
+          observations: 'A provider re-read contradicted the recorded effect.',
+          failureReason: `Evidence contradicts ${effects.join(', ')}.`,
+          transient: false, progressed: true,
+          signature: await attemptSignature(governing?.toolName ?? null, { record: governing?.externalRecordId ?? null }, 'contradicted'),
+          externalEffects: sweep.contradicted,
+        });
+        audit.push({ kind: 'task_pending_verification', label: 'contradicted', payloadDigest: await digestPayload(sweep.contradicted), count: sweep.contradicted.length });
+        if (verificationPolicy.onContradicted === 'replan') {
+          return replanAfter(
+            `The provider was re-read and does not have the record ${effects.join(', ')} was supposed to create.`,
+            'Do not repeat the same write. Establish what actually exists at the provider first, then reach the objective another way.',
+          );
+        }
+        return escalate(verificationPolicy.onContradicted,
+          `Evidence shows ${effects.join(', ')} did not take effect.`,
+          'Reconcile against the provider before deciding the objective.');
+      }
+
+      if (sweep.verdict !== 'confirmed') {
+        // Nothing was disproven. The provider either could not be asked or has
+        // not caught up, and neither is evidence that the effect failed.
+        const unreachable = sweep.unreachable.length > 0;
+        const spend = await attemptSpend(dbSession, organizationId, taskId, 'verification');
+        const spent = { attempts: spend.attempts + 1, elapsedMs: spend.elapsedMs };
+        await recordWorkAttempt(dbSession, {
+          organizationId, taskId, kind: 'verification', outcome: 'inconclusive',
+          objectiveSnapshot: task.goal, tools: effects,
+          observations: unreachable
+            ? 'The provider could not be reached for a re-read.'
+            : 'The provider was re-read and has not caught up.',
+          transient: unreachable, progressed: false,
+          signature: await attemptSignature(governing?.toolName ?? null, { record: governing?.externalRecordId ?? null }, unreachable ? 'unreachable' : 'unproven'),
+          externalEffects: [...unsettled],
+        });
+        await persistStep(dbSession, {
+          taskId, organizationId, stepIndex, kind: 'verification_attempt',
+          policyEffect: 'allow', resultDigest: await digestPayload(effects),
+        });
+
+        if (budgetExhausted(verificationPolicy, spent)) {
+          // Not FAILED: the write landed, and saying otherwise is as untrue as
+          // claiming success. Not COMPLETED either. A person reconciles it,
+          // with the objective and the attempts intact.
+          return escalate(verificationPolicy.onExhausted,
+            `Executed ${effects.join(', ')} but could not confirm the effect after ${spent.attempts} attempts.`,
+            'Reconcile against the provider before closing; the objective and its attempt history are preserved.');
+        }
+
+        audit.push({ kind: 'task_pending_verification', label: 'scheduled', payloadDigest: await digestPayload(effects), count: spent.attempts });
+        return finish(unreachable ? 'WAITING_FOR_PROVIDER' : 'PENDING_VERIFICATION', {
+          resultJson: JSON.stringify(answer),
+          nextAttemptAt: new Date(Date.now() + nextDelayMs(verificationPolicy, spent.attempts)),
+        });
+      }
+      // Every effect is proven. Completion is now a statement about the world,
+      // not about the model's confidence, so the task may close.
+      audit.push({ kind: 'task_pending_verification', label: 'confirmed', payloadDigest: await digestPayload(sweep.confirmed), count: sweep.confirmed.length });
+    }
+
     audit.push({ kind: 'task_completed', label: task.agentId, payloadDigest: await digestPayload(answer), count: stepIndex });
     return finish('COMPLETED', { resultJson: JSON.stringify(answer) });
   };
@@ -316,12 +578,26 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
   try {
     try{parseTaskCheck(contract);}catch{return finish('FAILED',{error:'This legacy task needs an explicit completion condition before it can run.'});}
     if(readiness.failure)return finish('FAILED',{error:readiness.failure});
+    // A paused employee stops taking on execution; an archived one has stopped
+    // entirely. Neither is a failure of the work, so it waits for a person
+    // rather than being marked failed for something its owner did.
+    if (owner && owner.status !== 'active') {
+      return finish('WAITING_FOR_HUMAN', {
+        error: `${owner.name} is ${owner.status} and is not running work. Resume the employee, or reassign this work to one that is active.`,
+      });
+    }
+    if(owner){
+      const effective=await effectiveEmployeeAccess(dbSession,organizationId,owner.id);
+      const required:string[]=contract.kind==='evidence'?contract.tools:[];
+      if(!effective.capabilities.length||required.some((name: string)=>!effective.capabilities.includes(name)))return finish('WAITING_FOR_PROVIDER',{error:'Employee access is unavailable. Configure its connections and capabilities in Setup; this work will retry automatically.',nextAttemptAt:new Date(Date.now()+60000)});
+    }
     // Answer the proposal the run parked on, before asking the model anything
     // else. Until this happens the transcript ends on an unanswered tool_use,
     // which no provider will accept as a valid conversation.
     if (decidedApproval) {
       await settleDecidedApproval(dbSession, {
         organizationId, taskId, task, subject, messages, seenNumbers, audit, approval: decidedApproval,
+        employeePermissions,
       });
       // The approved side effect and its observation must become durable
       // before another model call starts. If the worker dies after execution,
@@ -476,9 +752,20 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
           await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'verification_check', toolName: 'plan_goal', policyEffect: verification.exitCode ? 'deny' : 'allow', resultDigest: await digestPayload(verification), error: verification.exitCode ? verification.problems.join(' ') : undefined });
           if (verification.exitCode) {
             results.push({ type: 'tool_result', tool_use_id: use.id, content: JSON.stringify(verification), is_error: true });
-            if (await failedCheckCount(dbSession, organizationId, taskId) > MAX_CHECK_REPAIRS) {
+            const planRepair = await repairBudget();
+            if (budgetExhausted(planRepair.policy, { attempts: planRepair.failures, elapsedMs: 0 })) {
               messages.push({ role: 'user', content: results });
-              return finish('FAILED', { error: 'Plan checks failed after bounded repair: ' + verification.problems.join(' ') });
+              await recordWorkAttempt(dbSession, {
+                organizationId, taskId, kind: 'check_repair', outcome: 'failed',
+                objectiveSnapshot: task.goal,
+                observations: verification.problems.join(' '),
+                failureReason: 'The plan could not be made to satisfy its checks.',
+                transient: false, progressed: false,
+                signature: await attemptSignature('plan_goal', null, verification.problems.join(' ')),
+              });
+              return handOff(planRepair.policy.onExhausted,
+                'Plan checks failed after bounded repair: ' + verification.problems.join(' '),
+                'The objective is preserved; a person decides whether the plan or the objective needs adjusting.');
             }
             continue;
           }
@@ -490,7 +777,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
           toolName: use.name,
           args: use.input,
           subject,
-          context: { personaId: task.agentId, delegationDepth: task.delegationDepth, remainingSteps },
+          context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth, remainingSteps },
           task: { id: taskId, stepIndex },
         });
         audit.push(...outcome.audit);
@@ -505,6 +792,21 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
             resultDigest: await digestPayload(result.json),
             attempt: result.attempts, durationMs: result.durationMs,
           });
+          // Where the effect landed, filed against the reservation that guarded
+          // it. Verification re-reads this exact record later; without it the
+          // (provider, tool) verifier has nothing to look up and the effect can
+          // never be proven.
+          if (result.tool.externalEffect) {
+            const reference = result.json as { provider?: unknown; external_id?: unknown } | null;
+            const externalRecordId = typeof reference?.external_id === "string" ? reference.external_id : null;
+            const sourceProvider = typeof reference?.provider === "string" ? reference.provider : null;
+            if (externalRecordId || sourceProvider) {
+              await recordExternalReference(dbSession, {
+                organizationId, taskId, stepIndex, toolName: use.name,
+                sourceProvider, externalRecordId,
+              });
+            }
+          }
           results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify(result.json) });
           continue;
         }
@@ -517,7 +819,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
             // Bind the human decision to this exact model proposal. Tool name
             // alone is insufficient because one assistant message may contain
             // two calls to the same financial tool with different arguments.
-            evidence: { toolUseId: use.id, goal: task.goal, agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
+            evidence: { toolUseId: use.id, payloadHash: await payloadHash(use.input), goal: task.goal, agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
             amountCents: typeof use.input.amount_cents === "number" ? use.input.amount_cents : undefined,
             currency: typeof use.input.currency === "string" ? use.input.currency : undefined,
             tier: result.tier,
@@ -554,7 +856,50 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
           argsDigest: await digestPayload(redactArguments(use.input)),
           error: message,
         });
-        results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify({ error: message }), is_error: true });
+        // The failure enters attempt history, which is the whole of what was
+        // missing. Without this a failed call was an error string handed back
+        // to the model and recorded nowhere, so the second identical failure
+        // was indistinguishable from the first and nothing could tell a retry
+        // from a loop.
+        const failure = classifyToolFailure(result);
+        await recordWorkAttempt(dbSession, {
+          organizationId, taskId,
+          kind: "replan",
+          outcome: result.status === "denied" ? "blocked" : "failed",
+          objectiveSnapshot: task.goal,
+          tools: [use.name],
+          observations: message,
+          failureReason: failure.reason,
+          transient: failure.transient,
+          // A failed call moved nothing. Saying otherwise would hide the loop
+          // from `detectStagnation`, which treats progress as absolution.
+          progressed: false,
+          signature: await attemptSignature(use.name, redactArguments(use.input), failure.reason),
+        });
+
+        let errorContent = message;
+        if (!failure.transient) {
+          // Only for failures that will not fix themselves. A rate limit told
+          // to "try something else" is bad advice — repeating it verbatim is
+          // the correct move, and `detectStagnation` already declines to count
+          // transient attempts as repetition.
+          const traces = await attemptTraces(dbSession, organizationId, taskId);
+          const stagnation = detectStagnation(traces);
+          const guidance = replanGuidance(use.name, stagnation.repeats || 1);
+          errorContent = `${message} ${guidance}`;
+
+          if (stagnation.stagnant) {
+            // The budget is not the problem; the approach is. Handing this to a
+            // person beats spending the remaining steps rediscovering it.
+            results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify({ error: errorContent }), is_error: true });
+            messages.push({ role: "user", content: results });
+            return handOff("human_handoff",
+              `${message} ${stagnation.repeats} recent attempts made no progress (${stagnation.reason}).`,
+              "A different approach is needed rather than another attempt; the objective and every attempt behind it are on the record.");
+          }
+        }
+
+        results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify({ error: errorContent }), is_error: true });
       }
 
       messages.push({ role: "user", content: results });
@@ -615,6 +960,14 @@ async function resumeFromApproval(dbSession: DbSession,
  * a read is idempotent by construction, and a mutating one recomputes the same
  * key and is suppressed as a duplicate rather than executed twice.
  */
+/** The completion contract's kind, for routing. Unparseable is simply unknown. */
+function taskCheckKind(checkJson: string | null): string | null {
+  try {
+    const parsed = JSON.parse(checkJson ?? "{}") as { kind?: unknown };
+    return typeof parsed.kind === "string" ? parsed.kind : null;
+  } catch { return null; }
+}
+
 async function settleDecidedApproval(dbSession: DbSession, input: {
   organizationId: string;
   taskId: string;
@@ -624,8 +977,10 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
   seenNumbers: Set<number>;
   audit: AuditEvent[];
   approval: ApprovalRecord;
+  /** The owning employee's authority, so a settled approval is judged by the same envelope. */
+  employeePermissions: readonly Permission[] | null;
 }): Promise<void> {
-  const { organizationId, taskId, task, subject, messages, seenNumbers, audit, approval } = input;
+  const { organizationId, taskId, task, subject, messages, seenNumbers, audit, approval, employeePermissions } = input;
   const last = messages[messages.length - 1];
   if (!last || last.role !== "assistant" || !Array.isArray(last.content)) return;
 
@@ -634,7 +989,7 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
 
   const results: ContentBlock[] = [];
   for (const use of toolUses) {
-    const isGatedCall = approvalMatchesToolUse(approval.evidenceJson, use, approval.toolName);
+    const isGatedCall = await approvalMatchesToolUse(approval.evidenceJson, use, approval.toolName);
 
     if (isGatedCall && approval.status !== "approved") {
       const refusal = approval.status === "rejected"
@@ -655,12 +1010,12 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
     const outcome = isGatedCall
       ? await executeApprovedTool(dbSession, {
           toolName: use.name, args: use.input, subject,
-          context: { personaId: task.agentId, delegationDepth: task.delegationDepth },
+          context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth },
           task: { id: taskId, stepIndex: approval.stepIndex, approvalId: approval.id, policyVersion: approval.policyVersion },
         })
       : await executeTool(dbSession, {
           toolName: use.name, args: use.input, subject,
-          context: { personaId: task.agentId, delegationDepth: task.delegationDepth },
+          context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth },
           task: { id: taskId, stepIndex: approval.stepIndex },
         });
     audit.push(...outcome.audit);
@@ -679,6 +1034,20 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
         // running (lib/agents/tasks.ts `reserveMutation`); repeating it here
         // would collide with it.
       });
+      // Every tool that reaches outside Aval requires approval, so this is the
+      // path external effects actually take. Recording where the effect landed
+      // anywhere else would miss all of them.
+      if (result.tool.externalEffect) {
+        const reference = result.json as { provider?: unknown; external_id?: unknown } | null;
+        const externalRecordId = typeof reference?.external_id === "string" ? reference.external_id : null;
+        const sourceProvider = typeof reference?.provider === "string" ? reference.provider : null;
+        if (externalRecordId || sourceProvider) {
+          await recordExternalReference(dbSession, {
+            organizationId, taskId, stepIndex: approval.stepIndex, toolName: use.name,
+            sourceProvider, externalRecordId,
+          });
+        }
+      }
       results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify(result.json) });
       continue;
     }

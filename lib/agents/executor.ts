@@ -25,6 +25,7 @@ import { taskBoundary, inboundToolAllowed } from './task-boundary';
 import { checkFaithfulness, withDerivedNumbers } from "@/lib/ask-aval/faithfulness";
 import { evidenceNumbersFromTranscript } from "./transcript-evidence";
 import { canonicalAction } from "./autonomy";
+import { employeeExecutionRefusal } from "./employee-access";
 import { getTask } from "./tasks";
 import { executionAuthority } from "./autonomy-storage";
 import { getTool } from "./registry";
@@ -81,6 +82,10 @@ export async function executeTool(dbSession: DbSession, request: ExecutionReques
   const descriptor = getTool(request.toolName);
   if (request.task) {
     const task = await getTask(dbSession, request.subject.organizationId, request.task.id);
+    if(task?.employeeId) {
+      const refusal=await employeeExecutionRefusal(dbSession,request.subject.organizationId,task.employeeId,request.toolName,request.args);
+      if(refusal)return {result:{status:'denied',code:'permission_denied',reason:refusal},audit};
+    }
     const scope = task ? JSON.parse(task.executionScopeJson) : {};
     if (task && ['send_external_message','place_call','publish_listing'].includes(request.toolName)) {
       const evidence = evidenceNumbersFromTranscript(JSON.parse(task.transcriptJson));
@@ -265,6 +270,10 @@ export async function executeApprovedTool(dbSession: DbSession, request: Executi
   const descriptor = getTool(request.toolName);
   if (request.task) {
     const task = await getTask(dbSession, request.subject.organizationId, request.task.id);
+    if(task?.employeeId) {
+      const refusal=await employeeExecutionRefusal(dbSession,request.subject.organizationId,task.employeeId,request.toolName,request.args);
+      if(refusal)return {result:{status:'denied',code:'permission_denied',reason:refusal},audit};
+    }
     const scope = task ? JSON.parse(task.executionScopeJson) : {};
     if (task && ['send_external_message','place_call','publish_listing'].includes(request.toolName)) {
       const evidence = evidenceNumbersFromTranscript(JSON.parse(task.transcriptJson));
@@ -313,7 +322,11 @@ async function runWithRetries(dbSession: DbSession,
   for (let attempt = 1; attempt <= tool.maxRetries + 1; attempt++) {
     try {
       const out = await withTimeout(
-        runTool(dbSession, tool.name, request.args, request.subject.organizationId, request.task ? `${request.task.id}:${tool.name}:${await digestPayload(canonicalAction(request.args))}` : _key ?? undefined, request.task),
+        runTool(dbSession, tool.name, request.args, request.subject.organizationId, request.task ? `${request.task.id}:${tool.name}:${await digestPayload(canonicalAction(request.args))}` : _key ?? undefined,
+          // The persona travels with the task coordinates so a PMS write can
+          // re-resolve this agent's deployments at execution time, not just at
+          // assembly. `approvalId` is already on `task` and reaches the same gate.
+          request.task ? { ...request.task, personaId: request.context?.personaId } : undefined),
         tool.timeoutMs,
         tool.name,
       );

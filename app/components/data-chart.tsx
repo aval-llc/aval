@@ -2,6 +2,7 @@
 import { useEffect, useId, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { chartDomain } from "@/lib/charts/domain";
+import type { DataState } from "@/lib/operations/dashboard-state";
 import {
   chartKinds,
   finiteValue,
@@ -29,6 +30,9 @@ export function DataChart({
   additive = false,
   initialKind = "bars",
   loading = false,
+  dataState = "live",
+  onConnect,
+  connectLabel,
 }: {
   title: string;
   subtitle?: string;
@@ -42,9 +46,13 @@ export function DataChart({
   additive?: boolean;
   initialKind?: ChartKind;
   loading?: boolean;
+  dataState?: DataState;
+  onConnect?: () => void;
+  connectLabel?: string;
 }) {
   const t = useTranslations("Enterprise"),
     c = useTranslations("Charts"),
+    s = useTranslations("DashboardState"),
     locale = useLocale();
   const id = useId().replace(/:/g, "");
   const [hidden, setHidden] = useState<string[]>([]),
@@ -53,6 +61,8 @@ export function DataChart({
   const [selectedKind, setKind] = useState<ChartKind>(initialKind),
     [finish, setFinish] = useState("gradient");
   const [preferenceKey, setPreferenceKey] = useState("");
+  const preview = dataState === "preview";
+  const syncing = loading || dataState === "syncing";
   const storageKey = `aval.chart.v2.${chartId ?? title}`;
   useEffect(() => {
     let saved: { kind?: ChartKind; finish?: string } = {};
@@ -136,13 +146,18 @@ export function DataChart({
     <section
       className="data-chart"
       aria-labelledby={`${id}-title`}
-      aria-busy={loading}
+      aria-busy={syncing}
       data-chart-kind={kind}
+      data-state={dataState}
     >
       <div className="data-chart-heading">
         <div>
           <h3 id={`${id}-title`}>{title}</h3>
           {subtitle && <p>{subtitle}</p>}
+          {preview && <p className="dashboard-state-label">{s("preview")}</p>}
+          {dataState === "syncing" && <p className="dashboard-state-label">{s("syncing")}</p>}
+          {dataState === "empty" && <p className="dashboard-state-label">{s("empty")}</p>}
+          {preview && onConnect && <button type="button" className="soft-button dashboard-connect" onClick={onConnect}>{connectLabel ?? s("connect")}</button>}
         </div>
         <div className="chart-controls">
           <label>
@@ -151,6 +166,7 @@ export function DataChart({
               className="enterprise-select"
               aria-label={`${title}: ${c("representation")}`}
               value={kind}
+              disabled={preview || syncing}
               onChange={(e) => setKind(e.target.value as ChartKind)}
             >
               {kinds.map((k) => (
@@ -166,6 +182,7 @@ export function DataChart({
               className="enterprise-select"
               aria-label={`${title}: ${c("finish")}`}
               value={finish}
+              disabled={preview || syncing}
               onChange={(e) => setFinish(e.target.value)}
             >
               <option value="gradient">{c("gradient")}</option>
@@ -176,6 +193,7 @@ export function DataChart({
             type="button"
             className="soft-button"
             aria-pressed={table}
+            disabled={preview || syncing}
             onClick={() => setTable(!table)}
           >
             {t(table ? "showChart" : "showData")}
@@ -188,6 +206,7 @@ export function DataChart({
             type="button"
             aria-pressed={!hidden.includes(s.key)}
             key={s.key}
+            disabled={preview || syncing}
             onClick={() =>
               setHidden((old) =>
                 old.includes(s.key)
@@ -203,10 +222,20 @@ export function DataChart({
           </button>
         ))}
       </div>
-      {loading ? (
+      {syncing ? (
         <div className="chart-loading" role="status">
           <span />
-          {c("loading")}
+          {dataState === "syncing" ? s("syncing") : c("loading")}
+        </div>
+      ) : preview ? (
+        <div className="data-chart-plot data-chart-preview" aria-hidden="true">
+          <svg viewBox="0 0 620 260" width="100%" focusable="false">
+            <defs><linearGradient id={`${id}-preview`} x1="0" y1="0" x2="0" y2="1"><stop stopColor={series[0]?.color ?? "var(--viz-blue)"} stopOpacity=".65"/><stop offset="1" stopColor={series[0]?.color ?? "var(--viz-blue)"} stopOpacity=".1"/></linearGradient></defs>
+            {[68, 118, 168, 218].map((line) => <line key={line} x1="65" x2="596" y1={line} y2={line} stroke="var(--line)" strokeDasharray="3 6" />)}
+            {initialKind === "horizontal" || initialKind === "bars" || initialKind === "stacked" || initialKind === "dots" ?
+              [0, 1, 2, 3, 4].map((index) => <rect key={index} x={initialKind === "horizontal" ? 145 : 95 + index * 95} y={initialKind === "horizontal" ? 32 + index * 42 : 190 - [45, 92, 62, 116, 78][index]} width={initialKind === "horizontal" ? [295, 210, 345, 260, 185][index] : 38} height={initialKind === "horizontal" ? 16 : [45, 92, 62, 116, 78][index]} rx="4" fill={`url(#${id}-preview)`}/>) :
+              <><path d="M65 183 L155 150 L245 163 L335 91 L425 120 L515 72 L596 104 L596 218 L65 218 Z" fill={`url(#${id}-preview)`}/><path d="M65 183 L155 150 L245 163 L335 91 L425 120 L515 72 L596 104" fill="none" stroke={series[0]?.color ?? "var(--viz-blue)"} strokeWidth="2.5"/></>}
+          </svg>
         </div>
       ) : !rows.length || !numbers.length ? (
         <div className="enterprise-empty">

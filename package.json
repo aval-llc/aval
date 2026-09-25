@@ -42,7 +42,11 @@
     "evaluate:semantic:codex": "node scripts/evaluate-codex-semantic.mjs docs/audit/codex-semantic-evaluation.json",
     "validate:runtime:codex": "node --import ./tests/integration/module-hooks.mjs scripts/validate-codex-runtime.mjs docs/audit/codex-runtime-validation.json",
     "validate:independence": "node --import ./tests/integration/module-hooks.mjs scripts/validate-independence.mjs",
-    "compare:agents:codex": "node --import ./tests/integration/module-hooks.mjs scripts/compare-agent-llm.mjs"
+    "compare:agents:codex": "node --import ./tests/integration/module-hooks.mjs scripts/compare-agent-llm.mjs",
+    "test:db:start": "node scripts/database-harness.mjs start",
+    "test:db:reset": "node scripts/database-harness.mjs reset",
+    "test:db:stop": "node scripts/database-harness.mjs stop",
+    "test:postgres:local": "AVAL_TEST_DATABASE_URL=$(node scripts/database-harness.mjs reset) npm run test:postgres"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",
@@ -51,6 +55,7 @@
     "@radix-ui/react-separator": "^1.1.15",
     "@radix-ui/react-slot": "^1.3.3",
     "@radix-ui/react-tabs": "^1.1.21",
+    "border-beam": "^1.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
@@ -61,6 +66,7 @@
     "exceljs": "^4.4.0",
     "iconoir-react": "^7.12.1",
     "jspdf": "^4.2.1",
+    "liquid-gooey": "^0.2.1",
     "lucide-react": "^1.40.0",
     "next-intl": "^4.13.7",
     "pg": "^8.23.0",
@@ -70,7 +76,9 @@
     "react-day-picker": "^10.0.1",
     "react-dom": "19.2.8",
     "simple-icons": "^16.28.0",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "thinking-orbs": "^0.3.1",
+    "voice-glow": "^0.2.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
@@ -103,6 +111,8 @@
   },
   "type": "module",
   "overrides": {
-    "vinext": { "image-size": "2.0.3" }
+    "vinext": {
+      "image-size": "2.0.3"
+    }
   }
 }

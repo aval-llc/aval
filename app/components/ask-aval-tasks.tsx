@@ -254,6 +254,7 @@ export function useDraftJobs(locale: string) {
             headline?: string;
             narrative?: string;
             documentType?: string;
+            personaId?: string | null;
             document?: string;
             metrics?: DraftMetric[];
             chart?: DraftChart;
@@ -270,6 +271,7 @@ export function useDraftJobs(locale: string) {
             instructions: row.instructions,
             format: row.format,
             documentType: row.documentType,
+            personaId: row.personaId ?? undefined,
           },
           status:
             row.status === "done"
@@ -647,10 +649,12 @@ export function AskAvalTasksSection({
   onSend,
   onRemove,
   loading = false,
+  canCreate = true,
 }: {
   jobs: DraftJob[];
   onRemove: (ids: string[]) => Promise<void>;
   loading?: boolean;
+  canCreate?: boolean;
   onCreate: (input: CreateDraftInput) => void;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
@@ -696,8 +700,8 @@ export function AskAvalTasksSection({
     <section className="ask-aval-tasks" data-reveal>
       <div className="ask-aval-tasks-heading">
         <div>
-          <h2>{t("AskAvalTasks.sectionTitle")}</h2>
-          <p>{t("AskAvalTasks.sectionSubtitle")}</p>
+          <h2>{t("AgentLibrary.documentsTitle")}</h2>
+          <p>{t("AgentLibrary.documentsSubtitle")}</p>
         </div>
         <div className="draft-heading-actions">
           <button
@@ -709,7 +713,7 @@ export function AskAvalTasksSection({
             <Trash width={16} height={16} />
             {t("AskAvalTasks.clearAll")}
           </button>
-          <button
+          {canCreate && <button
             type="button"
             className="primary-button"
             disabled={removing}
@@ -717,7 +721,7 @@ export function AskAvalTasksSection({
           >
             <Page width={17} height={17} />
             {t("AskAvalTasks.newDraft")}
-          </button>
+          </button>}
         </div>
       </div>
       {deleteError && (
@@ -751,8 +755,8 @@ export function AskAvalTasksSection({
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="small-dialog">
+          <Dialog.Overlay className="dialog-overlay employee-draft-overlay" />
+          <Dialog.Content className="small-dialog employee-draft-dialog">
             <Dialog.Title>{t("AskAvalTasks.clearTitle")}</Dialog.Title>
             <Dialog.Description>
               {t("AskAvalTasks.clearDescription", { count: clearIds.length })}
@@ -782,8 +786,8 @@ export function AskAvalTasksSection({
       </Dialog.Root>
       <Dialog.Root open={creating} onOpenChange={setCreating}>
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="small-dialog">
+          <Dialog.Overlay className="dialog-overlay employee-draft-overlay" />
+          <Dialog.Content className="small-dialog employee-draft-dialog">
             <div className="dialog-top">
               <Dialog.Title>{t("AskAvalTasks.newDraft")}</Dialog.Title>
               <Dialog.Close className="icon-button">

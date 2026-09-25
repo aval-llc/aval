@@ -1,7 +1,7 @@
 import type { DbSession } from "@/db/postgres/session";
 import { getTask } from './tasks';
 import { getTool } from './registry';
-import { hasPermission, roleForPersona } from './permissions';
+import { canOrchestrate, hasPermission, roleForPersona } from './permissions';
 import { MAX_DELEGATION_DEPTH } from './policy';
 export function inboundToolAllowed(scope: { conversationId?: string; messageId?: string; maintenance?: { residentId: string; propertyId: string; unitId: string } }, name: string, args: Record<string, unknown>) {
   if (name === 'request_execution_plan') return false;
@@ -24,7 +24,12 @@ export async function taskBoundary(dbSession: DbSession, org:string,user:string,
   if(['FAILED','COMPLETED','CANCELLED'].includes(task.status))return 'The task or its parent has stopped.';
   if(Date.now()>=(task.deadlineAt?.getTime()??task.createdAt.getTime()+30*60_000))return 'The task or its parent reached its wall-clock limit.';
   if(task.cancelRequested)return 'The task or its parent was cancelled.';
-  if(!hasPermission(roleForPersona(task.agentId),tool.requiredPermission))return 'The task ancestry does not grant this tool permission.';
+  // The executing task must hold the permission. An ancestor may instead be
+  // allowed to route it — see ORCHESTRATION_PERMISSIONS. A coordinator that
+  // calls the tool itself is still the executing task, so it is still refused.
+  if(!hasPermission(roleForPersona(task.agentId),tool.requiredPermission)
+     &&!(task.id!==taskId&&canOrchestrate(roleForPersona(task.agentId),tool.requiredPermission)))
+   return 'The task ancestry does not grant this tool permission.';
   const scope=JSON.parse(task.executionScopeJson);
   if(scope.source==='inbound'){
    if(!inboundToolAllowed(scope,toolName,args))return 'Inbound tasks are limited to their originating message and approved matched maintenance request.';

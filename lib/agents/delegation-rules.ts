@@ -43,7 +43,11 @@ export const DELEGATION_RULES: Partial<Record<AgentRole, readonly AgentRole[]>> 
   portfolioOutlook: ["leaseReview", "financial"],
   // Renewal and expiration questions land here first and often need the lease.
   brokerage: ["leaseReview"],
-  general: ["financial", "leaseReview", "maintenance", "riskAnalyst"],
+  // Brokerage was absent, which left `pms.leasing.write` — the permission only
+  // brokerage holds — unreachable from the coordinator. Leasing work could be
+  // started by explicitly selecting the specialist but never by coordinating
+  // toward it, which is the path event-driven work has to take.
+  general: ["financial", "leaseReview", "maintenance", "riskAnalyst", "brokerage"],
 };
 
 export type DelegationRefusal =
@@ -103,4 +107,10 @@ export function checkDelegation(parent: DelegationParent, toPersonaId: string): 
   }
 
   return { ok: true, permissions };
+}
+
+/** The delegation role for an actor, with what it may delegate to. */
+export function roleForDelegation(actorId: string): { role: AgentRole; allowed: readonly AgentRole[] } {
+  const role = roleForPersona(actorId);
+  return { role, allowed: DELEGATION_RULES[role] ?? [] };
 }

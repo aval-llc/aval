@@ -19,6 +19,11 @@ const eslintConfig = defineConfig([
     "outputs/**",
     "infra/benchmark/outputs/**",
     "infra/benchmark/.wrangler/**",
+    // Agent scratch space, not project source. `.claude/worktrees` holds full
+    // checkouts of other branches, so linting it reports thousands of errors
+    // for code this branch does not own and can never fix here.
+    ".claude/**",
+    ".remember/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

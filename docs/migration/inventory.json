@@ -1,11 +1,11 @@
 {
   "version": 1,
   "sourceHashEncoding": "UTF-8, LF normalized",
-  "schemaSha256": "16b1644dd238d0973ceb9841971fe54e780130f21d9587073b9dd5caa7892f06",
-  "journalSha256": "4984c17d584df17d596430888cfacc8e85f77ac61f7d8b4ff2023ad9165855d6",
+  "schemaSha256": "e53bb95d8cd88d56211c997e8ed9af6da2820d5914d063a7d70087b003623dd4",
+  "journalSha256": "781480e7b5a3a6283efd46884109b2ad4332a6d4794ed614f7d3483d026662af",
   "counts": {
-    "tables": 67,
-    "migrations": 33,
+    "tables": 74,
+    "migrations": 38,
     "triggers": 6,
     "getDbFiles": 0
   },
@@ -174,6 +174,31 @@
       "index": 32,
       "file": "0032_enterprise_identity_hierarchy.sql",
       "sha256": "2992d853f323d53fad2d5d23f7acfb55521a3dd8fc0174d41933fb9f010d7572"
+    },
+    {
+      "index": 33,
+      "file": "0033_productive_zuras.sql",
+      "sha256": "07b15f25afdcda0a03665239550ae0745466d8672a818aed7ad851084f3f63f8"
+    },
+    {
+      "index": 34,
+      "file": "0034_silent_kang.sql",
+      "sha256": "5aa8b01acb0f7715e2210eb243e382a5986feb3ef2c7a5d16f9aad0dcbbf478e"
+    },
+    {
+      "index": 35,
+      "file": "0035_mute_firebird.sql",
+      "sha256": "10434d9bf5725ed8fc140f69e5c460210bfc0a014c51c481b5d99084f939cec4"
+    },
+    {
+      "index": 36,
+      "file": "0036_safe_jazinda.sql",
+      "sha256": "fa36ec4b4f609718084e815311fb96489cf4035e325adfd7829acebdc3b669a2"
+    },
+    {
+      "index": 37,
+      "file": "0037_bouncy_matthew_murdock.sql",
+      "sha256": "8e329819d6acb385b96436684da74452df017767733039217cb2b6b5117c57d4"
     }
   ],
   "tables": [
@@ -1540,6 +1565,247 @@
         },
         {
           "name": "sqlite_autoindex_agent_checks_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "agent_deployments",
+      "exportName": "agentDeployments",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "persona_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "workflows_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "autonomy_mode",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "status",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "agent_deployments_lookup_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "persona_id",
+            "status"
+          ]
+        },
+        {
+          "name": "agent_deployments_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "persona_id",
+            "provider"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "persona_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "workflows_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "autonomy_mode",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'supervised'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'active'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "agent_deployments_lookup_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "persona_id",
+            "status"
+          ]
+        },
+        {
+          "name": "agent_deployments_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "persona_id",
+            "provider"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_agent_deployments_1",
           "unique": true,
           "origin": "pk",
           "columns": [
@@ -11797,6 +12063,128 @@
       ]
     },
     {
+      "name": "organization_seat_slugs",
+      "exportName": "organizationSeatSlugs",
+      "columns": [
+        {
+          "name": "slug",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "organization_seat_slugs_org_idx",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "organization_seat_slugs_org_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_organization_seat_slugs_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    {
       "name": "organizations",
       "exportName": "organizations",
       "columns": [
@@ -11846,6 +12234,15 @@
           "conversion": "explicit mapping required"
         },
         {
+          "name": "seat_slug",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
           "name": "created_at",
           "sqlType": "integer",
           "columnType": "SQLiteTimestamp",
@@ -11864,7 +12261,15 @@
           "conversion": "timestamptz (epoch milliseconds)"
         }
       ],
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "organizations_seat_slug_uq",
+          "unique": true,
+          "columns": [
+            "seat_slug"
+          ]
+        }
+      ],
       "foreignKeys": [],
       "replayedColumns": [
         {
@@ -11915,10 +12320,25 @@
           "notNull": false,
           "default": null,
           "primaryKeyPosition": 0
+        },
+        {
+          "name": "seat_slug",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
         }
       ],
       "replayedForeignKeys": [],
       "replayedIndexes": [
+        {
+          "name": "organizations_seat_slug_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "seat_slug"
+          ]
+        },
         {
           "name": "sqlite_autoindex_organizations_1",
           "unique": true,
@@ -12567,6 +12987,1347 @@
         },
         {
           "name": "sqlite_autoindex_planning_projects_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pms_action_flows",
+      "exportName": "pmsActionFlows",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "action",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "version",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "steps_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "digest",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "status",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "learned_by_user_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "last_replay_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "last_replay_ok",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "consecutive_failures",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "pms_action_flow_lookup_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "provider",
+            "action",
+            "status"
+          ]
+        },
+        {
+          "name": "pms_action_flow_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "provider",
+            "action",
+            "version"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "action",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "steps_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'candidate'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "learned_by_user_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "last_replay_at",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "last_replay_ok",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "consecutive_failures",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "pms_action_flow_lookup_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "provider",
+            "action",
+            "status"
+          ]
+        },
+        {
+          "name": "pms_action_flow_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "provider",
+            "action",
+            "version"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_pms_action_flows_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pms_seat_messages",
+      "exportName": "pmsSeatMessages",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "digest",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "recipient",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "disposition",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "authenticated_domain",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "method",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "provider_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "reason",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "observed_authserv_ids",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "object_key",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "received_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "processed_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "pms_seat_messages_digest_idx",
+          "unique": false,
+          "columns": [
+            "digest"
+          ]
+        },
+        {
+          "name": "pms_seat_messages_held_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "authenticated_domain"
+          ]
+        },
+        {
+          "name": "pms_seat_messages_org_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "disposition"
+          ]
+        }
+      ],
+      "foreignKeys": [],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "recipient",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "disposition",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "authenticated_domain",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "method",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "provider_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "observed_authserv_ids",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "object_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "received_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "processed_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [],
+      "replayedIndexes": [
+        {
+          "name": "pms_seat_messages_digest_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "digest"
+          ]
+        },
+        {
+          "name": "pms_seat_messages_held_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "authenticated_domain"
+          ]
+        },
+        {
+          "name": "pms_seat_messages_org_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "disposition"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_pms_seat_messages_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pms_seat_senders",
+      "exportName": "pmsSeatSenders",
+      "columns": [
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "domain",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "provider_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "added_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "added_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "pms_seat_senders_org_idx",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "pms_seat_senders_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "domain"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "domain",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "provider_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "added_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "added_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "pms_seat_senders_org_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "pms_seat_senders_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "domain"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pms_write_authorizations",
+      "exportName": "pmsWriteAuthorizations",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "action",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "status",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "signed_authorization",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "authorization_reference",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "version",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "approved_by_user_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "approved_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "created_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "pms_write_auth_org_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "status"
+          ]
+        },
+        {
+          "name": "pms_write_auth_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "provider",
+            "action"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "action",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'draft'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "signed_authorization",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "false",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "authorization_reference",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "approved_by_user_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "approved_at",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "pms_write_auth_org_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "status"
+          ]
+        },
+        {
+          "name": "pms_write_auth_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "provider",
+            "action"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_pms_write_authorizations_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pms_write_queue",
+      "exportName": "pmsWriteQueue",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "action",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "approval_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "flow_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "payload_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "idempotency_key",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "status",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "leased_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "lease_expires_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "attempts",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "last_error",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "pms_write_queue_drain_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "status",
+            "created_at"
+          ]
+        },
+        {
+          "name": "pms_write_queue_idem_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "idempotency_key"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "action",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "approval_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "flow_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "idempotency_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'pending'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "leased_by",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "lease_expires_at",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "attempts",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "pms_write_queue_drain_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "status",
+            "created_at"
+          ]
+        },
+        {
+          "name": "pms_write_queue_idem_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "idempotency_key"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_pms_write_queue_1",
           "unique": true,
           "origin": "pk",
           "columns": [
@@ -17341,5 +19102,5 @@
     }
   ],
   "consumers": [],
-  "inventorySha256": "cd07916e7ae2e1636dae04bb1469dd7b30a5178516ac3070717b258fbc71387b"
+  "inventorySha256": "6f618ac0fb7a8f26782565f002b76857f9427598f9dcda3aef430fb2fce75185"
 }

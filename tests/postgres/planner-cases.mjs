@@ -77,10 +77,18 @@ export async function runPlannerCases(t, { config, administrator }) {
           assert.equal(children[0].status, "COMPLETED", children[0].error);
           assert.ok(modelCalls >= 4);
         } else {
-          assert.equal(final.status, scenario === "cancel" ? "CANCELLED" : "FAILED", final.error);
-          assert.equal(final.result_json, null);
-          if (scenario === "missing-model") assert.match(final.error, /connect|model|provider/i);
-          if (scenario === "child-failure") assert.equal(children[0].status, "FAILED");
+          if (scenario === "child-failure") {
+            // A child that cannot evidence its objective is handed to a person,
+            // not written off, so neither it nor its parent is terminal. The
+            // parent stays open waiting on work that a human now owns.
+            assert.equal(children[0].status, "WAITING_FOR_HUMAN", children[0].error);
+            assert.ok(!["COMPLETED", "FAILED"].includes(final.status), `parent must not be terminal: ${final.status}`);
+            assert.equal(final.result_json, null);
+          } else {
+            assert.equal(final.status, scenario === "cancel" ? "CANCELLED" : "FAILED", final.error);
+            assert.equal(final.result_json, null);
+            if (scenario === "missing-model") assert.match(final.error, /connect|model|provider/i);
+          }
         }
       });
     }

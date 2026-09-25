@@ -24,5 +24,7 @@ export async function ensureOrganization(dbSession: DbSession, identity: ApiIden
   await db.insert(organizations).values(organization).onConflictDoNothing();
   // Membership is descriptive; the matching access grant is the authority.
   await upsertMembership(dbSession, { organizationId: identity.organizationId, userId: identity.userId, role: "owner" });
+  // Employees are created explicitly from Setup. Starter roles remain templates,
+  // so a new workspace's graph reflects only configuration the owner chose.
   return organization;
 }

@@ -1,0 +1,54 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The seat reader — the third Worker, and the only one holding both the
+  // unverified inbox and the database (worker/pms-seat-reader.ts explains why
+  // that is one component and not a binding added to either of the others).
+  //
+  // Deploy:  npx wrangler deploy --config wrangler.reader.jsonc
+  "name": "aval-pms-seat-reader",
+  "main": "worker/pms-seat-reader.ts",
+  "compatibility_date": "2026-05-22",
+  "account_id": "3d090d893daad1536ed1dff3368d59b8",
+
+  // No fetch handler and no route. Same reasoning as the mail Worker: a
+  // component whose input is unverified mail should not carry an HTTP surface,
+  // and wrangler publishes a workers.dev URL unless told not to.
+  "workers_dev": false,
+
+  // Every five minutes. The lag an operator sees between allowing a sender and
+  // their waiting mail being read, so it is short enough that the review does
+  // not look broken, and long enough that an idle account is not paying for
+  // empty list calls.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  "vars": {
+    // Cloudflare does not document the authserv-id Email Routing stamps, and
+    // `lib/pms/inbound/authentication.ts` refuses any result not bearing the
+    // expected one — correctly, since accepting whatever the message claims is
+    // the forgery it exists to stop. So this value is unverified until a real
+    // message confirms it, and the failure mode is closed: nothing verifies, and
+    // `pms_seat_messages.observed_authserv_ids` records what actually arrived.
+    "PMS_SEAT_AUTHSERV_ID": "mx.cloudflare.net",
+
+    // Where the decision happens. This Worker holds the inbox and no database;
+    // the app holds the database and no inbox. See the note in the Worker.
+    // The matching secret is PMS_SEAT_READER_TOKEN, set with
+    // `npx wrangler secret put PMS_SEAT_READER_TOKEN --config wrangler.reader.jsonc`
+    // and never written here.
+    "PMS_SEAT_ADJUDICATOR_URL": "https://app.aval.llc"
+  },
+
+  "r2_buckets": [
+    {
+      "binding": "PMS_SEAT_INBOX",
+      "bucket_name": "aval-pms-seat-inbox"
+    }
+  ],
+}

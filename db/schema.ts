@@ -75,9 +75,23 @@ export const organizations = sqliteTable("organizations", {
   // Setup. Null means the built-in "general" persona, matching this app's
   // behavior before this column existed.
   defaultPersonaId: text("default_persona_id"),
+  // The seat slug currently shown to this workspace — its address is
+  // `agent-{seatSlug}@aval.llc`. Null until an operator picks one during setup;
+  // a workspace without one has no inbound seat and no PMS can mail it.
+  //
+  // This is the *current* address, not the set of addresses that reach here.
+  // Renaming adds a slug rather than replacing one, because a customer's PMS
+  // already has the old address on file and nothing we do should make mail they
+  // send disappear. `organization_seat_slugs` is that permanent set, and every
+  // value here must also exist there.
+  seatSlug: text("seat_slug"),
+  // How many AI employees this workspace may have. Null means no limit, which
+  // is the architecture's own position: a ceiling is a commercial decision, not
+  // a property of the runtime, so nothing below this column assumes a number.
+  aiEmployeeLimit: integer("ai_employee_limit"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+}, (table) => [uniqueIndex("organizations_seat_slug_uq").on(table.seatSlug)]);
 
 export const ssoConnections = sqliteTable("sso_connections", {
   id: text("id").primaryKey(),
@@ -1193,6 +1207,15 @@ export const agentTasks = sqliteTable(
     // Persona id — a built-in role or a custom persona row. Resolved to a
     // permission envelope by lib/agents/permissions.ts on every step.
     agentId: text("agent_id").notNull(),
+    /**
+     * The employee that owns this work.
+     *
+     * Durable, so a restart resumes with the same owner rather than re-deriving
+     * one. Nullable while the built-in specialists are still addressed by
+     * `agentId`; once every persona resolves to an employee record this becomes
+     * the only answer to "who is doing this".
+     */
+    employeeId: text("employee_id"),
     goal: text("goal").notNull(),
     // QUEUED | RUNNING | WAITING_FOR_TOOL | WAITING_FOR_APPROVAL | COMPLETED | FAILED | CANCELLED
     status: text("status").notNull(),
@@ -1282,6 +1305,14 @@ export const agentTaskSteps = sqliteTable(
     // insert with the same key is rejected by the database, which is what
     // makes duplicate execution impossible rather than merely unlikely.
     idempotencyKey: text("idempotency_key"),
+    /**
+     * Where an external effect landed, recorded after the provider accepted it.
+     * Verification needs to re-read the exact record the write created, and the
+     * reservation is written before the provider call, so these are filled in
+     * afterwards against the same idempotency key.
+     */
+    sourceProvider: text("source_provider"),
+    externalRecordId: text("external_record_id"),
     error: text("error"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
@@ -1524,3 +1555,875 @@ export const agentPlanNodes = sqliteTable("agent_plan_nodes", {
 export const agentModelContexts = sqliteTable("agent_model_contexts", {
  id:text("id").primaryKey(),organizationId:text("organization_id").notNull().references(()=>organizations.id),taskId:text("task_id").notNull().references(()=>agentTasks.id),stepIndex:integer("step_index").notNull(),contextJson:text("context_json").notNull(),digest:text("digest").notNull(),createdAt:integer("created_at",{mode:"timestamp_ms"}).notNull(),
 },t=>[index("agent_model_context_task_idx").on(t.organizationId,t.taskId,t.stepIndex)]);
+
+/**
+ * Per-org authorization for a PMS write action (docs/PMS_INTEGRATION.md, P0/P2).
+ *
+ * Deliberately shaped like `agent_execution_policies` and deliberately NOT like
+ * `communication_settings`. A `signed_authorization` that cannot say who signed
+ * it and when is not an authorization, it is a checkbox — and for the actions
+ * gated here (money in a trust account, a message to a housing applicant) the
+ * identity of the approver is the entire control.
+ *
+ * One row per (org, provider, action). Absence means not enabled: the resolver
+ * reads a missing row as `off`, never as permitted. `status` exists because an
+ * authorization is revocable without being deleted — `suspended` preserves the
+ * audit trail of who had once signed for it.
+ */
+export const pmsWriteAuthorizations = sqliteTable(
+  "pms_write_authorizations",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    // A PmsAction from lib/pms/types.ts. Stored as text because the enum lives
+    // in code, where a test can assert every stored value still resolves.
+    action: text("action").notNull(),
+    status: text("status").notNull().default("draft"), // draft | approved | suspended
+    // True only when a human countersigned the provider's terms override. The
+    // resolver requires this for any action whose descriptor says permitted:false.
+    signedAuthorization: integer("signed_authorization", { mode: "boolean" }).notNull().default(false),
+    // Free text naming the document or counsel sign-off. Not parsed; it exists
+    // so an auditor can find the paper.
+    authorizationReference: text("authorization_reference"),
+    version: integer("version").notNull().default(1),
+    approvedByUserId: text("approved_by_user_id"),
+    approvedAt: integer("approved_at", { mode: "timestamp_ms" }),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_write_auth_uq").on(table.organizationId, table.provider, table.action),
+    index("pms_write_auth_org_idx").on(table.organizationId, table.status),
+  ],
+);
+
+/**
+ * A recorded, replayable path for one (provider, action) — the cache behind the
+ * `unlearned` state.
+ *
+ * The first time an action is needed on a provider whose mechanism is `ui`, the
+ * agent reads the page's semantic tree, works out the path, and proposes it on
+ * an approval card. On approval it executes *and* stores the path here. Every
+ * later run replays this row: no model call, deterministic, and renderable on an
+ * approval card before it runs, which a live vision agent can never be.
+ *
+ * `version` is part of the key rather than a mutable column because a provider
+ * UI redesign does not invalidate history — it creates a new flow. Keeping the
+ * old row lets an audit entry from last month still resolve to the steps that
+ * actually ran.
+ *
+ * `provider` is scoped per-org rather than global on purpose: two AppFolio
+ * tenants can have different field layouts, and a flow learned in one workspace
+ * is not evidence about another. Global promotion is a later decision, and it
+ * needs to be a deliberate one.
+ */
+export const pmsActionFlows = sqliteTable(
+  "pms_action_flows",
+  {
+    id: text("id").primaryKey(),
+    /**
+     * Null means a workflow Aval ships, which every workspace can use.
+     *
+     * The same shape as `expertise_profiles`, and for the same reason: driving
+     * AppFolio's work-order screen is Aval's problem to solve once, not a thing
+     * every customer should have to discover for themselves. A workspace may
+     * still hold its own version of a (provider, action) — `activeFlow` prefers
+     * it — which is how a customer with a non-standard configuration is served
+     * without forking the shipped one.
+     */
+    organizationId: text("organization_id").references(() => organizations.id),
+    provider: text("provider").notNull(),
+    /** The canonical capability this workflow implements, e.g. maintenance.work_order.create. */
+    action: text("action").notNull(),
+    version: integer("version").notNull().default(1),
+    /** Which access mode this workflow drives. A `ui` flow is meaningless to an API connection. */
+    accessMode: text("access_mode").notNull().default("customer_desktop_session"),
+    // Ordered, declarative steps — selectors and values, no executable code.
+    // Reviewed on an approval card, so it has to be readable by a person.
+    stepsJson: text("steps_json").notNull(),
+    // SHA-256 of stepsJson. An approval binds to this, so a flow edited after
+    // approval fails to replay rather than running something unapproved.
+    digest: text("digest").notNull(),
+    /**
+     * draft | testing | active | degraded | disabled.
+     *
+     * Only `active` is replayable. `degraded` is the state a workflow falls
+     * into when the provider's screen has moved under it — distinct from
+     * `disabled`, because one is a thing that happened and the other is a
+     * decision somebody made.
+     */
+    status: text("status").notNull().default("draft"),
+    /** What the signed-in provider user must be able to do for this to work at all. */
+    requiredRole: text("required_role"),
+    /** low | medium | high | critical. Drives approval, not availability. */
+    riskClass: text("risk_class").notNull().default("medium"),
+    /** How the effect is proven: read_after_write | external_id_lookup | none. */
+    verificationStrategy: text("verification_strategy").notNull().default("read_after_write"),
+    /** How a repeat is recognised: external_id | field_match | none. */
+    reconciliationStrategy: text("reconciliation_strategy").notNull().default("field_match"),
+    /** What happens instead when this workflow cannot run: email | human_handoff | aval_native | none. */
+    fallback: text("fallback").notNull().default("human_handoff"),
+    /**
+     * How far this workflow has actually been proven, never how far we hope.
+     *
+     * unimplemented | unit_tested | simulator_e2e_tested |
+     * customer_authorized_ui_tested | sandbox_tested | live_provider_tested.
+     */
+    certification: text("certification").notNull().default("unimplemented"),
+    learnedByUserId: text("learned_by_user_id"),
+    /** Who promoted it into service. Activation is an act with an author. */
+    promotedByUserId: text("promoted_by_user_id"),
+    promotedAt: integer("promoted_at", { mode: "timestamp_ms" }),
+    lastReplayAt: integer("last_replay_at", { mode: "timestamp_ms" }),
+    lastReplayOk: integer("last_replay_ok", { mode: "boolean" }),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    /** What is known to be wrong with it, for the surface that lists workflows. */
+    knownIssues: text("known_issues"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_action_flow_uq").on(table.organizationId, table.provider, table.action, table.version),
+    index("pms_action_flow_lookup_idx").on(table.organizationId, table.provider, table.action, table.status),
+  ],
+);
+
+/**
+ * Pending PMS writes awaiting the desktop runner.
+ *
+ * No new queue infrastructure: this follows the `integration_events` pattern the
+ * WhatsApp discovery identified as the one that works on D1 — an append-only log
+ * with primary-key dedupe, drained by a poller. The difference is who drains it.
+ * `integration_events` is drained by the one-minute cron; this is drained by the
+ * Electron runner asking for its own org's pending rows, because the whole point
+ * of `runner: 'desktop'` is that the cron cannot do this work.
+ *
+ * `leaseId`-style provider ids are NOT stored here; `payloadJson` holds only what
+ * the approved flow needs, and the approval it binds to is the record of intent.
+ */
+export const pmsWriteQueue = sqliteTable(
+  "pms_write_queue",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    action: text("action").notNull(),
+    // The approval that authorized this write. Null is only valid for actions
+    // whose resolution did not require one; the drainer re-checks either way.
+    approvalId: text("approval_id"),
+    flowId: text("flow_id"),
+    payloadJson: text("payload_json").notNull(),
+    // Caller-supplied idempotency key. Unique per org so a retried enqueue
+    // collides on the index instead of queueing a second write.
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"), // pending | leased | done | failed | abandoned
+    // Set while a runner holds it, so two desktop instances for one org cannot
+    // both execute. Expires, because a laptop closing mid-write is normal.
+    leasedBy: text("leased_by"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_write_queue_idem_uq").on(table.organizationId, table.idempotencyKey),
+    index("pms_write_queue_drain_idx").on(table.organizationId, table.status, table.createdAt),
+  ],
+);
+
+/**
+ * Which system an agent works inside (docs/PMS_INTEGRATION_DISCOVERY.md).
+ *
+ * `agent_personas` says what an agent *is* and which tools it may frame; nothing
+ * said which PMS it works in. Without that, `pmsToolAvailability()` had to
+ * resolve across every connected provider and let the model name one as a tool
+ * argument — so an org with two PMSs offered every agent both.
+ *
+ * A join row, not a `provider` column on `agent_personas`, because one persona
+ * should be deployable into several PMSs at different autonomy levels and one
+ * PMS should host several personas. A column forces one-to-one and makes "the
+ * maintenance agent in AppFolio is supervised while the one in DoorLoop is
+ * autonomous" unrepresentable.
+ *
+ * `personaId` carries no foreign key on purpose: it holds either an
+ * `agent_personas.id` or a built-in PersonaId that has no row to point at.
+ */
+export const agentDeployments = sqliteTable(
+  "agent_deployments",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    // An agent_personas.id, or a built-in PersonaId. No FK — see above.
+    personaId: text("persona_id").notNull(),
+    // The PMS this deployment works inside. Matches integration_connections.provider.
+    provider: text("provider").notNull(),
+    // JSON string array of PmsWorkflow this deployment owns here. A deployment
+    // that owns "maintenance" does not thereby own "arrears" in the same system.
+    workflowsJson: text("workflows_json").notNull().default("[]"),
+    autonomyMode: text("autonomy_mode").notNull().default("supervised"), // supervised | assisted | autonomous
+    status: text("status").notNull().default("active"), // active | paused
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("agent_deployments_uq").on(table.organizationId, table.personaId, table.provider),
+    index("agent_deployments_lookup_idx").on(table.organizationId, table.personaId, table.status),
+  ],
+);
+
+/**
+ * Every seat slug ever issued, and who it belongs to. Permanently.
+ *
+ * `slug` is the primary key and rows are **never deleted**, which is the whole
+ * design: a slug cannot be reissued, so mail a PMS is still sending to a
+ * workspace's old address can never arrive at a different workspace. That is not
+ * a hypothetical — a seat address lives inside a customer's PMS configuration,
+ * outside our control, and may be used for years after they stopped thinking
+ * about it.
+ *
+ * A workspace that renames gains a row. It never gives one up, and every row it
+ * holds keeps resolving to it. `organizations.seatSlug` names which of them is
+ * the current one to display; this table decides which mail is whose.
+ */
+export const organizationSeatSlugs = sqliteTable(
+  "organization_seat_slugs",
+  {
+    slug: text("slug").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** Who claimed it, for the audit trail on an address a customer will type. */
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("organization_seat_slugs_org_idx").on(table.organizationId)],
+);
+
+/**
+ * Who may write to a workspace's seat address.
+ *
+ * `verifySender` (lib/pms/inbound/authentication.ts) refuses every message when
+ * this table has no row for the workspace, and that is the intended reading: a
+ * workspace that has not said who may write to its seat has not consented. Same
+ * rule as `pms_write_authorizations` — absence is never permission.
+ *
+ * A row is (workspace, domain, provider). The provider is not decoration: it is
+ * how the read envelope knows which system's format a verified message is in,
+ * without inferring it from content an attacker could shape. Mail that
+ * authenticates as `mail.appfolio.com` is parsed as AppFolio because an operator
+ * said that domain is their AppFolio, not because the body looked like it.
+ *
+ * Domains are stored as the operator confirmed them, and matched by
+ * `domainMatches`, which accepts subdomains. So a row for `appfolio.com` covers
+ * `mail.appfolio.com` without an operator having to predict which subdomains
+ * their PMS will send from next year.
+ *
+ * Unlike `organization_seat_slugs`, rows here are deletable. Revoking a sender
+ * has to be possible and immediate — the address is permanent precisely so that
+ * consent does not have to be.
+ */
+export const pmsSeatSenders = sqliteTable(
+  "pms_seat_senders",
+  {
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** Normalized by `sender-domain.ts` before it gets here: lowercase, no scheme, no leading dot. */
+    domain: text("domain").notNull(),
+    /** A provider id from lib/pms/providers. Verified mail from this domain is read as this system. */
+    providerId: text("provider_id").notNull(),
+    /** Who allowed it. This is a consent record, so the approver is part of it. */
+    addedBy: text("added_by").notNull(),
+    addedAt: integer("added_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_seat_senders_uq").on(table.organizationId, table.domain),
+    index("pms_seat_senders_org_idx").on(table.organizationId),
+  ],
+);
+
+/**
+ * The per-workspace *mailbox* allowlist — one approved sender, not a domain.
+ *
+ * Separate from `pms_seat_senders` because it is a different grant with
+ * different rules, and a nullable `address` column on one table would have made
+ * every read decide which kind of row it was holding.
+ *
+ * This exists for the two cases a domain grant cannot serve without
+ * overreaching. A two-person company whose "PMS" is a person forwarding notices
+ * from Gmail: `gmail.com` as a domain grants every Gmail user on earth, while
+ * `john@gmail.com` grants John. And a message a human adjudicated: approving
+ * what arrived must approve *that sender*, never the population behind them.
+ *
+ * Deletable for the same reason as the domain list — consent has to be
+ * revocable and immediate.
+ */
+export const pmsSeatSenderAddresses = sqliteTable(
+  "pms_seat_sender_addresses",
+  {
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** Normalized by `sender-domain.ts`: lowercase, no display name, no angle brackets. */
+    address: text("address").notNull(),
+    /** A provider id from lib/pms/providers. Verified mail from here is read as this system. */
+    providerId: text("provider_id").notNull(),
+    /** Who allowed it. This is a consent record, so the approver is part of it. */
+    addedBy: text("added_by").notNull(),
+    addedAt: integer("added_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("pms_seat_sender_addresses_uq").on(table.organizationId, table.address),
+    index("pms_seat_sender_addresses_org_idx").on(table.organizationId),
+  ],
+);
+
+/**
+ * One row per message the seat has processed — the reader's ledger.
+ *
+ * Written by `aval-pms-seat-reader` (worker/pms-seat-reader.ts), which is the
+ * only component holding both the unverified inbox and the database. The app
+ * never reads R2; it reads this. That split is deliberate and is the reason this
+ * table exists at all rather than the review surface listing the bucket:
+ * `d9210f8` took the inbox binding off the app Worker, and re-adding it to draw
+ * a settings panel would undo the boundary both wrangler configs exist to hold.
+ *
+ * `digest` is the primary key and is the message's own content hash, so a sweep
+ * that runs twice, or a PMS that sends the same notice twice, writes the same
+ * row. The sweep is therefore safe to re-run at any point, including mid-failure.
+ *
+ * ## What may be rendered from this table
+ *
+ * `authenticated_domain` is null unless the domain was actually authenticated by
+ * the topmost trusted `Authentication-Results`. That is a storage-level control,
+ * not a convention: a held message's `From` is chosen by whoever sent it, and a
+ * review surface that rendered a claimed domain would be putting attacker-picked
+ * text on an operator's screen next to an "Allow" button. Mail that authenticated
+ * nothing is counted, never named.
+ *
+ * `reason` and `observed_authserv_ids` are triage fields. They can contain
+ * sender-influenced text and are for a developer reading a query result, never
+ * for a customer-facing surface.
+ */
+export const pmsSeatMessages = sqliteTable(
+  "pms_seat_messages",
+  {
+    /**
+     * `<recipient>:<digest>` — a key Aval constructs, not one taken from the mail.
+     *
+     * The digest alone cannot be the key. It is a content hash, and two
+     * workspaces can be sent the *same bytes* — one vendor notice addressed to
+     * both, or the same announcement to two seats. Keyed on the digest, the
+     * second workspace's row would overwrite the first, taking its
+     * organization_id with it: one customer's held mail silently reattributed
+     * to another. The recipient is in the key for that reason, and it works
+     * because a seat address belongs to one workspace forever
+     * (`organization_seat_slugs`).
+     */
+    id: text("id").primaryKey(),
+    /** SHA-256 of the raw message, and the last segment of its R2 key. */
+    digest: text("digest").notNull(),
+    /** The seat address it was sent to. Ours, not the sender's, so safe to display. */
+    recipient: text("recipient").notNull(),
+    /** Null when the slug belongs to no workspace — mail to an address never issued. */
+    organizationId: text("organization_id"),
+    /** verified | held | unauthenticated | unassigned — see lib/pms/inbound/disposition.ts. */
+    disposition: text("disposition").notNull(),
+    /** Set only when authentication established it. Null is the signal not to name a sender. */
+    authenticatedDomain: text("authenticated_domain"),
+    /**
+     * The exact mailbox, set only when it authenticated — a strictly stronger
+     * condition than the domain, requiring DMARC *and* an aligned DKIM
+     * signature (`authenticatedAddress`). Null under the same rule as the
+     * domain: a sender-chosen `From` is never stored where a review screen
+     * could put it next to a button that grants access.
+     *
+     * It is here so a person adjudicating held mail can approve *that sender*
+     * rather than the domain behind them, which for a consumer mailbox
+     * provider is the difference between one person and a population.
+     */
+    authenticatedAddress: text("authenticated_address"),
+    /** dmarc | dkim, whichever established the domain. */
+    method: text("method"),
+    /** The provider from the matching allowlist row, so the parser is chosen by consent. */
+    providerId: text("provider_id"),
+    /** Triage only. May contain sender-influenced text; never render to an operator. */
+    reason: text("reason"),
+    /**
+     * The authserv-ids actually seen on the message, recorded because the one
+     * Cloudflare uses is not documented anywhere we could find. If verification
+     * fails across the board, this column is the difference between a one-query
+     * answer and a blind hunt. Triage only — a sender can put ids here too.
+     */
+    observedAuthservIds: text("observed_authserv_ids"),
+    /** Where the object now lives, so a later sweep or an audit can fetch it. */
+    objectKey: text("object_key").notNull(),
+    receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
+    processedAt: integer("processed_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("pms_seat_messages_org_idx").on(table.organizationId, table.disposition),
+    index("pms_seat_messages_held_idx").on(table.organizationId, table.authenticatedDomain),
+    index("pms_seat_messages_digest_idx").on(table.digest),
+  ],
+);
+
+/**
+ * One observed fact about one operational entity, with where it came from and
+ * how far to trust it.
+ *
+ * The operational tables (`properties`, `residents`, `workOrders`,
+ * `ledgerEntries`) already record `sourceProvider`, `sourceConnectionId` and
+ * `externalId`, which answers "which system did this row come from". They do
+ * not answer the questions an agent has to ask before acting: when did the
+ * provider consider this true, when did we last look, is it still fresh, is it
+ * authoritative or something a model inferred, and does another system
+ * disagree.
+ *
+ * A fact is never overwritten by a different source. A second source writes a
+ * second row, and the two are marked `conflicted` — `operations_conflicts`
+ * remains the surface a person resolves them on. Collapsing them would be the
+ * silent overwrite the design exists to prevent.
+ */
+export const operationalFacts = sqliteTable(
+  "operational_facts",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** property | unit | resident | lease | work_order | vendor | account */
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    /** The field or claim this fact is about, as a stable path: `balance_cents`, `status`, `lease.end_date`. */
+    factType: text("fact_type").notNull(),
+    /** Scalar rendering, for the common case where the value fits in one column. */
+    value: text("value"),
+    /** Pointer for a value too large or too structured to inline. Exactly one of `value`/`valueRef` is set. */
+    valueRef: text("value_ref"),
+    /** provider | aval_native | human | document | inference */
+    sourceType: text("source_type").notNull(),
+    sourceProvider: text("source_provider"),
+    sourceRecordId: text("source_record_id"),
+    /** When the source considered this true. Null when the provider offers no effective time — an honest null, never a fabricated one. */
+    observedAt: integer("observed_at", { mode: "timestamp_ms" }),
+    /** When Aval last read it. Always known, because Aval did the reading. */
+    syncedAt: integer("synced_at", { mode: "timestamp_ms" }).notNull(),
+    /** Freshness horizon. Staleness is `now() > expiresAt`, derived rather than stored, so it cannot itself go stale. */
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    /** Named policy the horizon came from, so a change of policy is legible. */
+    freshnessPolicy: text("freshness_policy"),
+    /** authoritative | reported | inferred | human_confirmed */
+    authoritativeness: text("authoritativeness").notNull(),
+    /** Only meaningful for `inference`; null elsewhere rather than a misleading 1.0. */
+    confidence: real("confidence"),
+    /** Evidence or fact ids this was derived from, as JSON. */
+    derivedFromJson: text("derived_from_json").notNull().default("[]"),
+    /** none | conflicted | superseded */
+    conflictState: text("conflict_state").notNull().default("none"),
+    /** The fact that replaced this one, when superseded. */
+    supersededBy: text("superseded_by"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("operational_facts_entity_idx").on(table.organizationId, table.entityType, table.entityId, table.factType),
+    index("operational_facts_conflict_idx").on(table.organizationId, table.conflictState),
+    // One live fact per (entity, field, source). A re-sync from the same source
+    // updates its own row; a different source gets its own, which is what makes
+    // a disagreement visible instead of destructive.
+    uniqueIndex("operational_facts_source_uq").on(
+      table.organizationId, table.entityType, table.entityId, table.factType, table.sourceType, table.sourceProvider,
+    ),
+    check("operational_facts_source_type", sql`source_type IN ('provider','aval_native','human','document','inference')`),
+    check("operational_facts_authority", sql`authoritativeness IN ('authoritative','reported','inferred','human_confirmed')`),
+    check("operational_facts_conflict_state", sql`conflict_state IN ('none','conflicted','superseded')`),
+    check("operational_facts_confidence_range", sql`confidence IS NULL OR (confidence >= 0 AND confidence <= 1)`),
+    // An inference must say how sure it is; anything else must not pretend to.
+    check("operational_facts_confidence_scope", sql`(source_type = 'inference') = (confidence IS NOT NULL)`),
+  ],
+);
+
+/**
+ * What was observed about an action Aval took, and whether it proves the
+ * action's claim.
+ *
+ * A task that caused an external effect holds at `PENDING_VERIFICATION` until
+ * something independent says the effect took hold. Without this table that
+ * state could only ever expire into a human handoff, which is honest but is
+ * not verification. Each row is one observation: a provider re-read, a webhook,
+ * a person confirming, a document, or Aval's own state — compared against the
+ * state the action expected.
+ *
+ * `verificationResult` is the comparison's outcome, not the observation's
+ * quality. An observation that positively shows the action did *not* happen is
+ * `contradicted`, which is a successful verification of a failure.
+ */
+export const actionEvidence = sqliteTable(
+  "action_evidence",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    taskId: text("task_id").notNull().references(() => agentTasks.id),
+    /** The execution this is evidence about — the idempotency key the executor reserved. */
+    actionExecutionId: text("action_execution_id").notNull(),
+    /** The tool whose effect is being verified. */
+    toolName: text("tool_name").notNull(),
+    /** What Aval claims happened, in one line, for a person reading the trail. */
+    claim: text("claim").notNull(),
+    expectedStateJson: text("expected_state_json").notNull().default("{}"),
+    /** provider_reread | provider_event | human_confirmation | document | aval_native */
+    evidenceType: text("evidence_type").notNull(),
+    sourceProvider: text("source_provider"),
+    externalRecordId: text("external_record_id"),
+    observedStateJson: text("observed_state_json").notNull().default("{}"),
+    /** When the observation was true at its source, where that is knowable. */
+    observedAt: integer("observed_at", { mode: "timestamp_ms" }),
+    /** confirmed | contradicted | inconclusive */
+    verificationResult: text("verification_result").notNull(),
+    /** Pointer to a stored payload; never the payload itself, which may hold resident data. */
+    payloadRef: text("payload_ref"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("action_evidence_task_idx").on(table.organizationId, table.taskId),
+    index("action_evidence_execution_idx").on(table.actionExecutionId),
+    // A provider can deliver the same webhook twice, and a scheduled re-read can
+    // race one. The same observation of the same execution is one row.
+    uniqueIndex("action_evidence_observation_uq").on(
+      table.actionExecutionId, table.evidenceType, table.externalRecordId, table.verificationResult,
+    ),
+    check("action_evidence_type", sql`evidence_type IN ('provider_reread','provider_event','human_confirmation','document','aval_native')`),
+    check("action_evidence_result", sql`verification_result IN ('confirmed','contradicted','inconclusive')`),
+  ],
+);
+
+/**
+ * Attempt budgets, as configuration rather than as constants in the runtime.
+ *
+ * `kind` keeps the three budgets apart — how long a provider is waited on,
+ * how many times an answer may be repaired, and how many times a goal may be
+ * re-planned are different questions, and one must never become the ceiling on
+ * another. A null selector means "any"; the most specific matching row wins,
+ * and a workspace with no rows at all behaves exactly as the shipped defaults.
+ */
+export const attemptPolicies = sqliteTable(
+  "attempt_policies",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    /** verification | check_repair | replan */
+    kind: text("kind").notNull(),
+    /** Selectors. Null means "any"; a row applies only where every named selector matches. */
+    provider: text("provider"),
+    toolName: text("tool_name"),
+    workType: text("work_type"),
+    riskClass: text("risk_class"),
+    /** Null caps nothing by count. Legitimate for work that must wait until a person intervenes. */
+    maxAttempts: integer("max_attempts"),
+    /** Null caps nothing by elapsed time. */
+    maxElapsedMs: integer("max_elapsed_ms"),
+    initialDelayMs: integer("initial_delay_ms").notNull().default(0),
+    /** fixed | linear | exponential */
+    backoffStrategy: text("backoff_strategy").notNull().default("fixed"),
+    backoffFactor: real("backoff_factor").notNull().default(2),
+    maxDelayMs: integer("max_delay_ms"),
+    /** human_handoff | replan | fail — what happens when the budget is spent. */
+    onExhausted: text("on_exhausted").notNull().default("human_handoff"),
+    /** human_handoff | replan | fail — what happens when the provider says it did not take hold. */
+    onContradicted: text("on_contradicted").notNull().default("human_handoff"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("attempt_policies_lookup_idx").on(table.organizationId, table.kind, table.enabled),
+    // One row per selector shape per budget, so "most specific wins" never has
+    // two candidates of equal specificity to choose between.
+    uniqueIndex("attempt_policies_selector_uq").on(
+      table.organizationId, table.kind, table.provider, table.toolName, table.workType, table.riskClass,
+    ),
+    check("attempt_policies_kind", sql`kind IN ('verification','check_repair','replan')`),
+    check("attempt_policies_backoff", sql`backoff_strategy IN ('fixed','linear','exponential')`),
+    check("attempt_policies_on_exhausted", sql`on_exhausted IN ('human_handoff','replan','fail')`),
+    check("attempt_policies_on_contradicted", sql`on_contradicted IN ('human_handoff','replan','fail')`),
+    check("attempt_policies_attempts_positive", sql`max_attempts IS NULL OR max_attempts >= 1`),
+    check("attempt_policies_elapsed_positive", sql`max_elapsed_ms IS NULL OR max_elapsed_ms >= 0`),
+    check("attempt_policies_delay_nonnegative", sql`initial_delay_ms >= 0`),
+    check("attempt_policies_factor_positive", sql`backoff_factor > 0`),
+  ],
+);
+
+/**
+ * What was tried, and what was learned from it.
+ *
+ * A replan that cannot see the previous attempt can only guess, and guessing
+ * produces the loop this table exists to break: strategy A, fail, replan,
+ * strategy A. Each row is one attempt at the objective — an execution, a
+ * verification sweep, a repair, or a replan — with enough structure for the
+ * next planning pass to choose differently on purpose.
+ *
+ * `signature` is what makes repetition detectable: a digest of the tool, its
+ * canonical arguments and the failure. Two attempts with the same signature
+ * tried the same thing and got the same answer. `transient` is what keeps a
+ * legitimate retry — a rate limit, a provider that has not caught up — from
+ * being mistaken for a loop.
+ */
+export const workAttempts = sqliteTable(
+  "work_attempts",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    taskId: text("task_id").notNull().references(() => agentTasks.id),
+    /** The employee that made the attempt. Null until employees exist as records. */
+    employeeId: text("employee_id"),
+    attemptNumber: integer("attempt_number").notNull(),
+    /** execution | verification | check_repair | replan */
+    kind: text("kind").notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+    /** The objective as it stood for this attempt, so a later change of goal stays legible. */
+    objectiveSnapshot: text("objective_snapshot"),
+    strategy: text("strategy"),
+    actionsJson: text("actions_json").notNull().default("[]"),
+    toolsJson: text("tools_json").notNull().default("[]"),
+    delegationsJson: text("delegations_json").notNull().default("[]"),
+    observations: text("observations"),
+    result: text("result"),
+    /** succeeded | failed | inconclusive | blocked */
+    outcome: text("outcome").notNull(),
+    failureReason: text("failure_reason"),
+    blockerReason: text("blocker_reason"),
+    /** The failure had a cause expected to pass, which is the one case where repeating verbatim is correct. */
+    transient: integer("transient", { mode: "boolean" }).notNull().default(false),
+    /** The attempt moved the objective: new evidence, a state change, something learned. */
+    progressed: integer("progressed", { mode: "boolean" }).notNull().default(false),
+    /** Digest of tool + canonical args + failure. Equal signatures mean the same thing was tried. */
+    signature: text("signature"),
+    learned: text("learned"),
+    shouldChange: text("should_change"),
+    nextStrategy: text("next_strategy"),
+    costCents: integer("cost_cents"),
+    tokensUsed: integer("tokens_used"),
+    latencyMs: integer("latency_ms"),
+    externalEffectsJson: text("external_effects_json").notNull().default("[]"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("work_attempts_task_idx").on(table.organizationId, table.taskId, table.kind),
+    index("work_attempts_signature_idx").on(table.organizationId, table.taskId, table.signature),
+    // Attempt numbering is the budget. Making it unique per (task, kind) is what
+    // stops a crash-and-resume from spending the same attempt twice, and what
+    // keeps the three budgets counted separately.
+    uniqueIndex("work_attempts_number_uq").on(table.taskId, table.kind, table.attemptNumber),
+    check("work_attempts_kind", sql`kind IN ('execution','verification','check_repair','replan')`),
+    check("work_attempts_outcome", sql`outcome IN ('succeeded','failed','inconclusive','blocked')`),
+    check("work_attempts_number_positive", sql`attempt_number >= 1`),
+  ],
+);
+
+/**
+ * A durable organizational actor.
+ *
+ * Not a model session and not a persona: an employee outlives any particular
+ * run, owns Work, and carries its own authority. The eight specialists that
+ * preceded this were a fixed union in source — `PersonaId` — which meant the
+ * roster was a property of the build rather than of the customer. Here a role
+ * is just text, because "Turnover Coordinator" is a thing a customer invents,
+ * not a thing Aval ships.
+ *
+ * Scopes are relational (`ai_employee_scopes`) rather than folded into one
+ * opaque prompt, so what an employee may reach is enforced by the backend and
+ * legible to the person who granted it.
+ */
+export const aiEmployees = sqliteTable(
+  "ai_employees",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    name: text("name").notNull(),
+    /** Free text on purpose. No enum of valid roles exists, or may exist. */
+    role: text("role").notNull(),
+    description: text("description"),
+    /** What this employee is responsible for, in the customer's own words. */
+    objective: text("objective"),
+    instructions: text("instructions"),
+    /** draft | active | paused | archived */
+    status: text("status").notNull().default("draft"),
+    /** supervised | assisted | autonomous */
+    autonomyMode: text("autonomy_mode").notNull().default("supervised"),
+    /** Named approval policy this employee runs under. */
+    approvalPolicy: text("approval_policy").notNull().default("standard"),
+    /** Null means this employee commits no money at all, which is the safe default. */
+    spendLimitCents: integer("spend_limit_cents"),
+    /** The highest risk tier this employee may act at without a person. */
+    riskCeiling: text("risk_ceiling").notNull().default("low"),
+    /** organization | property | work — how widely its memory reaches. */
+    memoryScope: text("memory_scope").notNull().default("work"),
+    /** Creating an employee grants nothing; these are turned on deliberately. */
+    mayCommunicateExternally: integer("may_communicate_externally", { mode: "boolean" }).notNull().default(false),
+    mayDelegate: integer("may_delegate", { mode: "boolean" }).notNull().default(false),
+    createdBy: text("created_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("ai_employees_org_idx").on(table.organizationId, table.status),
+    // One name per workspace. Duplicates are allowed by the architecture but not
+    // by this table: a directory containing two employees called Maya cannot be
+    // used to decide which one is waiting on you.
+    uniqueIndex("ai_employees_org_name_uq").on(table.organizationId, table.name),
+    check("ai_employees_status", sql`status IN ('draft','active','paused','archived')`),
+    check("ai_employees_autonomy", sql`autonomy_mode IN ('supervised','assisted','autonomous')`),
+    check("ai_employees_risk", sql`risk_ceiling IN ('low','medium','high','critical')`),
+    check("ai_employees_memory_scope", sql`memory_scope IN ('organization','property','work')`),
+    check("ai_employees_spend_nonnegative", sql`spend_limit_cents IS NULL OR spend_limit_cents >= 0`),
+    check("ai_employees_name_present", sql`length(trim(name)) > 0`),
+    check("ai_employees_role_present", sql`length(trim(role)) > 0`),
+  ],
+);
+
+/**
+ * What one employee is allowed to reach.
+ *
+ * One row per grant, so authority is additive, auditable and revocable a piece
+ * at a time. `scope_kind` is an internal taxonomy and is constrained; the
+ * values are not, because a data domain or a work type is something a customer
+ * names.
+ *
+ * Absence is never permission: an employee with no rows of a given kind reaches
+ * nothing of that kind, rather than everything.
+ */
+export const aiEmployeeScopes = sqliteTable(
+  "ai_employee_scopes",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    employeeId: text("employee_id").notNull().references(() => aiEmployees.id),
+    /** property | connection | capability | work_type | data_domain | delegate_to */
+    scopeKind: text("scope_kind").notNull(),
+    value: text("value").notNull(),
+    grantedBy: text("granted_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("ai_employee_scopes_lookup_idx").on(table.employeeId, table.scopeKind),
+    uniqueIndex("ai_employee_scopes_grant_uq").on(table.employeeId, table.scopeKind, table.value),
+    check("ai_employee_scopes_kind", sql`scope_kind IN ('property','connection','capability','work_type','data_domain','delegate_to')`),
+    check("ai_employee_scopes_value_present", sql`length(trim(value)) > 0`),
+  ],
+);
+
+/**
+ * Expertise: what an employee knows how to do, separately from who it is.
+ *
+ * The eight specialists conflated these. "Maintenance" was simultaneously an
+ * identity, a permission envelope, a prompt fragment and a tool subset, which
+ * is why handling a recurring HVAC complaint that also needs vendor
+ * coordination and escalation meant either one over-broad agent or four
+ * separate bots.
+ *
+ * An employee is the persistent worker; expertise is loaded for the work in
+ * front of it. Only the routing metadata here is ever held in memory at once —
+ * the instructions are read for the profiles actually selected, so a catalogue
+ * of two hundred costs nothing to carry.
+ */
+export const expertiseProfiles = sqliteTable(
+  "expertise_profiles",
+  {
+    id: text("id").primaryKey(),
+    /** Null for the profiles Aval ships; set for one a workspace authored. */
+    organizationId: text("organization_id").references(() => organizations.id),
+    /** Stable handle: `resident-experience`, `vendor-coordination`. */
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    /* ── routing metadata: small, always loadable ─────────────────────────── */
+    /** Capability tags this expertise answers to, as a JSON string array. */
+    capabilityTagsJson: text("capability_tags_json").notNull().default("[]"),
+    /** Business domains it belongs to, as a JSON string array. */
+    domainsJson: text("domains_json").notNull().default("[]"),
+    /** Words and work types that suggest it, as a JSON string array. */
+    routingSignalsJson: text("routing_signals_json").notNull().default("[]"),
+    /** Tools it cannot work without, as a JSON string array. Absence of one excludes it. */
+    requiredCapabilitiesJson: text("required_capabilities_json").notNull().default("[]"),
+    /* ── the body: read only once selected ───────────────────────────────── */
+    instructions: text("instructions").notNull().default(""),
+    /** Ceiling this expertise refuses to act above, whatever the employee allows. */
+    riskCeiling: text("risk_ceiling").notNull().default("low"),
+    version: integer("version").notNull().default(1),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("expertise_profiles_lookup_idx").on(table.organizationId, table.enabled),
+    // A workspace may shadow a shipped profile with its own of the same slug;
+    // it may not have two of its own.
+    uniqueIndex("expertise_profiles_slug_uq").on(table.organizationId, table.slug),
+    check("expertise_profiles_risk", sql`risk_ceiling IN ('low','medium','high','critical')`),
+    // Valid in both dialects: GLOB is SQLite-only and would not survive the
+    // Postgres generator, which copies these predicates through verbatim.
+    check("expertise_profiles_slug_shape", sql`slug = lower(slug) AND length(slug) BETWEEN 2 AND 64`),
+  ],
+);
+
+/**
+ * Which expertise an employee is permitted to load.
+ *
+ * Permission, not preference: selection chooses from this set and never outside
+ * it, so an employee cannot acquire a competence at runtime by being asked
+ * nicely. An employee with no rows may load nothing, which makes a new employee
+ * inert until somebody decides what it should know.
+ */
+export const employeeExpertise = sqliteTable(
+  "employee_expertise",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    employeeId: text("employee_id").notNull().references(() => aiEmployees.id),
+    expertiseId: text("expertise_id").notNull().references(() => expertiseProfiles.id),
+    /** Pinned expertise is always loaded, whatever the work looks like. */
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    grantedBy: text("granted_by").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("employee_expertise_lookup_idx").on(table.employeeId),
+    uniqueIndex("employee_expertise_uq").on(table.employeeId, table.expertiseId),
+  ],
+);
+
+/**
+ * Why a particular expertise was loaded for a particular piece of work.
+ *
+ * A routing decision that cannot be inspected is indistinguishable from a
+ * guess. Each row records what was considered, what was chosen, on what
+ * signals, by which model, and whether a person overrode it — so "why did Maya
+ * treat this as an escalation" has an answer that does not require rerunning
+ * anything.
+ */
+export const expertiseSelections = sqliteTable(
+  "expertise_selections",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id").notNull().references(() => organizations.id),
+    taskId: text("task_id").notNull().references(() => agentTasks.id),
+    employeeId: text("employee_id"),
+    /** Every profile considered, with its score, as JSON. */
+    candidatesJson: text("candidates_json").notNull().default("[]"),
+    /** The slugs actually loaded, as a JSON string array. */
+    selectedJson: text("selected_json").notNull().default("[]"),
+    /** The signals that decided it, as JSON. */
+    signalsJson: text("signals_json").notNull().default("{}"),
+    /** deterministic | model | user — how the choice was reached. */
+    decidedBy: text("decided_by").notNull(),
+    modelProvider: text("model_provider"),
+    modelName: text("model_name"),
+    confidence: real("confidence"),
+    /** Set when a person's explicit choice replaced what routing proposed. */
+    overriddenBy: text("overridden_by"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("expertise_selections_task_idx").on(table.organizationId, table.taskId),
+    check("expertise_selections_decided_by", sql`decided_by IN ('deterministic','model','user')`),
+    check("expertise_selections_confidence", sql`confidence IS NULL OR (confidence >= 0 AND confidence <= 1)`),
+  ],
+);

@@ -5,8 +5,13 @@ import { createTask, getTask, type TaskRecord } from './tasks';
 import { parseTaskCheck, type TaskCheck } from './checks';
 import { digestPayload } from '@/lib/audit/chain';
 import { getTool } from './registry';
-import { hasPermission, roleForPersona } from './permissions';
-export const MAX_PLAN_NODES = 4, MAX_PLAN_REVISIONS = 2, MAX_GOAL_TASKS = 8;
+import { hasPermission, roleForPersona, canOrchestrate } from './permissions';
+import { resolveAttemptPolicy } from "./attempt-policy.ts";
+import { loadAttemptPolicies } from "./attempt-policy-store.ts";
+import { delegationRefusal } from "./delegation.ts";
+/** Fan-out and total size remain structural caps. How many times a goal may be
+ * rethought is policy — see DEFAULT_ATTEMPT_POLICIES.replan. */
+export const MAX_PLAN_NODES = 4, MAX_GOAL_TASKS = 8;
 type Node = {
     key: string;
     goal: string;
@@ -37,7 +42,9 @@ export function validatePlanNodes(value: unknown, parent: TaskRecord, completed:
             throw Error('Nested goal planning is not supported.');
         const agentId = typeof n.agentId === 'string' ? n.agentId : parent.agentId;
         const permission = check.kind === 'evidence' ? check.tools.map(t => getTool(t)!.requiredPermission) : [getTool(check.kind === 'delivery' ? (check.operation === 'listing' ? 'publish_listing' : check.operation === 'call' ? 'place_call' : 'send_external_message') : 'record_preference')!.requiredPermission];
-        if (permission.some(p => !hasPermission(roleForPersona(parent.agentId), p) || !hasPermission(roleForPersona(agentId), p)))
+        // The child must hold every permission its node needs. The parent must
+        // hold it or be allowed to route it to that child.
+        if (permission.some(p => (!hasPermission(roleForPersona(parent.agentId), p) && !canOrchestrate(roleForPersona(parent.agentId), p)) || !hasPermission(roleForPersona(agentId), p)))
             throw Error('A planned task requires permissions outside its parent or specialist.');
         keys.add(n.key);
         return { key: n.key, goal: n.goal.trim(), agentId, dependsOn: n.dependsOn as string[], check };
@@ -77,7 +84,13 @@ export async function writeGoalPlan(dbSession: DbSession, org: string, rootId: s
         if (plan && prior?.nodes.some(n => n.status === 'RUNNING' || n.status === 'WAITING_FOR_APPROVAL'))
             throw Error('Wait for running or approval-pending work before replanning.');
         const revision = (plan?.revision ?? 0) + 1;
-        if (revision > MAX_PLAN_REVISIONS)
+        // How many times a goal may be rethought is a property of the work, not
+        // a constant. The default matches the cap this replaced; a workspace can
+        // give slow-moving objectives more room without widening anything else,
+        // because the replan budget is resolved separately from verification
+        // and repair.
+        const replanPolicy = resolveAttemptPolicy('replan', {}, await loadAttemptPolicies(dbSession, org));
+        if (replanPolicy.maxAttempts != null && revision > replanPolicy.maxAttempts)
             throw Error('The goal reached its replan cap. Review the failed checks.');
         const nodes = validatePlanNodes(value, root, prior?.nodes.filter(n => n.status === 'COMPLETED').map(n => n.key));
         if (prior)
@@ -89,6 +102,15 @@ export async function writeGoalPlan(dbSession: DbSession, org: string, rootId: s
         const existing = await dbSession.db.select({ id: agentPlanNodes.id }).from(agentPlanNodes).where(eq(agentPlanNodes.rootTaskId, rootId));
         if (existing.length + nodes.length > MAX_GOAL_TASKS)
             throw Error('The goal reached its total task cap.');
+        // Who may open work under whom, and whether doing so would close a
+        // loop. The live path has never asked either question: it checked that
+        // the child held the permissions its node needed, which is a different
+        // question from whether this parent may hand work to that child at all.
+        for (const node of nodes) {
+            if (node.agentId === root.agentId && !root.employeeId) continue;
+            const refusal = await delegationRefusal(dbSession, org, root, { agentId: node.agentId, employeeId: null });
+            if (refusal) throw Error(refusal);
+        }
         const steps = Math.floor((root.maxSteps - root.stepCount - 2) / (2 * nodes.length)), tokens = Math.floor((root.maxTokens - root.tokensUsed) / (2 * nodes.length));
         if (steps < 2 || tokens < 2048)
             throw Error('Insufficient shared budget for this plan. Reduce its size.');

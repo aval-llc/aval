@@ -5,8 +5,16 @@ import { organizations } from "@/db/postgres/schema";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { listCustomPersonas } from "@/lib/ask-aval/custom-personas";
+import { PERSONAS } from "@/lib/ask-aval/persona-catalog";
 
-const BUILT_IN_PERSONA_IDS = new Set(["general", "financial", "brokerage", "realEstate", "marketResearch", "maintenance", "riskAnalyst", "portfolioOutlook"]);
+/**
+ * The built-in personas, read from the catalogue rather than copied.
+ *
+ * This was a hand-written list, and it had drifted: `leaseReview` was missing,
+ * so the Setup picker offered a card that always failed to save. Deriving it
+ * from PERSONAS means the list cannot fall behind the thing it describes.
+ */
+const builtInPersonaIds = (): Set<string> => new Set(Object.keys(PERSONAS));
 
 /** GET: which persona Ask Aval opens with by default for this org. Null means the built-in "general" persona. */
 async function GETWithSession(dbSession: DbSession, request: Request) {
@@ -23,7 +31,7 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   const body = await request.json().catch(() => ({})) as { personaId?: string | null };
   const personaId = body.personaId ?? null;
 
-  if (personaId !== null && !BUILT_IN_PERSONA_IDS.has(personaId)) {
+  if (personaId !== null && !builtInPersonaIds().has(personaId)) {
     const customPersonas = await listCustomPersonas(dbSession, identity.organizationId);
     if (!customPersonas.some((persona) => persona.id === personaId)) {
       return Response.json({ error: "Unknown agent" }, { status: 400 });

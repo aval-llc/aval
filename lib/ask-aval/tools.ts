@@ -7,16 +7,24 @@ import { HARNESS_TOOLS, runHarnessTool } from '@/lib/agents/harness-tools';
  * number itself — every figure in its final answer must trace back to a
  * tool result (enforced by the faithfulness gate in handler.ts).
  *
- * This app runs on a single static sample-data snapshot (app/data/sample.ts),
- * not a live per-tenant database yet, so every executor below reads that
- * snapshot rather than querying tables that don't exist. Anywhere the
- * snapshot genuinely doesn't have what a tool's shape implies (a numeric
- * days-past-due figure, a real dollar-scale time series for NOI), the
- * executor says so in a `note` field instead of inventing a plausible value.
+ * Every executor below reads the tenant's own database. Operations tools query
+ * the normalized tables (`properties`, `units`, `leases`, `residents`,
+ * `work_orders`, `ledger_entries`, `vendors`); metric tools read
+ * `portfolio_snapshots` and `funnel_snapshots` through
+ * `lib/ask-aval/portfolio-data.ts`. Every read is organization-scoped by the
+ * session, and RLS enforces that independently of this file.
+ *
+ * `app/data/sample.ts` is demo content for the marketing surface and the
+ * source of the shared `derive*Pct` helpers. It is NOT a fallback for these
+ * executors: a tool with no data says so in a `note` field rather than
+ * borrowing a plausible figure from the fixture. `tests/agent-tools-live-data.test.ts`
+ * fails if that ever stops being true.
  */
 
 import type { ToolSchema } from "./model-types";
 import { COMMUNICATION_TOOLS, runCommunicationTool } from "@/lib/communications/tools";
+import { PMS_WRITE_TOOL_SCHEMAS, runPmsWriteTool } from "@/lib/pms/tools.ts";
+import { isPmsWriteTool } from "@/lib/pms/tool-map.ts";
 import { OPERATIONS_TOOLS, runOperationsTool } from "./operations-tools";
 import { METRIC_KEYS, deltaPct, noDataAvailable, readFunnel, readMetricSeries, readMetrics, type MetricKey } from "./portfolio-data";
 import { PREFERENCE_TOPICS, recordPreference, describePreference, type PreferenceTopic } from "./preferences";
@@ -191,7 +199,14 @@ const COMPOSE_DOCUMENT_TOOL: ToolSchema = {
  * model picks by description, and the two families are described in terms of
  * what they can answer rather than which table they read.
  */
-const ALL_DATA_TOOLS: ToolSchema[] = [...DATA_TOOLS, ...OPERATIONS_TOOLS, ...COMMUNICATION_TOOLS, ...HARNESS_TOOLS];
+const ALL_DATA_TOOLS: ToolSchema[] = [
+  ...DATA_TOOLS, ...OPERATIONS_TOOLS, ...COMMUNICATION_TOOLS, ...HARNESS_TOOLS,
+  // Present in the schema list, absent from any given request unless the
+  // capability matrix assembled it in (lib/agents/runtime.ts). Listing them
+  // here is what makes that filter mean something — before this, it narrowed a
+  // set these tools were never in.
+  ...PMS_WRITE_TOOL_SCHEMAS,
+];
 
 /** Tools for a quick chat answer — `render_answer`'s `document` is optional. */
 export const TOOLS: ToolSchema[] = [...ALL_DATA_TOOLS, RENDER_ANSWER_TOOL];
@@ -219,7 +234,22 @@ function collectNumbers(v: unknown, out: number[] = []): number[] {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export async function runTool(dbSession: DbSession, name: string, input: Record<string, unknown>, organizationId?: string, operationKey?: string, taskContext?: {id:string;stepIndex:number}): Promise<ToolOutput> {
+export async function runTool(dbSession: DbSession, name: string, input: Record<string, unknown>, organizationId?: string, operationKey?: string, taskContext?: {id:string;stepIndex:number;approvalId?:string;personaId?:string}): Promise<ToolOutput> {
+  // Before the harness/communication branches: a PMS write is the only kind
+  // of tool here that reaches into a customer's system of record, and its
+  // whole gate chain lives behind this one call.
+  if (isPmsWriteTool(name)) {
+    if (!organizationId) throw new Error("A workspace is required.");
+    return {
+      json: await runPmsWriteTool(dbSession, name, input, organizationId, operationKey, {
+        personaId: taskContext?.personaId,
+        approvalId: taskContext?.approvalId,
+      }),
+      // A provider's acknowledgement is not a measured figure. Nothing a PMS
+      // echoes back may enter the faithfulness gate's evidence set.
+      numbers: [],
+    };
+  }
   if (HARNESS_TOOLS.some(tool=>tool.name===name)) {
     if(!organizationId)throw Error('A workspace is required.');
     return {json:await runHarnessTool(dbSession, name,input,organizationId,taskContext?.id,operationKey,taskContext?.stepIndex),numbers:[]};

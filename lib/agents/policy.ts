@@ -22,7 +22,7 @@
 
 import { autonomyApproval, type AutonomyMode } from "./autonomy.ts";
 import { NON_CAPABILITY_TOOLS, getTool, implementedTools, type RiskLevel, type ToolDescriptor } from "./registry.ts";
-import { hasPermission, roleForPersona, type AgentRole } from "./permissions.ts";
+import { hasPermission, roleForPersona, type AgentRole, type Permission } from "./permissions.ts";
 import { validateFinancialArguments } from "./financial.ts";
 
 export type PolicyEffect = "allow" | "deny" | "require_approval";
@@ -51,6 +51,16 @@ export interface PolicySubject {
 }
 
 export interface PolicyContext {
+  /**
+   * The owning employee's authority, where the work has an owner.
+   *
+   * Takes precedence over the persona envelope when present. An employee's
+   * authority is the permissions its granted capabilities imply, which is what
+   * lets a role the code has never heard of hold real permissions: before
+   * employees, every unrecognised persona resolved to one read-only envelope,
+   * so a customer-defined actor could only ever read.
+   */
+  employeePermissions?: readonly Permission[] | null;
   /** Persona id — a built-in role or a custom persona's row id. Resolved to an envelope by `roleForPersona`. */
   personaId?: string;
   autonomyMode?: AutonomyMode;
@@ -92,7 +102,11 @@ export function evaluate(
   if (tool.unimplemented) return deny("not_implemented", `"${toolName}" is declared but has no executor.`, tool);
 
   const role: AgentRole = roleForPersona(context.personaId);
-  if (!hasPermission(role, tool.requiredPermission)) {
+  if (context.employeePermissions) {
+    if (!context.employeePermissions.includes(tool.requiredPermission)) {
+      return deny("permission_denied", `This employee does not hold "${tool.requiredPermission}".`, tool);
+    }
+  } else if (!hasPermission(role, tool.requiredPermission)) {
     return deny("permission_denied", `Agent "${role}" does not hold "${tool.requiredPermission}".`, tool);
   }
 
@@ -143,10 +157,45 @@ function approvalReason(risk: RiskLevel, name: string): string {
  * executor enforces. `lib/ask-aval/personas.ts` narrows further per persona for
  * framing reasons; this is the ceiling neither it nor a prompt can raise.
  */
-export function allowedToolNames(personaId: string | undefined, subject: Pick<PolicySubject, "isGuest">): string[] {
+export function allowedToolNames(
+  personaId: string | undefined,
+  subject: Pick<PolicySubject, "isGuest">,
+  employeePermissions?: readonly Permission[] | null,
+): string[] {
   const role = roleForPersona(personaId);
+  const holds = (permission: Permission) => employeePermissions
+    ? employeePermissions.includes(permission)
+    : hasPermission(role, permission);
   return implementedTools()
-    .filter((tool) => hasPermission(role, tool.requiredPermission))
+    .filter((tool) => holds(tool.requiredPermission))
     .filter((tool) => !(subject.isGuest && tool.mutates))
     .map((tool) => tool.name);
+}
+
+/**
+ * The permissions a set of granted capabilities implies.
+ *
+ * An employee is granted tools, and each tool declares the permission it
+ * needs, so its envelope is derived rather than declared twice. Deriving it
+ * this way means a grant cannot imply more than the tool itself requires —
+ * there is nowhere to write a permission an employee holds but no granted tool
+ * uses.
+ *
+ * External communication is a separate switch because "may use the messaging
+ * tool" and "may contact a resident on the workspace's behalf" are different
+ * decisions, and conflating them is how an employee ends up emailing people
+ * because somebody wanted it to read a thread.
+ */
+export function employeeEnvelope(
+  capabilities: readonly string[],
+  options: { mayCommunicateExternally: boolean },
+): Permission[] {
+  const held = new Set<Permission>();
+  for (const name of capabilities) {
+    const tool = getTool(name);
+    if (!tool || tool.unimplemented) continue;
+    held.add(tool.requiredPermission);
+  }
+  if (!options.mayCommunicateExternally) held.delete("messaging.send.external");
+  return [...held];
 }

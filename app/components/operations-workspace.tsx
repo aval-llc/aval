@@ -5,6 +5,7 @@ import { Refresh } from "iconoir-react";
 import type { OperationsOverview } from "@/lib/operations/summary";
 import { DataChart, type ChartRow, type ChartSeries } from "./data-chart";
 import { useExperience } from "./experience";
+import { DASHBOARD_DOMAINS, resolveDashboardState, type DashboardCapability, type DashboardConnection, type DashboardDomain, type DataState } from "@/lib/operations/dashboard-state";
 type OperationsModule =
   "properties" | "leasing" | "maintenance" | "accounting" | "overview";
 const palette = [
@@ -21,44 +22,57 @@ export function OperationsWorkspace({
   hero,
 }: {
   view: OperationsModule;
-  openConnections: () => void;
+  openConnections: (domain?: DashboardDomain) => void;
   hero?: ReactNode;
 }) {
   const t = useTranslations(),
     e = useTranslations("Enterprise"),
     c = useTranslations("Charts"),
+    s = useTranslations("DashboardState"),
     locale = useLocale();
   const { market } = useExperience();
   const [period, setPeriod] = useState("month_to_date"),
     [revision, setRevision] = useState(0);
   const [loaded, setLoaded] = useState<{
     data: OperationsOverview | null;
+    availability: { connections: DashboardConnection[]; nativeCapabilities: DashboardCapability[] } | null;
     loading: boolean;
     error: boolean;
-  }>({ data: null, loading: true, error: false });
+  }>({ data: null, availability: null, loading: true, error: false });
   useEffect(() => {
     const abort = new AbortController();
     void (async () => {
-      setLoaded({ data: null, loading: true, error: false });
+      setLoaded({ data: null, availability: null, loading: true, error: false });
       try {
         const r = await fetch(`/api/operations/overview?period=${period}`, {
           cache: "no-store",
           signal: abort.signal,
         });
         if (!r.ok) throw Error();
-        const { overview } = (await r.json()) as {
+        const { overview, availability } = (await r.json()) as {
           overview: OperationsOverview;
+          availability: { connections: DashboardConnection[]; nativeCapabilities: DashboardCapability[] };
         };
         if (!abort.signal.aborted)
-          setLoaded({ data: overview, loading: false, error: false });
+          setLoaded({ data: overview, availability, loading: false, error: false });
       } catch {
         if (!abort.signal.aborted)
-          setLoaded({ data: null, loading: false, error: true });
+          setLoaded({ data: null, availability: null, loading: false, error: true });
       }
     })();
     return () => abort.abort();
   }, [period, revision]);
   const data = loaded.data;
+  const state = (domain: DashboardDomain, hasResult: boolean): DataState =>
+    !loaded.availability ? "syncing" : resolveDashboardState(domain, loaded.availability.connections, loaded.availability.nativeCapabilities, hasResult);
+  const connectLabel = (domain: DashboardDomain) => ({
+    property: s("property"), leasing: s("leasing"), inbox: s("inbox"), accounting: s("accounting"),
+  })[DASHBOARD_DOMAINS[domain].cta];
+  const chartState = (domain: DashboardDomain, rows: ChartRow[]) => ({
+    dataState: state(domain, rows.some((row) => Object.values(row.values).some((value) => typeof value === "number" && value !== 0))),
+    onConnect: () => openConnections(domain),
+    connectLabel: connectLabel(domain),
+  });
   const money = (n: number) =>
     new Intl.NumberFormat(locale, {
       style: "currency",
@@ -145,64 +159,74 @@ export function OperationsWorkspace({
   let metrics: {
     label: string;
     value: number | null;
+    domain: DashboardDomain;
     format?: (n: number) => string;
   }[] = [];
   if (view === "overview")
     metrics = [
       {
         label: e("noi"),
+        domain: "accounting",
         value:
           data?.headline.noiCents == null ? null : data.headline.noiCents / 100,
         format: money,
       },
       {
         label: c("physicalOccupancy"),
+        domain: "occupancy",
         value: data?.headline.physicalOccupancyPct ?? null,
         format: pct,
       },
       {
         label: e("collectionRate"),
+        domain: "collections",
         value: data?.headline.collectionRatePct ?? null,
         format: pct,
       },
-      { label: e("open"), value: data?.headline.openWorkOrders ?? null },
+      { label: e("open"), domain: "maintenance", value: data?.headline.openWorkOrders ?? null },
     ];
   else if (view === "properties")
     metrics = [
       {
         label: t("Nav.properties"),
+        domain: "property",
         value: data?.portfolio.propertyCount ?? null,
       },
       {
         label: e("units"),
+        domain: "occupancy",
         value: data?.portfolio.occupancy.totalUnits ?? null,
       },
       {
         label: e("occupied"),
+        domain: "occupancy",
         value: data?.portfolio.occupancy.occupiedUnits ?? null,
       },
       {
         label: e("available"),
+        domain: "occupancy",
         value: data?.portfolio.occupancy.availableToLeaseUnits ?? null,
       },
     ];
   else if (view === "leasing")
-    metrics = (data?.leasing.funnel ?? [])
-      .slice(0, 4)
-      .map((s) => ({ label: e(`stages.${s.stage}`), value: s.reached }));
+    metrics = (["inquiry", "contacted", "toured", "applied"] as const)
+      .map((stage) => ({ label: e(`stages.${stage}`), domain: "leasing" as const, value: data?.leasing.funnel?.find((row) => row.stage === stage)?.reached ?? null }));
   else if (view === "maintenance")
     metrics = [
       {
         label: e("reported"),
+        domain: "maintenance",
         value: data?.maintenance.summary.totalWorkOrders ?? null,
       },
-      { label: e("open"), value: data?.maintenance.summary.openCount ?? null },
+      { label: e("open"), domain: "maintenance", value: data?.maintenance.summary.openCount ?? null },
       {
         label: e("completed"),
+        domain: "maintenance",
         value: data?.maintenance.summary.completedCount ?? null,
       },
       {
         label: e("emergency"),
+        domain: "maintenance",
         value: data?.maintenance.summary.emergencyOpenCount ?? null,
       },
     ];
@@ -210,6 +234,7 @@ export function OperationsWorkspace({
     metrics = [
       {
         label: e("billed"),
+        domain: "collections",
         value: data?.accounting.collections
           ? data.accounting.collections.billedCents / 100
           : null,
@@ -217,6 +242,7 @@ export function OperationsWorkspace({
       },
       {
         label: e("collected"),
+        domain: "collections",
         value: data?.accounting.collections
           ? data.accounting.collections.collectedCents / 100
           : null,
@@ -224,6 +250,7 @@ export function OperationsWorkspace({
       },
       {
         label: e("pastDue"),
+        domain: "collections",
         value: data?.accounting.aging
           ? data.accounting.aging.totalPastDueCents / 100
           : null,
@@ -231,6 +258,7 @@ export function OperationsWorkspace({
       },
       {
         label: e("collectionRate"),
+        domain: "collections",
         value: data?.accounting.collections?.collectionRatePct ?? null,
         format: pct,
       },
@@ -248,7 +276,7 @@ export function OperationsWorkspace({
           </h1>
           <p className="header-subtitle">{c("description")}</p>
         </div>
-        <button className="soft-button" onClick={openConnections}>
+        <button className="soft-button" onClick={() => openConnections()}>
           {e("manageSources")}
         </button>
       </header>
@@ -294,10 +322,10 @@ export function OperationsWorkspace({
           </button>
         </div>
       )}
-      {data?.isEmpty && (
+      {data?.isEmpty && loaded.availability && Object.keys(DASHBOARD_DOMAINS).every((domain) => state(domain as DashboardDomain, false) === "empty") && (
         <div className="operations-empty-note">
           <p>{c("empty")}</p>
-          <button className="soft-button" onClick={openConnections}>
+          <button className="soft-button" onClick={() => openConnections()}>
             {e("manageSources")}
           </button>
         </div>
@@ -306,18 +334,18 @@ export function OperationsWorkspace({
         className="metric-grid compact-metrics"
         aria-busy={loaded.loading}
       >
-        {metrics.map((m) => (
-          <article className="metric-card" key={m.label}>
+        {metrics.map((m) => {
+          const dataState = state(m.domain, m.value !== null && m.value !== 0);
+          return <article className="metric-card" data-state={dataState} key={m.label}>
             <span>{m.label}</span>
             <strong>
-              {loaded.loading
-                ? "…"
-                : m.value === null
-                  ? "—"
-                  : (m.format?.(m.value) ?? m.value.toLocaleString(locale))}
+              {dataState === "syncing" ? s("syncing") : dataState === "preview" ? (m.format === pct ? "0%" : m.format?.(0) ?? "0") : dataState === "empty" ? (m.format?.(0) ?? "0") : m.value === null ? "—" : (m.format?.(m.value) ?? m.value.toLocaleString(locale))}
             </strong>
-          </article>
-        ))}
+            {dataState === "preview" && <><small>{s("preview")}</small><button type="button" className="dashboard-metric-connect" onClick={() => openConnections(m.domain)}>{connectLabel(m.domain)}</button></>}
+            {dataState === "syncing" && <button type="button" className="dashboard-metric-connect" onClick={() => openConnections(m.domain)}>{e("manageSources")}</button>}
+            {dataState === "empty" && <small>{s("empty")}</small>}
+          </article>;
+        })}
       </section>
       <div
         className={
@@ -328,6 +356,7 @@ export function OperationsWorkspace({
           <section className="panel chart-wide">
             <DataChart
               {...common}
+              {...chartState("accounting", cashRows)}
               {...currency}
               chartId={`${view}.cash`}
               title={c("cashFlow")}
@@ -343,6 +372,7 @@ export function OperationsWorkspace({
           <section className="panel">
             <DataChart
               {...common}
+              {...chartState("occupancy", occupancyRows)}
               chartId={`${view}.occupancy`}
               title={e("occupancyByType")}
               subtitle={c("occupancyNote")}
@@ -357,6 +387,7 @@ export function OperationsWorkspace({
           <section className="panel">
             <DataChart
               {...common}
+              {...chartState("leasing", funnelRows)}
               chartId={`${view}.funnel`}
               title={e("leasingFunnel")}
               subtitle={c("funnelNote")}
@@ -370,6 +401,7 @@ export function OperationsWorkspace({
           <section className="panel">
             <DataChart
               {...common}
+              {...chartState("maintenance", categories)}
               chartId={`${view}.maintenance`}
               title={e("workByCategory")}
               subtitle={e("chartDescription")}
@@ -385,6 +417,9 @@ export function OperationsWorkspace({
           <section className="panel">
             <DataChart
               {...common}
+              dataState={state("leasing", Boolean(data?.leasing.expirations.schedule.some((row) => row.leaseCount > 0)))}
+              onConnect={() => openConnections("leasing")}
+              connectLabel={connectLabel("leasing")}
               chartId={`${view}.expirations`}
               title={e("leaseExpirations")}
               subtitle={c("expirationNote")}
@@ -402,6 +437,9 @@ export function OperationsWorkspace({
           <section className="panel">
             <DataChart
               {...common}
+              dataState={state("rent", Boolean(data?.portfolio.rentPosition.grossPotentialRentCents))}
+              onConnect={() => openConnections("rent")}
+              connectLabel={connectLabel("rent")}
               {...currency}
               chartId="properties.rents"
               title={c("rentPosition")}
@@ -438,6 +476,9 @@ export function OperationsWorkspace({
           <section className="panel">
             <DataChart
               {...common}
+              dataState={state("maintenance", Boolean(data?.maintenance.spendByProperty.some((row) => row.totalCostCents)))}
+              onConnect={() => openConnections("maintenance")}
+              connectLabel={connectLabel("maintenance")}
               {...currency}
               chartId="maintenance.spend"
               title={c("maintenanceSpend")}
@@ -456,6 +497,7 @@ export function OperationsWorkspace({
           <section className="panel chart-wide">
             <DataChart
               {...common}
+              {...chartState("accounting", incomeRows)}
               {...currency}
               chartId={`${view}.incomeMix`}
               title={c("incomeMix")}
@@ -473,6 +515,7 @@ export function OperationsWorkspace({
             <section className="panel">
               <DataChart
                 {...common}
+                {...chartState("accounting", pnlRows)}
                 {...currency}
                 chartId="accounting.properties"
                 title={e("incomeExpenses")}
@@ -484,6 +527,9 @@ export function OperationsWorkspace({
             <section className="panel">
               <DataChart
                 {...common}
+                dataState={state("collections", Boolean(data?.accounting.aging?.totalPastDueCents))}
+                onConnect={() => openConnections("collections")}
+                connectLabel={connectLabel("collections")}
                 {...currency}
                 chartId="accounting.aging"
                 title={e("receivablesAging")}

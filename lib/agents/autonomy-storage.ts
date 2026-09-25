@@ -5,6 +5,7 @@ import { readOnboarding } from '@/lib/onboarding/storage';
 import { roleFor } from '@/lib/organizations/membership';
 import { digestPayload } from '@/lib/audit/chain';
 import { autonomyMode, canonicalAction } from './autonomy';
+import { getEmployee } from './employees';
 import { getTask } from './tasks';
 /** Read on every mutation. The model cannot supply or cache its own mode/authority. */
 export async function executionAuthority(dbSession: DbSession, org: string, user: string, taskId: string | undefined, tool: string, args: Record<string,unknown>) {
@@ -20,8 +21,11 @@ export async function executionAuthority(dbSession: DbSession, org: string, user
     });
   }
   const task = taskId ? await getTask(dbSession, org, taskId) : null;
+  const employee=task?.employeeId ? await getEmployee(dbSession,org,task.employeeId) : null;
+  const modes=['supervised','assisted','autonomous'] as const;
+  const mode=modes[Math.min(modes.indexOf(autonomyMode(state.preferences.autonomy[0])),employee?modes.indexOf(employee.autonomyMode):2)];
   const inbound = task && JSON.parse(task.executionScopeJson).source === 'inbound';
-  return { mode: inbound ? 'supervised' as const : autonomyMode(state.preferences.autonomy[0]), revision: state.revision, role, planned: inbound ? false : planned };
+  return { mode: inbound ? 'supervised' as const : mode, revision: state.revision, role, planned: inbound ? false : planned };
 }
 export async function planEvidence(dbSession: DbSession, args: Record<string,unknown>, user: string, org: string) {
   const state = await readOnboarding(dbSession, user,org);

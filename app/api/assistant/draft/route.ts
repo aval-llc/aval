@@ -3,6 +3,7 @@ import type { DbSession } from "@/db/postgres/session";
 import { env } from "cloudflare:workers";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
+import { resolvePersona } from "@/lib/ask-aval/personas";
 import { handleAskAvalDraft, type DraftFormat } from "@/lib/ask-aval/draft";
 import type { AskAvalEnv } from "@/lib/ask-aval/model-types";
 import {
@@ -45,12 +46,14 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   const id = body.id ?? crypto.randomUUID();
   if (!validDraftId(id))
     return Response.json({ error: "Invalid draft ID" }, { status: 400 });
+  const persona = await resolvePersona(dbSession, typeof body.personaId === "string" ? body.personaId : undefined, identity.organizationId);
   const token = await reserveDraft(dbSession, identity, id, {
     title,
     instructions,
     format,
     documentType: documentType || null,
     moduleLabel: focusedModule?.label ?? null,
+    personaId: persona.id,
   });
   if (!token)
     return Response.json({ error: "This draft was removed." }, { status: 409 });
@@ -60,7 +63,7 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
     { orgId: identity.organizationId, userId: identity.userId },
     locale,
     focusedModule,
-    body.personaId,
+    persona.id,
     isGuestIdentity(identity),
   );
 

@@ -33,6 +33,8 @@
  * or spend a model step.
  */
 
+import { belongsToAgent } from "./agent-library-model";
+import { MarkdownPreview } from "./markdown-preview";
 import { AgentApprovalPrompt } from "./agent-approval-prompt";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
@@ -56,6 +58,7 @@ import { formatDuration, groupBySteps, toneFor, type RowTone } from "@/lib/agent
 /* ── shapes returned by app/api/agents/* ──────────────────────────────────── */
 
 interface TaskSummary {
+  employeeId?: string | null;
   id: string;
   agentId: string;
   goal: string;
@@ -86,7 +89,7 @@ interface TaskDetail extends TaskSummary {
   tokens: { used: number; max: number };
   delegationDepth: number;
   parentTaskId: string | null;
-  result: { headline?: string; narrative?: string } | null;
+  result: { headline?: string; narrative?: string; document?: string } | null;
   trace: TraceEntry[];
   plan?: { revision: number; nodes: { id: string; key: string; goal: string; status: string; dependencies: string; error: string | null }[] } | null;
   checks?: { step: number; exitCode: number; output: { problems?: string[]; scope?: string } | null }[];
@@ -95,6 +98,8 @@ interface TaskDetail extends TaskSummary {
 interface PendingApproval {
   id: string;
   taskId: string;
+  agentId?: string;
+  employeeId?: string | null;
   tool: string;
   risk: string;
   tier: string;
@@ -293,6 +298,7 @@ function TaskCard({ task, detail, expanded, busy, onToggle, onCancel }: {
         <div className="agent-task-detail">
           {detail ? (
             <>
+              <details className="execution-disclosure"><summary>{t("AgentLibrary.executionDetails")}</summary>
               {detail.plan?.nodes.length ? <section className="agent-task-result">
                 <p className="eyebrow">{t("AgentTrace.goalPlan", { revision: detail.plan.revision })}</p>
                 <ol className="agent-plan-nodes">{detail.plan.nodes.map(node => <li key={node.id}>
@@ -311,11 +317,13 @@ function TaskCard({ task, detail, expanded, busy, onToggle, onCancel }: {
                 <small>{t("AgentTrace.checkScope")}</small>
               </section>}
 
-              {detail.result?.headline && (
+              </details>
+              {(detail.result?.headline || detail.result?.narrative || detail.result?.document) && (
                 <div className="agent-task-result">
                   <p className="eyebrow">{t("AgentTrace.conclusion")}</p>
                   <strong>{detail.result.headline}</strong>
                   {detail.result.narrative && <p>{detail.result.narrative}</p>}
+                  {detail.result.document && <div className="library-document-output"><MarkdownPreview text={detail.result.document}/><a className="soft-button" download={`aval-${task.id}.md`} href={`data:text/markdown;charset=utf-8,${encodeURIComponent(detail.result.document)}`}>{t("AgentLibrary.downloadDocument")}</a></div>}
                 </div>
               )}
               {/* A withheld or failed run is reported, not hidden. The
@@ -346,7 +354,7 @@ function TaskCard({ task, detail, expanded, busy, onToggle, onCancel }: {
 
 /* ── the section ──────────────────────────────────────────────────────────── */
 
-export function AgentTrace() {
+export function AgentTrace({ agentFilter, employeeFilter = false, agentLabel, mode = "all", onReviewCount }: { agentFilter?: string; employeeFilter?: boolean; agentLabel?: string; mode?: "all" | "work" | "review" | "documents"; onReviewCount?: (count: number) => void } = {}) {
   const t = useTranslations();
   // Read here rather than threaded through TasksView, which has no other use
   // for it — only the approval card's currency formatting needs a locale.
@@ -356,7 +364,7 @@ export function AgentTrace() {
   const [details, setDetails] = useState<Record<string, TaskDetail>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [goal, setGoal] = useState("");
-  const [agentId, setAgentId] = useState<string>("general");
+  const [agentId, setAgentId] = useState<string>(agentFilter ?? "general");
   const [recommendation, setRecommendation] = useState<{agentId:string;mode:string;goal:string}|null>(null);
   const suggestion = goal.trim() && recommendation?.goal === goal ? recommendation : null;
   useEffect(() => {
@@ -379,37 +387,43 @@ export function AgentTrace() {
   // False once the component unmounts, so a response that lands afterwards is
   // dropped instead of writing to state that no longer exists.
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const loadTasks = useCallback(async (signal?: AbortSignal) => {
+    const scope = agentFilter ? `?${employeeFilter ? "employeeId" : "agentId"}=${encodeURIComponent(agentFilter)}` : "";
     const [taskResponse, approvalResponse] = await Promise.all([
-      fetch("/api/agents/tasks", { signal }).then((response) => response.json()).catch(() => ({})),
-      fetch("/api/agents/approvals", { signal }).then((response) => response.json()).catch(() => ({})),
+      fetch(`/api/agents/tasks${scope}`, { signal }).then((response) => response.ok ? response.json() : null).catch(() => null),
+      fetch(`/api/agents/approvals${scope}`, { signal }).then((response) => response.ok ? response.json() : null).catch(() => null),
     ]);
     if (!mounted.current || signal?.aborted) return;
-    setTasks((taskResponse as { tasks?: TaskSummary[] }).tasks ?? []);
-    setApprovals((approvalResponse as { approvals?: PendingApproval[] }).approvals ?? []);
+    if (!taskResponse || !approvalResponse) { setNotice(t("AgentLibrary.workUnavailable")); return; }
+    const allTasks = (taskResponse as { tasks?: TaskSummary[] }).tasks ?? [];
+    const visibleTasks = agentFilter ? allTasks.filter(task => belongsToAgent(task, agentFilter, employeeFilter)) : allTasks;
+    setTasks(visibleTasks);
+    setApprovals(((approvalResponse as { approvals?: PendingApproval[] }).approvals ?? []).filter(approval => !agentFilter || (approval.agentId ? belongsToAgent({ agentId: approval.agentId, employeeId: approval.employeeId }, agentFilter, employeeFilter) : visibleTasks.some(task => task.id === approval.taskId))));
+    onReviewCount?.(((approvalResponse as { approvals?: PendingApproval[] }).approvals ?? []).length);
     setLoaded(true);
-  }, []);
+  }, [agentFilter, employeeFilter, t, onReviewCount]);
 
   /** Reads one task's detail. The endpoint is side-effect free. */
   const loadDetail = useCallback(async (id: string, signal?: AbortSignal) => {
-    const response = await fetch(`/api/agents/tasks/${id}`, { signal });
+    const response = await fetch(`/api/agents/tasks/${id}`, { signal }).catch(() => null);
+    if (!response?.ok) { if (!signal?.aborted) setNotice(t("AgentLibrary.workUnavailable")); return null; }
     const detail = (await response.json().catch(() => null)) as TaskDetail | null;
     if (!mounted.current || signal?.aborted) return null;
     if (detail?.id) setDetails((current) => ({ ...current, [id]: detail }));
     return detail;
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadTasks(controller.signal);
+    queueMicrotask(() => { if (!controller.signal.aborted) void loadTasks(controller.signal); });
     return () => controller.abort();
   }, [loadTasks]);
 
   // Polling observes worker-owned execution. It runs only while something is
   // live, so an idle workspace makes no requests at all.
-  const hasLive = tasks.some((task) => !SETTLED.has(task.status));
+  const hasLive = mode === "review" || tasks.some((task) => !SETTLED.has(task.status));
   useEffect(() => {
     if (!hasLive) return;
     const controller = new AbortController();
@@ -447,14 +461,14 @@ export function AgentTrace() {
       const response = await fetch("/api/agents/tasks", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ goal: trimmed, agentId }),
+        body: JSON.stringify({ goal: trimmed, ...(employeeFilter?{employeeId:agentFilter}:{agentId}) }),
       });
       const data = (await response.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!response.ok || data.error) { setNotice(data.error ?? t("AgentTrace.startFailed")); return; }
       setGoal("");
       if (data.id) { setExpanded(data.id); await loadDetail(data.id); }
       await loadTasks();
-    } finally {
+    } catch { setNotice(t("AgentTrace.startFailed")); } finally {
       setBusy(false);
     }
   };
@@ -494,14 +508,14 @@ export function AgentTrace() {
     <section className="ask-aval-tasks agent-trace-card" data-reveal>
       <div className="ask-aval-tasks-heading">
         <div>
-          <h2>{t("AgentTrace.title")}</h2>
-          <p>{t("AgentTrace.subtitle")}</p>
+          <h2>{t(mode === "review" ? "AgentLibrary.reviewTab" : mode === "documents" ? "AgentLibrary.documentsTitle" : agentFilter ? "AgentLibrary.workTab" : "AgentTrace.title")}</h2>
+          <p>{t(mode === "review" ? "AgentLibrary.reviewSubtitle" : agentFilter ? "AgentLibrary.outputsSubtitle" : "AgentTrace.subtitle")}</p>
         </div>
       </div>
 
       {/* Approvals first: a parked action is the only thing here that needs a
           person, so it outranks however many tasks are running below it. */}
-      {approvals.length > 0 && (
+      {(mode === "all" || mode === "review") && approvals.length > 0 && (
         <div className="agent-approvals">
           <p className="eyebrow"><Lock width={12} height={12}/>{t("AgentTrace.awaitingApproval", { count: approvals.length })}</p>
           <div className="agent-approval-grid">
@@ -512,7 +526,7 @@ export function AgentTrace() {
         </div>
       )}
 
-      <div className="agent-goal-form">
+      {(mode === "all" || mode === "work") && <div className="agent-goal-form">
         <label className="agent-goal-field">
           <Sparks width={16} height={16}/>
           <input
@@ -523,24 +537,25 @@ export function AgentTrace() {
             maxLength={1200}
           />
         </label>
-        <select value={agentId} onChange={(event) => setAgentId(event.target.value)} aria-label={t("AgentTrace.agentLabel")}>
+        {!agentFilter && <select value={agentId} onChange={(event) => setAgentId(event.target.value)} aria-label={t("AgentTrace.agentLabel")}>
           {Object.values(PERSONA_PRESETS).map((preset) => (
             <option value={preset.id} key={preset.id}>{t(preset.labelKey)}</option>
           ))}
-        </select>
+        </select>}
+        {agentFilter && <span className="library-agent-label">{agentLabel}</span>}
         <button type="button" className="primary-button" onClick={start} disabled={busy || !goal.trim()}>
           <Play width={15} height={15}/>{t("AgentTrace.runGoal")}
         </button>
-      </div>
+      </div>}
 
-      {suggestion && <div className="agent-suggestion"><span>{t("AgentTrace.suggestedAgent", { agent: t(personaFor(suggestion.agentId).labelKey) })}</span><button type="button" className="soft-button" onClick={()=>setAgentId(suggestion.agentId)}>{t("AgentTrace.chooseSuggested")}</button></div>}
-      {notice && <p className="agent-trace-notice">{notice}</p>}
+      {!agentFilter && suggestion && <div className="agent-suggestion"><span>{t("AgentTrace.suggestedAgent", { agent: t(personaFor(suggestion.agentId).labelKey) })}</span><button type="button" className="soft-button" onClick={()=>setAgentId(suggestion.agentId)}>{t("AgentTrace.chooseSuggested")}</button></div>}
+      {notice && <div className="agent-trace-notice" role="alert">{notice} <button type="button" className="text-button" onClick={() => { setNotice(null); void loadTasks(); if (expanded) void loadDetail(expanded); }}>{t("SetupView.refresh")}</button></div>}
 
-      {tasks.length === 0 ? (
-        <div className="empty-column">{loaded ? t("AgentTrace.empty") : t("AgentTrace.loadingTasks")}</div>
+      {mode === "review" ? (approvals.length === 0 && <div className="empty-column">{notice ? t("AgentLibrary.workUnavailable") : loaded ? t("AgentLibrary.reviewEmpty") : t("AgentTrace.loadingTasks")}</div>) : tasks.filter(task => mode !== "documents" || task.status === "COMPLETED").length === 0 ? (
+        <div className="empty-column">{notice ? t("AgentLibrary.workUnavailable") : loaded ? t(agentFilter ? "AgentLibrary.emptyOutputs" : "AgentTrace.empty") : t("AgentTrace.loadingTasks")}</div>
       ) : (
         <div className="agent-task-list">
-          {tasks.map((task) => (
+          {tasks.filter(task => mode !== "documents" || task.status === "COMPLETED").map((task) => (
             <TaskCard
               task={task}
               detail={details[task.id] ?? null}
