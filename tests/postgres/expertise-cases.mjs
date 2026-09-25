@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { expertiseProfiles, expertiseSelections } from "../../db/postgres/schema.ts";
-import { createEmployee, listEmployees, setEmployeeStatus } from "../../lib/agents/employees.ts";
+import { createEmployee, employeeScopes, listEmployees } from "../../lib/agents/employees.ts";
 import { createTask } from "../../lib/agents/tasks.ts";
 import {
   SHIPPED_EXPERTISE, STARTER_TEMPLATES, listExpertiseCatalogue,
   grantExpertise, employeeCandidates, selectExpertiseForWork, loadExpertiseInstructions,
-  seedWorkspaceEmployees, assignEmployeeForWork,
+  createEmployeeFromTemplate, assignEmployeeForWork,
 } from "../../lib/agents/expertise.ts";
 
 /**
@@ -162,26 +162,25 @@ export async function runExpertiseCases(t, { session, userA, userB }) {
     assert.equal(recorded.overriddenBy, userA);
   });
 
-  await t.test("a workspace starts with the team Aval ships, as ordinary employees", async () => {
-    // The eight did not become templates that leave a new workspace empty. They
-    // are seeded as employees a customer can rename, re-scope, pause or
-    // archive — the roster is rows the customer owns now, not a union type.
-    const seeded = await fresh((s, org) => seedWorkspaceEmployees(s, org, newcomer));
-    assert.equal(seeded, STARTER_TEMPLATES.length, "every starter role arrives as an employee");
-
+  await t.test("a new workspace starts with Aval One and no employees", async () => {
+    // The historical agents became built-in Leads, not employee records. A
+    // workspace's roster is headcount the customer chose, so it starts empty
+    // and nothing fills it on the customer's behalf.
     const team = await fresh((s, org) => listEmployees(s, org, { limit: 100 }));
-    const roles = new Set(team.map((row) => row.role));
-    for (const legacy of ["Financial Analyst", "Maintenance", "Risk Analyst", "Lease Review"]) {
-      assert.ok(roles.has(legacy), `${legacy} is present as an employee`);
-    }
-    assert.ok(team.every((row) => row.status === "active"), "and they are ready to work");
+    assert.equal(team.length, 0, "no employees until somebody creates one");
+    assert.equal(await fresh((s, org) => assignEmployeeForWork(s, org, { objective: "A resident reports a leak", domains: ["maintenance"] })), null,
+      "and with nobody on the roster, work stays with Aval One");
+  });
 
-    // Seeding again does not fight what the customer has since decided.
-    assert.equal(await fresh((s, org) => seedWorkspaceEmployees(s, org, newcomer)), 0);
-    const archived = team.find((row) => row.role === "Market Research");
-    await fresh((s, org) => setEmployeeStatus(s, org, archived.id, "archived"));
-    assert.equal(await fresh((s, org) => seedWorkspaceEmployees(s, org, newcomer)), 0,
-      "an employee somebody deliberately archived does not come back tomorrow");
+  await t.test("a template creates one optional employee, capabilities and expertise included", async () => {
+    const maintenance = await fresh((s, org) => createEmployeeFromTemplate(s, org, newcomer, "maintenance-operations"));
+    const scopes = await fresh((s, org) => employeeScopes(s, org, maintenance.id));
+    const template = STARTER_TEMPLATES.find((row) => row.slug === "maintenance-operations");
+    assert.deepEqual([...(scopes.capability ?? [])].sort(), [...template.capabilities].sort(), "the template's reads come with it");
+    const candidates = await fresh((s, org) => employeeCandidates(s, org, maintenance.id));
+    assert.deepEqual(candidates.map((row) => row.slug).sort(), [...template.expertise].sort(), "and so does its expertise");
+    await fresh((s, org) => createEmployeeFromTemplate(s, org, newcomer, "portfolio-analyst"));
+    assert.equal((await fresh((s, org) => listEmployees(s, org, { limit: 100 }))).length, 2, "one employee per choice, never a roster");
   });
 
   await t.test("the coordinator assigns work to the employee equipped for it", async () => {
@@ -228,7 +227,7 @@ export async function runExpertiseCases(t, { session, userA, userB }) {
         assert.ok(known.has(slug), `${template.slug} refers to real expertise (${slug})`);
       }
     }
-    const template = STARTER_TEMPLATES.find((row) => row.slug === "maintenance");
+    const template = STARTER_TEMPLATES.find((row) => row.slug === "maintenance-operations");
     const fromTemplate = await run((s, org) => createEmployee(s, org, userA, {
       name: "Expertise from a template", role: template.role, objective: template.objective,
     }));

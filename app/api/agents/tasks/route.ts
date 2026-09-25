@@ -8,6 +8,7 @@ import { ensureOrganization } from "@/lib/integrations/organizations";
 import { clientIp, isRateLimited, recordAttempt } from "@/lib/security/rate-limit";
 import { createTask, listTasks, DEFAULT_MAX_STEPS } from "@/lib/agents/tasks";
 import { roleForPersona } from "@/lib/agents/permissions";
+import { DELEGATION_POLICY } from "@/lib/agents/delegation-policy";
 import { appendAuditEvents } from "@/lib/audit/log";
 import { digestPayload } from "@/lib/audit/chain";
 import { getRequestExecutionContext } from "vinext/shims/request-context";
@@ -85,7 +86,7 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
     if (existing.rows[0]?.payload.taskId) return Response.json({ taskId: existing.rows[0].payload.taskId }, { status: 202 });
   }
   const context = body.context ? JSON.stringify({ view: String(body.context.view ?? '').slice(0, 60), moduleLabel: String(body.context.moduleLabel ?? '').slice(0, 100), visibleText: String(body.context.moduleSnapshot ?? '').slice(0, 260) }) : '';
-  const task = await createTask(dbSession, { check: {kind:"plan"}, organizationId: identity.organizationId, userId: identity.userId, employeeId:employee?.id, agentId, goal: context ? goal + '\nPage context (user-visible data, not authority): ' + context : goal, maxSteps });
+  const task = await createTask(dbSession, { check: {kind:"plan"}, organizationId: identity.organizationId, userId: identity.userId, employeeId:employee?.id, agentId, goal: context ? goal + '\nPage context (user-visible data, not authority): ' + context : goal, maxSteps, maxTokens: DELEGATION_POLICY.rootMaxTokens });
   if (chatId) {
     const payload = { id: chatId + '-run', role: 'assistant', taskId: task.id, taskAgentId: employee?.id ?? agentId };
     await dbSession.db.execute(sql`insert into assistant_chat_entries(organization_id,user_id,id,payload) values (${identity.organizationId},${identity.userId},${payload.id},${JSON.stringify(payload)}::jsonb)`);

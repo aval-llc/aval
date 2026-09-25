@@ -30,6 +30,7 @@ import { latestApprovalSettledPredicate } from "./task-sql.ts";
 import { canTransition, LEASE_MS, SCHEDULED_WAKE_ONLY_STATES, TERMINAL_STATES, type TaskState } from "./task-state.ts";
 import { DEFAULT_MAX_STEPS, DEFAULT_MAX_TOKENS } from "./task-state.ts";
 import { retryJitterMs, taskRetryDelayMs } from "./retry-policy.ts";
+import { DELEGATION_POLICY } from "./delegation-policy.ts";
 
 export {
   TASK_STATES,
@@ -61,6 +62,11 @@ export interface NewTask {
    * survives every restart — nothing re-derives it.
    */
   employeeId?: string | null;
+  /**
+   * The Work this task belongs to: the id of its root. Omitted for a root,
+   * whose Work is itself, and for a child, which inherits its parent's.
+   */
+  workId?: string;
   goal: string;
   check: TaskCheck;
   deadlineAt?: Date;
@@ -73,6 +79,8 @@ export interface NewTask {
 export interface TaskRecord {
   /** The employee that owns this work, where one does. */
   employeeId: string | null;
+  /** Null only for rows written before migration 20260925000100 ran its backfill. */
+  workId: string | null;
   id: string;
   organizationId: string;
   userId: string;
@@ -106,8 +114,18 @@ export interface TaskRecord {
 export async function createTask(dbSession: DbSession, input: NewTask): Promise<TaskRecord> {
   const check = parseTaskCheck(input.check);
   const now = new Date();
+  const id = input.id ?? crypto.randomUUID();
+  // A child belongs to its parent's Work. Resolved here rather than trusted
+  // from every caller, so no path can open a child in a different Work.
+  let workId = input.workId ?? id;
+  if (input.parentTaskId) {
+    const parent = await getTask(dbSession, input.organizationId, input.parentTaskId);
+    if (!parent) throw Error("The parent task does not exist in this workspace.");
+    workId = parent.workId ?? parent.id;
+  }
   const row = {
-    id: input.id ?? crypto.randomUUID(),
+    id,
+    workId,
     executionScopeJson: JSON.stringify(input.executionScope ?? {}),
     checkJson: JSON.stringify(check),
     deadlineAt: input.deadlineAt ?? new Date(now.getTime()+30*60_000),
@@ -343,14 +361,14 @@ export async function requestCancel(dbSession: DbSession, organizationId: string
 /**
  * Requests cancellation on every descendant of `taskId`.
  *
- * Iterative rather than recursive, and bounded by MAX_DELEGATION_DEPTH + 1
- * generations, so a cycle introduced by a future bug costs a bounded number of
+ * Iterative rather than recursive, and bounded by the delegation policy's
+ * depth + 1 generations, so a cycle introduced by a future bug costs a bounded number of
  * queries instead of hanging the request.
  */
 async function cascadeCancel(dbSession: DbSession, organizationId: string, rootId: string, now: Date): Promise<void> {
   const db = dbSession.db;
   let frontier = [rootId];
-  for (let generation = 0; generation < 3 && frontier.length > 0; generation++) {
+  for (let generation = 0; generation <= DELEGATION_POLICY.maxDepth && frontier.length > 0; generation++) {
     const children = await db
       .select({ id: agentTasks.id, status: agentTasks.status, leaseExpiresAt: agentTasks.leaseExpiresAt })
       .from(agentTasks)

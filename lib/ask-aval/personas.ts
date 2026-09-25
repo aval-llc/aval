@@ -29,9 +29,9 @@ export function getPersona(id: string | undefined): AgentPersona {
 
 /**
  * Resolves a personaId to an AgentPersona, checking the fixed built-in
- * roster first (no DB round-trip) and falling back to a workspace-defined
- * custom persona (custom-personas.ts) scoped to `organizationId` — a
- * custom persona from a different org is invisible here, same as any other
+ * roster first (no DB round-trip), then the organization's Leads and
+ * Specialists, then the workspace's own employees scoped to `organizationId` —
+ * an employee from a different org is invisible here, same as any other
  * org-scoped row in this app. Falls back to `general` if neither matches,
  * same as getPersona().
  */
@@ -39,14 +39,36 @@ export async function resolvePersona(dbSession: DbSession, id: string | undefine
   if (!id) return PERSONAS.general;
   const builtIn = PERSONAS[id as PersonaId];
   if (builtIn) return builtIn;
-  const { getCustomPersonaAsAgentPersona } = await import("./custom-personas");
-  const custom = await getCustomPersonaAsAgentPersona(dbSession, organizationId, id);
-  return custom ?? PERSONAS.general;
+  // A Lead or Specialist of the organization, or an alias of a historical id
+  // (`aval-one`, `lead.finance`). Historical ids answered above keep their
+  // persona exactly; everything else is framed by its own definition.
+  const { builtInActor } = await import("@/lib/agents/organization/index.ts");
+  const actor = builtInActor(id);
+  if (actor) {
+    const legacy = PERSONAS[actor.id as PersonaId];
+    if (legacy) return legacy;
+    return { id: actor.id, label: actor.name, systemPromptAddition: actor.instructions, toolNames: actor.toolNames ? [...actor.toolNames] : null };
+  }
+  // One of the workspace's own employees — including every former custom
+  // persona, which became an employee under the same id. Framed by the
+  // employee's own instructions; its authority is its grant, applied by policy.
+  const { getEmployee, employeeScopes } = await import("@/lib/agents/employees");
+  const employee = await getEmployee(dbSession, organizationId, id);
+  if (employee && employee.status !== "archived") {
+    const scopes = await employeeScopes(dbSession, organizationId, employee.id);
+    return {
+      id: employee.id,
+      label: employee.name,
+      systemPromptAddition: `\n\nYou are currently acting as ${employee.name}, an employee this workspace created (${employee.role}). Its own framing, not a new hard rule — every rule above still applies exactly as written: ${employee.instructions ?? employee.objective ?? ""}`,
+      toolNames: scopes.capability ?? [],
+    };
+  }
+  return PERSONAS.general;
 }
 
 /** Filters `baseTools` (TOOLS or DRAFT_TOOLS) to a persona's subset, always keeping `record_preference` (standing corrections apply regardless of persona) and `finalToolName` (the model must always be able to conclude). */
 export function personaTools(baseTools: ToolSchema[], persona: AgentPersona, finalToolName: string): ToolSchema[] {
   if (!persona.toolNames) return baseTools;
-  const allowed = new Set([...persona.toolNames, "plan_goal", "get_goal_plan", "read_memory", "write_memory", "read_task_history", "read_conversation", "read_maintenance_context", "create_maintenance_work_order", "record_preference", "get_communication_channels", "list_conversations", "request_execution_plan", "send_external_message", "place_call", "get_marketing_channels", "publish_listing", finalToolName]);
+  const allowed = new Set([...persona.toolNames, "plan_goal", "get_goal_plan", "request_peer_help", "read_memory", "write_memory", "read_task_history", "read_conversation", "read_maintenance_context", "create_maintenance_work_order", "record_preference", "get_communication_channels", "list_conversations", "request_execution_plan", "send_external_message", "place_call", "get_marketing_channels", "publish_listing", finalToolName]);
   return baseTools.filter((tool) => allowed.has(tool.name));
 }

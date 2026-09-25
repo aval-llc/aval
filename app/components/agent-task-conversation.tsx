@@ -9,7 +9,7 @@ import { approvalsForChat } from '@/lib/agents/chat-task-scope';
 
 type Approval = {id:string;taskId:string;tool:string;evidence?:{review?:Record<string,unknown>;arguments?:Record<string,unknown>;reason?:string};requiredApprovals:number;approvalsReceived:number};
 type Task = {id:string;status:string;goal:string;error?:string;result?:{headline?:string;narrative?:string};plan?:{nodes:{id:string;goal:string;status:string}[]};createdAt?:string|number;finishedAt?:string|number|null;trace?:(SafeStep & {sequence:number})[]};
-const DONE = new Set(['COMPLETED','FAILED','CANCELLED']);
+const DONE = new Set(['COMPLETED','FAILED','CANCELLED','SUPERSEDED']);
 export function AgentTaskConversation({taskId,onActivity}: {taskId:string;onActivity?:(id:string,activity:VisualActivity,status:string)=>void}) {
   const t = useTranslations('AgentExperience');
   const [task,setTask] = useState<Task|null>(null);

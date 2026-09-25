@@ -20,7 +20,7 @@ export type TaskCheck = {
     kind: 'plan';
 };
 /** The repair budget is resolved policy now — see DEFAULT_ATTEMPT_POLICIES.check_repair. */
-export const EVIDENCE_TOOL_NAMES = implementedTools().filter(t => !t.mutates && !['plan_goal', 'get_goal_plan', 'read_memory', 'read_task_history', 'request_execution_plan'].includes(t.name)).map(t => t.name);
+export const EVIDENCE_TOOL_NAMES = implementedTools().filter(t => !t.mutates && !['plan_goal', 'get_goal_plan', 'request_peer_help', 'read_memory', 'read_task_history', 'request_execution_plan'].includes(t.name)).map(t => t.name);
 /** Shared model-facing shape; parseTaskCheck remains the runtime authority. */
 export const TASK_CHECK_SCHEMA = {
     type: 'object',
@@ -39,6 +39,17 @@ export const TASK_CHECK_SCHEMA = {
         { required: ['operation', 'status'], properties: { kind: { enum: ['delivery'] } } },
         { required: ['topic', 'statement'], properties: { kind: { enum: ['preference'] } } }],
 };
+/**
+ * A plan node's completion condition. The same as a task's, plus `plan`: the
+ * node is assigned to a Lead that plans for its own team. Depth and which
+ * actors may plan are enforced in goal-plan.ts, not here.
+ */
+export const PLAN_NODE_CHECK_SCHEMA = {
+    ...TASK_CHECK_SCHEMA,
+    description: 'Evidence: {"kind":"evidence","tools":["read_document"]}. Delivery: kind, operation and status. Preference: kind, topic and statement. Plan: {"kind":"plan"} assigns the node to a Lead, which plans for its own team. Use exact names from the tool enum.',
+    properties: { ...TASK_CHECK_SCHEMA.properties, kind: { type: 'string', enum: ['evidence', 'delivery', 'preference', 'plan'] } },
+};
+
 export function parseTaskCheck(value: unknown): TaskCheck {
     if (!value || typeof value !== 'object' || Array.isArray(value))
         throw Error('A machine-checkable completion condition is required.');

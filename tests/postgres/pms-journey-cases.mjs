@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { agentApprovals, integrationConnections } from '../../db/postgres/schema.ts';
-import { seedWorkspaceEmployees, assignEmployeeForWork } from '../../lib/agents/expertise.ts';
+import { createEmployeeFromTemplate, assignEmployeeForWork } from '../../lib/agents/expertise.ts';
+import { grantScope } from '../../lib/agents/employees.ts';
 import { intakeEvent } from '../../lib/agents/intake.ts';
 import { createTask, getTask } from '../../lib/agents/tasks.ts';
 import { listEmployees } from '../../lib/agents/employees.ts';
@@ -91,8 +92,13 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
   env.DATABASE_URL = config.connectionString;
   delete env.HYPERDRIVE;
 
-  await t.test('1. a new workspace has a team and no PMS at all', async () => {
-    assert.ok(await run((s, o) => seedWorkspaceEmployees(s, o, customer)) > 0, 'the starting team arrives');
+  await t.test('1. a new workspace hires one employee and has no PMS at all', async () => {
+    // Nothing is seeded: the customer chooses to create a Maintenance
+    // Operations employee, and grants it the one write this journey needs.
+    // The employee's grant is the ceiling of everything its work does, so
+    // without this grant the work order in step 7 is refused.
+    const employee = await run((s, o) => createEmployeeFromTemplate(s, o, customer, 'maintenance-operations'));
+    await run((s, o) => grantScope(s, o, employee.id, customer, { kind: 'capability', value: 'create_work_order' }));
 
     const connections = await run((s, o) => s.db.select().from(integrationConnections)
       .where(eq(integrationConnections.organizationId, o)));

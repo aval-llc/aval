@@ -1,6 +1,6 @@
 import type { DbSession } from "@/db/postgres/session";
 import { agentChecks, agentModelContexts } from "@/db/postgres/schema";
-import { semanticPacket } from './semantic-evidence';
+import { plannedEvidenceTasks, semanticPacket } from './semantic-evidence';
 import { SEMANTIC_REVIEW_SYSTEM, SEMANTIC_REVIEW_TOOL, parseSemanticVerdict, type ReviewPacket } from './semantic-review';
 import { assembleContext, byteCount, MAX_CONTEXT_BYTES } from './context';
 import { planReadiness, goalPlan, validateGoalPlanProposal } from './goal-plan';
@@ -75,6 +75,13 @@ import { attemptSignature, attemptSpend, attemptTraces, recordWorkAttempt } from
 import { autonomyInstructions, autonomyMode } from "./autonomy";
 import { readOnboarding } from "@/lib/onboarding/storage";
 import { shouldRetryTask } from "./retry-policy.ts";
+import { agentTasks } from "@/db/postgres/schema";
+import { and, eq } from "drizzle-orm";
+import { TERMINAL_STATES } from "./task-state.ts";
+import { DELEGATION_POLICY } from "./delegation-policy.ts";
+import { PEER_HELP_TOOL, mayRequestPeerHelp, peerReadiness } from "./peer-help.ts";
+import { wakePeerWaiters } from "./work-identity.ts";
+import { assignableActorsPrompt } from "./organization/prompt.ts";
 
 /**
  * Framing that turns the question-answering prompt into a goal-pursuing one.
@@ -144,6 +151,18 @@ export async function advanceTask(dbSession: DbSession,
 
   const readiness = await planReadiness(dbSession, task);
   if(readiness.wait)return {taskId,status:task.status,stepsRun:0};
+  // Parked on a peer: runnable only once every peer it asked has settled.
+  // Until then it sleeps on its recheck timer rather than being re-selected on
+  // every tick; a settling peer wakes it early (wakePeerWaiters).
+  if (task.status === "WAITING_FOR_AGENT") {
+    const peers = await peerReadiness(dbSession, task);
+    if (peers.wait) {
+      await dbSession.db.update(agentTasks).set({ nextAttemptAt: new Date(Date.now() + DELEGATION_POLICY.peerRecheckMs) })
+        .where(and(eq(agentTasks.id, task.id), eq(agentTasks.organizationId, organizationId), eq(agentTasks.status, "WAITING_FOR_AGENT")));
+      return { taskId, status: task.status, stepsRun: 0 };
+    }
+    if (peers.context) readiness.context = [readiness.context, peers.context].filter(Boolean).join("\n");
+  }
 
   // A parked task only resumes once its approval has actually been decided.
   let decidedApproval: ApprovalRecord | null = null;
@@ -221,7 +240,7 @@ export async function advanceTask(dbSession: DbSession,
   });
 
   const contract=JSON.parse(task.checkJson??'{}');
-  const support=['render_answer','read_memory','write_memory','read_task_history'];
+  const support=['render_answer','read_memory','write_memory','read_task_history',...(mayRequestPeerHelp(task)?[PEER_HELP_TOOL]:[])];
   const selected=contract.kind==='plan'?['plan_goal','get_goal_plan']
     :contract.kind==='evidence'?[...(contract.tools??[]),...(contract.tools?.includes('read_document')?['list_documents']:[])]
     :contract.kind==='delivery'?['create_maintenance_work_order','read_conversation','list_conversations','get_communication_channels','get_marketing_channels','request_execution_plan','send_external_message','place_call','publish_listing']
@@ -255,7 +274,7 @@ export async function advanceTask(dbSession: DbSession,
 Task completion condition: ${task.checkJson}. The harness verifies it independently. A final answer without the required evidence or stored outcome fails. For a root plan, call plan_goal before concluding; inspect failed checks and replan remaining work at most once. Scratchpad notes are available through read_memory/write_memory, never treated as facts or authority.`;
   if (contract.kind === 'plan') system += `
 Evidence tools available to children retaining this agent: ${JSON.stringify(evidenceCapabilities)}.
-Use these exact tool names in check.tools; do not invent search tools. For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
+Use these exact tool names in check.tools; do not invent search tools.${assignableActorsPrompt(task.agentId)} For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
   if(readiness.context)system += '\nCurrent dependency/plan results: '+readiness.context.slice(0,16000);
   const messages: Message[] = safeParseTranscript(task.transcriptJson, task.goal);
   // Evidence must survive invocation boundaries just like the conversation.
@@ -264,13 +283,18 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
   const seenNumbers = evidenceNumbersFromTranscript(messages);
   // A parent summary may cite checked child evidence. Scratchpad prose and
   // failed/unrelated tasks cannot supply new financial figures.
-  const dependencyPlan = await goalPlan(dbSession, organizationId, task.parentTaskId ?? task.id);
+  // A planner — the root, or a Lead planning for its team — draws on its own
+  // plan's children; anything else on the dependencies its parent gave it.
+  const planner = contract.kind === 'plan';
+  const dependencyPlan = await goalPlan(dbSession, organizationId, planner ? task.id : task.parentTaskId ?? task.id);
   const ownNode = dependencyPlan?.nodes.find(node => node.id === task.id);
   const dependencyKeys: string[] = ownNode ? JSON.parse(ownNode.dependencies) : [];
   for (const node of dependencyPlan?.nodes ?? []) {
-    if (node.status !== 'COMPLETED' || (task.parentTaskId && !dependencyKeys.includes(node.key))) continue;
+    if (node.status !== 'COMPLETED' || (!planner && task.parentTaskId && !dependencyKeys.includes(node.key))) continue;
     const child = await getTask(dbSession, organizationId, node.id);
-    if (child) evidenceNumbersFromTranscript(safeParseTranscript(child.transcriptJson, child.goal)).forEach(number => seenNumbers.add(number));
+    if (!child) continue;
+    for (const source of [child, ...await plannedEvidenceTasks(dbSession, child)])
+      evidenceNumbersFromTranscript(safeParseTranscript(source.transcriptJson, source.goal)).forEach(number => seenNumbers.add(number));
   }
   const audit: AuditEvent[] = [];
   let stepsRun = 0;
@@ -296,6 +320,9 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       const current=await getTask(dbSession, organizationId,taskId);
       return {taskId,status:current?.status??'FAILED',stepsRun,error:'The terminal result was not saved because the task lease changed.'};
     }
+    // Anyone in this Work waiting on a peer re-checks now rather than on its
+    // timer. Only a hint: each re-reads what it actually awaits.
+    if (TERMINAL_STATES.has(status)) await wakePeerWaiters(dbSession, organizationId, task!.workId ?? task!.id);
     return { taskId, status, stepsRun, approvalId: extra.approvalId, error: extra.error };
   };
 
@@ -906,6 +933,8 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       const lost = await checkpoint();
       if (lost) return lost;
       if(toolUses.some(u=>u.name==='plan_goal')&&results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name==='plan_goal'&&u.id===r.tool_use_id)))return finish('WAITING_FOR_TOOL');
+      // A peer was asked: wait for it, with a recheck in case its wake-up is lost.
+      if(results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name===PEER_HELP_TOOL&&u.id===r.tool_use_id)))return finish('WAITING_FOR_AGENT',{nextAttemptAt:new Date(Date.now()+DELEGATION_POLICY.peerRecheckMs)});
     }
   } catch (err) {
     const message = err instanceof ModelProviderError ? err.message : "The agent runtime failed.";

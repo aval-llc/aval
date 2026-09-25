@@ -15,7 +15,7 @@ export type ReviewPacket = {
 export function reviewSources(messages: Message[], prefix: string): ReviewSource[] {
     const calls = new Map<string, { name: string; input: unknown }>();
     const sources: ReviewSource[] = [];
-    const excluded = new Set(['render_answer', 'plan_goal', 'get_goal_plan', 'read_memory', 'write_memory', 'read_task_history', 'request_execution_plan']);
+    const excluded = new Set(['render_answer', 'plan_goal', 'get_goal_plan', 'request_peer_help', 'read_memory', 'write_memory', 'read_task_history', 'request_execution_plan']);
     for (const message of messages) {
         if (!Array.isArray(message.content)) continue;
         for (const block of message.content) {

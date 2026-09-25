@@ -17,7 +17,7 @@ import {
   DuplicateEmployeeNameError, EmployeeQuotaError, InvalidEmployeeInputError,
   type EmployeeStatus, type CreateEmployeeInput,
 } from "@/lib/agents/employees";
-import { STARTER_TEMPLATES } from "@/lib/agents/expertise";
+import { STARTER_TEMPLATES, createEmployeeFromTemplate } from "@/lib/agents/expertise";
 import { digestPayload } from "@/lib/audit/chain";
 
 const PAGE_SIZE = 50;
@@ -60,9 +60,13 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   await ensureOrganization(dbSession, identity);
 
   if(identity.role!=="owner")return Response.json({error:"Only workspace owners can create and configure employees."},{status:403});
-  const body = await request.json().catch(() => ({})) as Partial<CreateEmployeeInput>;
+  const body = await request.json().catch(() => ({})) as Partial<CreateEmployeeInput> & { templateSlug?: string };
   try {
-    const employee = await createEmployee(dbSession, identity.organizationId, identity.userId, {
+    // From a template: the template's capabilities and expertise come with it,
+    // not just its name and role. Chosen by a person, one employee at a time.
+    const employee = typeof body.templateSlug === "string" && body.templateSlug
+      ? await createEmployeeFromTemplate(dbSession, identity.organizationId, identity.userId, body.templateSlug, { name: typeof body.name === "string" ? body.name : undefined })
+      : await createEmployee(dbSession, identity.organizationId, identity.userId, {
       name: String(body.name ?? ""),
       role: String(body.role ?? ""),
       description: body.description ?? null,

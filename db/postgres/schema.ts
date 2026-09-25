@@ -1211,8 +1211,9 @@ export const agentTasks = pgTable(
     // The user whose authority the run carries. Every policy check re-reads
     // this rather than trusting anything in the task's own message history.
     userId: text("user_id").notNull(),
-    // Persona id — a built-in role or a custom persona row. Resolved to a
-    // permission envelope by lib/agents/permissions.ts on every step.
+    // The acting actor: Aval One (`general`), a Lead, a Specialist, or a
+    // historical persona id. Resolved to a permission envelope by
+    // lib/agents/organization on every step.
     agentId: text("agent_id").notNull(),
     /**
      * The employee that owns this work.
@@ -1224,8 +1225,12 @@ export const agentTasks = pgTable(
      */
     employeeId: text("employee_id"),
     goal: text("goal").notNull(),
-    // QUEUED | RUNNING | WAITING_FOR_TOOL | WAITING_FOR_APPROVAL | COMPLETED | FAILED | CANCELLED
+    // One of TASK_STATES in lib/agents/task-state.ts, enforced by
+    // agent_tasks_status_check (migration 20260925000100).
     status: text("status").notNull(),
+    // The root task of the Work this task belongs to; a root's is its own id.
+    // What delegation limits, duplicate detection and peer wake-ups key on.
+    workId: text("work_id"),
     // Conversation state, so a resumed run continues rather than restarting.
     // Sized by maxSteps and the model's own max_tokens, not unbounded.
     executionScopeJson: jsonText("execution_scope_json").notNull().default("{}"),
@@ -1271,6 +1276,7 @@ export const agentTasks = pgTable(
     index("agent_tasks_status_lease_idx").on(table.status, table.leaseExpiresAt),
     index("agent_tasks_status_attempt_idx").on(table.status, table.nextAttemptAt),
     index("agent_tasks_parent_idx").on(table.parentTaskId),
+    index("agent_tasks_work_idx").on(table.organizationId, table.workId, table.status),
   ],
 );
 

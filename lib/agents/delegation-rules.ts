@@ -7,48 +7,30 @@
  * is equally real: agents invoking each other without a bound, each hop
  * spending the workspace's money, none of them individually wrong.
  *
- * Four limits, all deterministic and none of them advisory:
+ * The limits, all deterministic and none of them advisory:
  *
- * 1. **An allow-list of pairs**, not a general capability. Delegation is a
- *    declared relationship between two roles, so the reachable graph is
- *    readable in one table instead of emergent at runtime.
- * 2. **A depth cap** (policy.ts). A → B → C is the most that can happen.
+ * 1. **A declared graph**, not a general capability. Who may hand work to whom
+ *    is part of each actor's definition (lib/agents/organization): Aval One to
+ *    any Lead or Specialist, a Lead to its own team and related Leads, a
+ *    Specialist to its declared collaborators and related Leads. The historical
+ *    persona pairs below are all still edges of that graph.
+ * 2. **Controlled depth and size** (delegation-policy.ts), not one integer.
  * 3. **A shared budget.** The child's steps come out of the parent's
  *    remaining allowance, so a chain cannot cost more than one task.
- * 4. **The child never holds authority the parent lacks.** Its permissions are
- *    the intersection of the two envelopes, so delegation can only ever
- *    narrow. Otherwise "ask Lease Review to read it for you" becomes the
- *    documented way around a permission boundary.
+ * 4. **The child never exercises authority the chain above it lacks.** A
+ *    descendant may use a permission only if it holds it and every ancestor
+ *    either holds it or may route it (task-boundary.ts). Delegation narrows;
+ *    otherwise "ask Lease Review to read it for you" becomes the documented way
+ *    around a permission boundary.
  */
 
-import { AGENT_PERMISSIONS, roleForPersona, type AgentRole, type Permission } from "./permissions.ts";
-import { MAX_DELEGATION_DEPTH } from "./policy.ts";
+import { AGENT_PERMISSIONS, type AgentRole, type Permission } from "./permissions.ts";
+import { LEGACY_DELEGATION_RULES, MAX_DELEGATION_DEPTH } from "./delegation-policy.ts";
+import { actorHolds, actorMayDelegateTo, actorOrchestrates, actorPermissions, builtInActor } from "./organization/index.ts";
+import { roleForPersona } from "./permissions.ts";
 
-/**
- * Who may ask whom. Read as: the key delegates to the values.
- *
- * Deliberately sparse. Each pair exists because there is a question the
- * delegator genuinely cannot answer with its own tools — not because the two
- * agents are topically adjacent.
- */
-export const DELEGATION_RULES: Partial<Record<AgentRole, readonly AgentRole[]>> = {
-  // Cash-flow work runs into lease terms it cannot read and maintenance spend
-  // it cannot see the work orders behind.
-  financial: ["leaseReview", "maintenance"],
-  // The widest reader, so it is the most likely to need a specialist's depth —
-  // and it holds no write permission, so nothing it delegates can mutate.
-  riskAnalyst: ["leaseReview", "financial", "maintenance"],
-  // Forward-looking work needs the expiration schedule read from the documents
-  // themselves, not from the summary fields.
-  portfolioOutlook: ["leaseReview", "financial"],
-  // Renewal and expiration questions land here first and often need the lease.
-  brokerage: ["leaseReview"],
-  // Brokerage was absent, which left `pms.leasing.write` — the permission only
-  // brokerage holds — unreachable from the coordinator. Leasing work could be
-  // started by explicitly selecting the specialist but never by coordinating
-  // toward it, which is the path event-driven work has to take.
-  general: ["financial", "leaseReview", "maintenance", "riskAnalyst", "brokerage"],
-};
+/** The historical persona pairs. Every one remains an edge of the organization's graph. */
+export const DELEGATION_RULES = LEGACY_DELEGATION_RULES;
 
 export type DelegationRefusal =
   | { ok: false; code: "not_allowed"; reason: string }
@@ -58,13 +40,24 @@ export type DelegationRefusal =
 
 export type DelegationCheck = { ok: true; permissions: readonly Permission[] } | DelegationRefusal;
 
-/** The permissions a delegated child may hold: the intersection of both envelopes. Delegation narrows, never widens. */
+/**
+ * The permissions both envelopes hold — what a child could exercise if the
+ * parent could not route anything. Delegation narrows, never widens.
+ */
 export function effectivePermissions(from: AgentRole, to: AgentRole): Permission[] {
   const parent = new Set(AGENT_PERMISSIONS[from]);
   return AGENT_PERMISSIONS[to].filter((permission) => parent.has(permission));
 }
 
-/** Every check a delegation must pass, in one place, before any row is written. */
+/**
+ * What a child actor may actually exercise under a parent actor: its own
+ * envelope, less anything the parent neither holds nor may route. The same
+ * rule `taskBoundary` applies on every call, stated once for planning.
+ */
+export function delegatedAuthority(fromId: string, toId: string): Permission[] {
+  return actorPermissions(toId).filter((permission) => actorHolds(fromId, permission) || actorOrchestrates(fromId, permission));
+}
+
 /** The parent facts a delegation decision needs. Structural, so this module never imports the storage layer. */
 export interface DelegationParent {
   agentId: string;
@@ -76,15 +69,15 @@ export interface DelegationParent {
   cancelRequested: boolean;
 }
 
-export function checkDelegation(parent: DelegationParent, toPersonaId: string): DelegationCheck {
+/** Every check a delegation must pass that needs no storage, in one place, before any row is written. */
+export function checkDelegation(parent: DelegationParent, toActorId: string): DelegationCheck {
   if (parent.cancelRequested) {
     return { ok: false, code: "cancelled", reason: "The parent task is cancelling; no new work may be started under it." };
   }
 
-  const from = roleForPersona(parent.agentId);
-  const to = roleForPersona(toPersonaId);
-  const allowed = DELEGATION_RULES[from] ?? [];
-  if (!allowed.includes(to)) {
+  if (!actorMayDelegateTo(parent.agentId, toActorId)) {
+    const from = builtInActor(parent.agentId)?.name ?? roleForPersona(parent.agentId);
+    const to = builtInActor(toActorId)?.name ?? roleForPersona(toActorId);
     return { ok: false, code: "not_allowed", reason: `"${from}" may not delegate to "${to}".` };
   }
 
@@ -101,15 +94,10 @@ export function checkDelegation(parent: DelegationParent, toPersonaId: string): 
     return { ok: false, code: "no_budget", reason: "The parent task has no execution budget left to share." };
   }
 
-  const permissions = effectivePermissions(from, to);
-  if (permissions.length === 0) {
-    return { ok: false, code: "not_allowed", reason: `"${from}" holds none of "${to}"'s permissions, so the delegation would grant nothing.` };
-  }
-
-  return { ok: true, permissions };
+  return { ok: true, permissions: delegatedAuthority(parent.agentId, toActorId) };
 }
 
-/** The delegation role for an actor, with what it may delegate to. */
+/** The delegation role for an actor, with what it may delegate to. Legacy personas only; see the organization for the full graph. */
 export function roleForDelegation(actorId: string): { role: AgentRole; allowed: readonly AgentRole[] } {
   const role = roleForPersona(actorId);
   return { role, allowed: DELEGATION_RULES[role] ?? [] };

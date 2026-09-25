@@ -4,7 +4,8 @@ import type { DbSession } from "@/db/postgres/session";
 import { organizations } from "@/db/postgres/schema";
 import { getApiIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
-import { listCustomPersonas } from "@/lib/ask-aval/custom-personas";
+import { getEmployee } from "@/lib/agents/employees";
+import { builtInActor } from "@/lib/agents/organization";
 import { PERSONAS } from "@/lib/ask-aval/persona-catalog";
 
 /**
@@ -31,9 +32,12 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   const body = await request.json().catch(() => ({})) as { personaId?: string | null };
   const personaId = body.personaId ?? null;
 
-  if (personaId !== null && !builtInPersonaIds().has(personaId)) {
-    const customPersonas = await listCustomPersonas(dbSession, identity.organizationId);
-    if (!customPersonas.some((persona) => persona.id === personaId)) {
+  // A built-in agent, a Lead or Specialist of the organization, or one of the
+  // workspace's own employees (which is also where every former custom persona
+  // now lives, under the same id).
+  if (personaId !== null && !builtInPersonaIds().has(personaId) && !builtInActor(personaId)) {
+    const employee = await getEmployee(dbSession, identity.organizationId, personaId);
+    if (!employee || employee.status === "archived") {
       return Response.json({ error: "Unknown agent" }, { status: 400 });
     }
   }

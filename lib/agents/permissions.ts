@@ -120,7 +120,9 @@ export const AGENT_PERMISSIONS: Record<AgentRole, readonly Permission[]> = {
   // reading the receivables ledger by the lease it is reading.
   leaseReview: ["documents.read", "leases.read"],
 
-  // A workspace-defined persona (lib/ask-aval/custom-personas.ts). Read-only
+  // Anything unrecognised: a typo, a stale client, or a historical custom
+  // persona id (every one of which is now an employee — migration
+  // 20260925000200 — whose own grant governs its work). Read-only
   // and no broader than the general agent's reads: the tools it may actually
   // call are additionally narrowed by its own validated `toolNames`, but its
   // ceiling is fixed here in code where a workspace cannot raise it.
@@ -169,18 +171,13 @@ export function hasPermission(role: AgentRole, permission: Permission): boolean 
  * unless its grant explicitly allows that operation" — not on the parent
  * holding it.
  */
+/**
+ * The historical routable set, kept as the base of Aval One's. Whether an actor
+ * may route a permission is now answered by `actorOrchestrates` in
+ * lib/agents/organization, which extends this with what each Lead's team holds.
+ */
 export const ORCHESTRATION_PERMISSIONS: Partial<Record<AgentRole, readonly Permission[]>> = {
   // The coordinator routes domain writes to the roles that own them. It gains
   // no ability to perform any of them.
   general: ["pms.maintenance.write", "pms.arrears.write", "pms.leasing.write"],
 };
-
-/**
- * Whether `role` may appear in the ancestry of a task exercising `permission`
- * without holding it.
- *
- * Deliberately not consulted for the task that is actually calling the tool.
- */
-export function canOrchestrate(role: AgentRole, permission: Permission): boolean {
-  return (ORCHESTRATION_PERMISSIONS[role] ?? []).includes(permission);
-}

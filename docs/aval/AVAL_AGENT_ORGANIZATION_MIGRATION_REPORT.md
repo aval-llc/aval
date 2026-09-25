@@ -1,0 +1,219 @@
+# Aval Agent Organization — Migration Report
+
+**Phase covered:** B (organizational model), per directive §38
+**Date:** 2026-09-25
+**Branch:** `phase-b-agent-organization`
+**Audit this builds on:** `docs/aval/AGENT_ORGANIZATION_EXISTING_SYSTEM_AUDIT.md`
+
+This report follows the structure of directive §40. Every claim is backed by
+code, or by a test that ran in this pass. Anything not verified says so.
+
+---
+
+## 1. Decisions applied
+
+| Decision | What was built |
+|---|---|
+| 1. Custom personas become AI Employees | Migration `20260925000200` turns every `agent_personas` row into an `ai_employees` row **with the same id**. The persona's tools become read-only capability grants. Its task history gains `employee_id`; `agent_id` is never rewritten. `/api/agents` and `/api/agents/[id]` are now compatibility adapters over employees. `lib/ask-aval/custom-personas.ts` is removed. |
+| 2. No automatic starter team | `seedWorkspaceEmployees` is gone. It had no production caller, and now nothing seeds employees at all. There are five optional templates: Resident Operations, Maintenance Operations, Leasing Operations, Portfolio Analyst and Owner Reporting. `createEmployeeFromTemplate` copies each template's capabilities and expertise, not just its name. |
+| 3. "Ask Aval" stays; Aval One is the identity | The chat label is unchanged. Aval One is the runtime identity behind it: the historical `general` id, with `aval-one` as an alias. The agent library shows "Aval One · Global orchestrator". |
+| 4. Controlled delegation | `DELEGATION_POLICY` (`lib/agents/delegation-policy.ts`) replaces the single `MAX_DELEGATION_DEPTH = 2`. It sets depth 3, fan-out, concurrency, total Work size, a peer-request allowance and a recheck interval. Alongside it: cycle refusal, reuse of duplicate sub-problems, budget carving, cascading cancellation, authority and scope narrowing, a shared Work id, and the existing attempt and stagnation handling. All six acceptance tests you asked for pass against Postgres (§6). |
+
+## 2. Existing capabilities
+
+**Preserved unchanged**
+
+- **The nine historical ids.** `general` and the eight legacy agents keep their exact permission envelopes and tool subsets. A unit test checks each one against `AGENT_PERMISSIONS` and `PERSONAS`.
+- **Everything recorded under those ids.** Deep links (`?view=agents&agent=<id>`), task and approval history, audit attribution and PMS deployments all keep resolving. So do the legacy delegation pairs, each of which is still an edge of the new graph.
+- **The core runtime.** Durable tasks, leases, approvals, the financial envelope, verification, the PMS capability matrix and no-PMS mode.
+
+**Modified**
+
+- **Authority resolution.** It now goes through `lib/agents/organization` (`actorHolds`, `actorOrchestrates`, `actorMayDelegateTo`) rather than `roleForPersona` alone. An unknown id still gets the read-only envelope.
+- **Work owned by an employee.**
+  - Where Aval One acts for an employee, the employee's own grant is the authority.
+  - A Lead or Specialist working for an employee holds the intersection of its own permissions and the employee's.
+  - Child tasks inherit the owning employee.
+  - This closes audit gaps 5 and 6.
+- **Coordinator routing.** Before, Aval One could route only PMS writes, so Aval One → Maintenance → a work-order Specialist could never act. Now it may route every permission a Lead exercises. It still exercises none of them itself. Money movement, lease execution, access changes and preferences can never be routed.
+- **Planning.**
+  - A Lead may be a plan node (`{"kind":"plan"}`) and plan for its own team.
+  - When a plan is revised, the replaced nodes become `SUPERSEDED` and their descendants are cancelled.
+- **Evidence review.** A planner below the root is judged on the evidence gathered under its own plan. That evidence is collected upward through the Leads beneath it.
+- **Budget for a coordinating root.** Roots created by `/api/agents/tasks` now get 240k tokens, up from 60k. Each hand-off halves the remaining budget, so this leaves a Specialist two levels down with what a single task always had. It is a ceiling: usage caps are still checked on every step.
+- **Task states.**
+  - Added: `WAITING_FOR_OWNER`, `WAITING_FOR_APPLICANT`, `WAITING_FOR_AGENT`, `PLANNING`, `SUPERSEDED`.
+  - `OPEN_STATES` now covers every state that is not finished.
+  - A database CHECK closes the set. It is added `NOT VALID`, so historical rows are not re-checked.
+
+**Retired**
+
+| Item | Reason |
+|---|---|
+| Custom personas as a separate concept | Decision 1. The table is kept and marked deprecated; no data was destroyed. |
+| The automatic starter team | Decision 2. It never ran in production. |
+| `canOrchestrate` in `permissions.ts` | Superseded by `actorOrchestrates`. Its tests now check the resolver the runtime actually uses. |
+
+## 3. Legacy agent mapping
+
+| Historical id | Now | Alias |
+|---|---|---|
+| `general` (Ask Aval) | Aval One | `aval-one` |
+| `financial` | Finance & Accounting Lead | `lead.finance` |
+| `brokerage` | Leasing & Marketing Lead | `lead.leasing-marketing` |
+| `realEstate` | Property Operations Lead | `lead.property-operations` |
+| `marketResearch` | Market Intelligence & Revenue Strategy Lead | `lead.market-revenue` |
+| `maintenance` | Maintenance & Facilities Lead | `lead.maintenance` |
+| `riskAnalyst` | Risk, Insurance & Compliance Lead | `lead.risk-compliance` |
+| `portfolioOutlook` | Portfolio & Asset Strategy Lead | `lead.portfolio-strategy` |
+| `leaseReview` | Lease Administration & Legal Operations Lead | `lead.lease-admin` |
+
+Aliases resolve to the historical id, never the reverse, so no stored row is
+reinterpreted.
+
+## 4. Organization status
+
+| | Count | Source |
+|---|---|---|
+| Aval One | 1 | `lib/agents/organization/domains.ts` |
+| Leads | 22 | same |
+| Specialists | 266 | `lib/agents/organization/specialists/*.ts` |
+| Canonical capabilities | 127 in the vocabulary; 124 in use | `lib/agents/organization/capabilities.ts` |
+
+**One source for the counts.** The registry, the API
+(`/api/agents/organization`) and the UI all read the same TypeScript registry.
+`tests/agent-organization.test.ts` checks the counts.
+
+**Specialists are not seeded into `expertise_profiles`.** That table still holds
+the 11 profiles an employee can be briefed from. Built-in actors are reached by
+delegation, not by grants. Seeding 266 rows would create a second copy of the
+catalogue that could drift from the first.
+
+**What every Specialist carries:**
+
+- a boundary
+- a named nearest sibling and how it differs
+- triggers
+- inputs and outputs
+- canonical capabilities
+- an execution model
+- a completion contract (done / not done)
+- forbidden actions
+- approvals
+- collaborators
+
+The catalogue was drafted with model assistance, then checked by a validator and
+by unit tests. **No property-management or legal professional has reviewed it.**
+Treat the boundaries and forbidden actions as a reviewed draft, not as legal
+policy.
+
+**Maturity**, derived from the code rather than claimed:
+
+| Level | Count | Meaning |
+|---|---|---|
+| `TOOLED` | 16 | Every capability the Specialist declares has an implemented tool. |
+| `ROUTABLE` | 250 | Can be assigned and briefed, but at least one of its capabilities has no executor yet. |
+| Provider-tested | 0 | Provider testing belongs to provider workflows, not to Specialists. |
+
+Of the 124 capabilities in use, **81 have no tool yet**.
+
+## 5. Customer AI Employee status
+
+- **Unchanged:** creating employees, scoping them, running them, and their lifecycle.
+- **Now enforced (Postgres-tested):**
+  - An employee's grant is the ceiling of everything its work opens.
+  - An employee may use any built-in Lead or Specialist as expertise. This can only narrow authority, because of the intersection rule above.
+  - Handing work to another employee still needs an explicit `delegate_to` grant.
+- **Not yet enforced:** employee `spend_limit_cents` and `risk_ceiling` (audit §3.10).
+
+## 6. Tests
+
+All of these ran in this pass on the branch:
+
+| Suite | Result |
+|---|---|
+| `npm run typecheck` | pass |
+| `npm run i18n:check` | pass (2332 keys) |
+| `npm run lint` | 0 errors; 5 warnings, all present before this change |
+| `npm run build` | pass |
+| `npm run test:unit` | 784 / 784 (baseline 768) |
+| `npm run test:postgres:local` | 232 / 232 (baseline 224) |
+
+**The six requested acceptance tests** are in `tests/postgres/organization-cases.mjs`:
+
+1. Aval One → Lead → Specialist runs to COMPLETED through the real task route and the real cron, with a scripted model.
+2. A Specialist asks a declared peer, waits in `WAITING_FOR_AGENT`, and resumes with the peer's answer. The answer is framed as a peer's view, not a provider fact.
+3. A → B → C → A is refused as a loop, even though C is otherwise allowed to reach A.
+4. The same question asked twice returns the same task, and the Work does not grow.
+5. Authority never expands:
+   - a peer request cannot reach a permission the asker lacks;
+   - a Lead above a Specialist does not lend it the Lead's permissions;
+   - an employee's grant caps its Specialists until the grant is widened.
+6. Recursion stops deterministically: at the depth limit, on a chain written past that limit, and at the Work-size limit.
+
+**Also tested:**
+
+- The custom-persona migration. The real SQL runs twice against seeded rows. Ids, names, read-only access and history are preserved, and the second run changes nothing.
+- The empty-roster rule. A new workspace has zero employees, and a template creates one employee with its grants.
+
+**Gaps these tests exposed, now fixed.** Each layer had passed its own tests;
+the joins between them had not:
+
+- `plan_goal`'s argument schema rejected `{"kind":"plan"}` nodes, so no Lead could ever receive a plan.
+- Evidence review assumed every planner is a root, so a Lead's reviewer never saw its team's evidence.
+- Evidence did not travel up through a Lead to Aval One.
+- The historical 60k root budget left a Specialist two levels down unable to fit its own context.
+
+## 7. UI changes
+
+The agent library now has four tabs, saved in the URL as `&tab=`:
+
+- **All agents:** Aval One, your employees and the Leads.
+- **Your employees:** customer-created employees only.
+- **Aval One & Leads:** 23 folder cards, in the existing card style.
+- **Expertise library:** 22 collapsible domains, each showing its Lead card and a grid of Specialists. Opening a Specialist shows what it does, when Aval uses it, what it needs and produces, what needs approval, what it never does, how it differs from its nearest sibling, and recent work.
+
+Two related changes:
+
+- Maturity labels, execution models and prompt text never reach the UI.
+- Template chips now create the employee from the template, grants included.
+
+Limits of this pass:
+
+- **Not visually checked in a signed-in session.** Local sign-in needs Supabase Auth, and this machine has no container runtime. Typecheck, lint and build pass, and the Postgres tests exercise the API routes behind the library. A signed-in visual pass on a hosted or Docker stack is still owed.
+- **Catalogue text is English in both locales.** That covers Lead and Specialist names and boundaries. The rest of the UI is translated.
+
+## 8. Provider capabilities and gaps
+
+Unchanged from the audit (§3.9, §3.12). No provider is live-validated, and no
+PMS write can succeed in production: DoorLoop is blocked, AppFolio's driver
+refuses to run, and there are no real verifiers.
+
+The canonical vocabulary maps onto today's tools and keeps every `PmsAction` as
+an alias. `work_order.create` now covers both the Aval-native tool and the PMS
+write as one capability with two tools; merging those two adapters is not done
+yet.
+
+## 9. Remaining blockers
+
+1. **`post_payment` and `create_payment_plan` still bypass the financial contract** (audit §3.10). This was deliberately left unchanged in this phase. Fixing it changes how every arrears write is approved, so it needs its own reviewed change.
+2. **Routing eligibility is computed but not used.** `eligibleDomains(customerTypes)` exists and is tested. Workspaces do not yet record their business type, so every workspace still reaches every domain, as before.
+3. **Synchronous Ask Aval is still single-turn.** Delegation through Leads and Specialists happens in agent work (durable tasks). A chat answer does not fan out.
+4. **Some states have no runtime writer yet.**
+   - New this phase: `WAITING_FOR_OWNER`, `WAITING_FOR_APPLICANT`, `PLANNING`.
+   - From earlier: `WAITING_FOR_RESIDENT`, `WAITING_FOR_VENDOR`, `WAITING_FOR_DOCUMENT`, `SCHEDULED`, `BLOCKED`.
+   - `WAITING_FOR_HUMAN` still has no exit except cancellation.
+5. **250 Specialists are routable but not fully tooled.** Delivering their capabilities is Phase C.
+6. **No jurisdiction-aware policy records** (directive §22) **and no market or pricing tools** (§23). The antitrust boundary exists only as briefing and forbidden actions, because there is no pricing tool yet for it to guard.
+
+## 10. No-PMS functionality
+
+Unchanged and tested (`tests/postgres/no-pms-cases.mjs`). A workspace with no
+PMS reaches Aval One, every Lead and every Specialist; only the PMS write tools
+are absent.
+
+## 11. Known legal and jurisdiction dependencies
+
+- **Human-gated or prepare-only work.** Every Specialist that touches fair housing, FCRA adverse action, accommodations, notices, evictions, deposits, late fees or rent increases can only prepare the work or needs a person to approve it. That work depends on jurisdiction rule records that do not exist yet.
+- **Pricing.** Pricing Specialists are briefed never to use competitors' nonpublic data, never to pool data across organizations, and never to coordinate prices.
+- **Review.** Counsel has not reviewed any of this.

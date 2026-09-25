@@ -83,6 +83,7 @@ test("the implemented mutation inventory is explicit", () => {
   const mutating = implementedTools().filter((tool) => tool.mutates).map((tool) => tool.name);
   assert.deepEqual(mutating, [
     "plan_goal",
+    "request_peer_help",
     "write_memory",
     "record_preference",
     "create_maintenance_work_order",

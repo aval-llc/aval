@@ -32,37 +32,50 @@ export const TASK_STATES = [
   "WAITING_FOR_RESIDENT",
   "WAITING_FOR_VENDOR",
   "WAITING_FOR_DOCUMENT",
+  // Waiting on the other two parties a property-management objective commonly
+  // stalls on: an owner's decision and an applicant's reply.
+  "WAITING_FOR_OWNER",
+  "WAITING_FOR_APPLICANT",
+  // Waiting on another Aval actor — a peer this task asked for help. Woken when
+  // that peer finishes, and on a recheck timer in case the wake-up is lost.
+  "WAITING_FOR_AGENT",
   // Deliberately deferred to a time, rather than waiting on a party.
   "SCHEDULED",
   // Cannot proceed and has no timer that would change that. Something outside
   // the runtime — a person, a permission, a connection — has to move first.
   "BLOCKED",
+  // Being decomposed into child work. Reserved: a planner today parks in
+  // WAITING_FOR_TOOL once its plan is written.
+  "PLANNING",
   "COMPLETED",
   "FAILED",
   "CANCELLED",
+  // Replaced by a revised plan. Terminal, and distinct from CANCELLED: nobody
+  // asked for this work to stop, a better plan made it unnecessary.
+  "SUPERSEDED",
 ] as const;
 
 export type TaskState = (typeof TASK_STATES)[number];
 
 /** States from which no further execution happens. */
-export const TERMINAL_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["COMPLETED", "FAILED", "CANCELLED"]);
+export const TERMINAL_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["COMPLETED", "FAILED", "CANCELLED", "SUPERSEDED"]);
 
 /**
  * States the task endpoint may hand to the runtime. A pending approval returns
  * immediately; an expired or decided one resumes. RUNNING is included so an
  * expired worker lease has a real recovery path.
  */
-export const ADVANCEABLE_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["QUEUED", "RUNNING", "WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "SCHEDULED"]);
+export const ADVANCEABLE_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["QUEUED", "RUNNING", "WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED"]);
 
 /**
  * States a worker resumes on a timer rather than on an event. The claim query
  * already gates on `nextAttemptAt`, so a verification re-check waits for its
  * own wake-up instead of spinning.
  */
-export const TIMER_RESUMED_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["PENDING_VERIFICATION", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "SCHEDULED"]);
+export const TIMER_RESUMED_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["PENDING_VERIFICATION", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED"]);
 
 /** Waiting on a party outside Aval, as opposed to on a clock or on Aval itself. */
-export const EXTERNAL_WAIT_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT"]);
+export const EXTERNAL_WAIT_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT"]);
 
 /**
  * States that are claimable only once a wake-up time has been set.
@@ -73,7 +86,7 @@ export const EXTERNAL_WAIT_STATES: ReadonlySet<TaskState> = new Set<TaskState>([
  * the same silent spin that made a parked verification unreachable. These
  * states must name the moment they expect to be worth looking at again.
  */
-export const SCHEDULED_WAKE_ONLY_STATES: ReadonlySet<TaskState> = new Set<TaskState>([...EXTERNAL_WAIT_STATES, "SCHEDULED"]);
+export const SCHEDULED_WAKE_ONLY_STATES: ReadonlySet<TaskState> = new Set<TaskState>([...EXTERNAL_WAIT_STATES, "WAITING_FOR_AGENT", "SCHEDULED"]);
 
 /**
  * States a worker takes the lease from as themselves rather than as `QUEUED`.
@@ -83,7 +96,7 @@ export const SCHEDULED_WAKE_ONLY_STATES: ReadonlySet<TaskState> = new Set<TaskSt
  * is absent on purpose: an approval-parked task takes its lease through the
  * approval path, which has already stamped one by the time the claim would run.
  */
-export const CLAIM_FROM_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["RUNNING", "WAITING_FOR_TOOL", "PENDING_VERIFICATION", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "SCHEDULED"]);
+export const CLAIM_FROM_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["RUNNING", "WAITING_FOR_TOOL", "PENDING_VERIFICATION", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED"]);
 
 /**
  * The state a worker should claim `status` from.
@@ -114,9 +127,10 @@ export function claimFromState(status: TaskState): TaskState {
  * intact.
  */
 export const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
-  QUEUED: ["RUNNING", "CANCELLED", "FAILED"],
-  RUNNING: ["WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION", "WAITING_FOR_HUMAN", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "SCHEDULED", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED", "QUEUED"],
-  WAITING_FOR_TOOL: ["RUNNING", "FAILED", "CANCELLED"],
+  QUEUED: ["RUNNING", "CANCELLED", "FAILED", "SUPERSEDED"],
+  PLANNING: ["RUNNING", "WAITING_FOR_TOOL", "FAILED", "CANCELLED"],
+  RUNNING: ["PLANNING", "WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION", "WAITING_FOR_HUMAN", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED", "QUEUED"],
+  WAITING_FOR_TOOL: ["RUNNING", "FAILED", "CANCELLED", "SUPERSEDED"],
   WAITING_FOR_APPROVAL: ["RUNNING", "CANCELLED", "FAILED"],
   // Verification either proves the effect, exhausts its budget and becomes a
   // person's problem, or is cancelled. It never returns to COMPLETED directly
@@ -130,6 +144,10 @@ export const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   WAITING_FOR_RESIDENT: ["RUNNING", "WAITING_FOR_HUMAN", "BLOCKED", "FAILED", "CANCELLED"],
   WAITING_FOR_VENDOR: ["RUNNING", "WAITING_FOR_HUMAN", "BLOCKED", "FAILED", "CANCELLED"],
   WAITING_FOR_DOCUMENT: ["RUNNING", "WAITING_FOR_HUMAN", "BLOCKED", "FAILED", "CANCELLED"],
+  WAITING_FOR_OWNER: ["RUNNING", "WAITING_FOR_HUMAN", "BLOCKED", "FAILED", "CANCELLED"],
+  WAITING_FOR_APPLICANT: ["RUNNING", "WAITING_FOR_HUMAN", "BLOCKED", "FAILED", "CANCELLED"],
+  // A peer finished, failed, or never answered inside the parent's deadline.
+  WAITING_FOR_AGENT: ["RUNNING", "WAITING_FOR_HUMAN", "FAILED", "CANCELLED"],
   SCHEDULED: ["RUNNING", "WAITING_FOR_HUMAN", "BLOCKED", "FAILED", "CANCELLED"],
   // Blocked work waits on a person or a change of configuration, so it leaves
   // only when something outside the runtime moves it.
@@ -137,6 +155,7 @@ export const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   COMPLETED: [],
   FAILED: [],
   CANCELLED: [],
+  SUPERSEDED: [],
 };
 
 export function canTransition(from: TaskState, to: TaskState): boolean {

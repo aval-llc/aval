@@ -25,6 +25,7 @@ import { pmsToolAvailability } from "@/lib/pms/assembly";
 import { allowedToolNames } from "./policy.ts";
 import { effectiveEmployeeAccess } from "./employee-access";
 import { getTool } from "./registry.ts";
+import { deploymentActorId } from "./organization/index.ts";
 
 export interface ToolsetRequest {
   employeeId?: string;
@@ -82,7 +83,7 @@ export async function assembleToolset(
 
   // 3. Provider capability: which PMS writes this workspace can actually reach,
   //    for this agent's deployments. Fail-closed on error, inside that module.
-  const pms = await pmsToolAvailability(dbSession, request.organizationId, request.agentId ?? "");
+  const pms = await pmsToolAvailability(dbSession, request.organizationId, deploymentActorId(request.agentId ?? ""));
 
   // 4. Employee scope, when the work has an owner.
   const employeeScoped = request.employeeCapabilities == null

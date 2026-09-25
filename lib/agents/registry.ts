@@ -103,6 +103,7 @@ const READ_DEFAULTS = {
 const DESCRIPTORS: ToolDescriptor[] = [
   ...['get_goal_plan','read_memory','read_task_history'].map(name=>({...READ_DEFAULTS,name,summary:'Durable task coordination and history.',requiredPermission:'tasks.manage' as const})),
   {...READ_DEFAULTS,name:'plan_goal',summary:'Persist a bounded goal plan.',requiredPermission:'tasks.manage',mutates:true,maxRetries:0,routine:true},
+  {...READ_DEFAULTS,name:'request_peer_help',summary:'Open one bounded question to a declared peer inside the same Work.',requiredPermission:'tasks.manage',mutates:true,maxRetries:0,routine:true},
   {...READ_DEFAULTS,name:'write_memory',summary:'Append a task scratchpad observation.',requiredPermission:'tasks.manage',mutates:true,maxRetries:0,routine:true},
   {...READ_DEFAULTS,name:"read_conversation",summary:"Read the originating conversation.",requiredPermission:"portfolio.read"},
   /* ── reads: portfolio and accounting ─────────────────────────────────── */

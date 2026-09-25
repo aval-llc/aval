@@ -1,6 +1,6 @@
 /**
  * Pure validation for a workspace-defined custom persona — split out of
- * custom-personas.ts (which also imports `@/db`, unresolvable outside the
+ * the custom-persona adapter in app/api/agents/route.ts (which also imports `@/db`, unresolvable outside the
  * Workers/Vite build) so this logic can be unit-tested directly with
  * `node --test`, matching this repo's convention of testing pure logic
  * straight and leaving D1-backed code to integration/manual verification.

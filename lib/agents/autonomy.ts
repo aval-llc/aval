@@ -3,7 +3,9 @@ export type AutonomyMode = 'supervised' | 'assisted' | 'autonomous';
 export function autonomyMode(value: unknown): AutonomyMode { return value === 'supervised' || value === 'autonomous' ? value : 'assisted'; }
 /** These are workflow controls inside the existing permission ceiling. */
 export function autonomyApproval(tool: ToolDescriptor, mode: AutonomyMode, planned: boolean): string | null {
-  if (tool.name === 'write_memory' || tool.name === 'plan_goal') return null;
+  // Coordination inside Aval, not an effect in the world: every limit that
+  // matters is enforced where the child work is created.
+  if (tool.name === 'write_memory' || tool.name === 'plan_goal' || tool.name === 'request_peer_help') return null;
   if (tool.name === 'request_execution_plan') return 'Review the proposed agent, evidence, recipients, and exact actions before approving this plan.';
   if (tool.riskLevel === 'critical' || (tool.requiresApproval && !tool.routine)) return 'This sensitive action always requires approval.';
   if (!tool.mutates) return null;

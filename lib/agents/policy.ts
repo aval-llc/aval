@@ -22,8 +22,11 @@
 
 import { autonomyApproval, type AutonomyMode } from "./autonomy.ts";
 import { NON_CAPABILITY_TOOLS, getTool, implementedTools, type RiskLevel, type ToolDescriptor } from "./registry.ts";
-import { hasPermission, roleForPersona, type AgentRole, type Permission } from "./permissions.ts";
+import { type Permission } from "./permissions.ts";
 import { validateFinancialArguments } from "./financial.ts";
+import { MAX_DELEGATION_DEPTH } from "./delegation-policy.ts";
+import { actorHolds, builtInActor } from "./organization/index.ts";
+import { roleForPersona } from "./permissions.ts";
 
 export type PolicyEffect = "allow" | "deny" | "require_approval";
 
@@ -61,7 +64,11 @@ export interface PolicyContext {
    * so a customer-defined actor could only ever read.
    */
   employeePermissions?: readonly Permission[] | null;
-  /** Persona id — a built-in role or a custom persona's row id. Resolved to an envelope by `roleForPersona`. */
+  /**
+   * The acting actor: Aval One, a Lead, a Specialist, a legacy persona id, or
+   * anything else (which resolves to the read-only envelope). Resolved to an
+   * envelope by the organization (lib/agents/organization).
+   */
   personaId?: string;
   autonomyMode?: AutonomyMode;
   approvedPlanAction?: boolean;
@@ -71,8 +78,12 @@ export interface PolicyContext {
   remainingSteps?: number;
 }
 
-/** Delegation is capped here rather than at the call site so no caller can opt out of the limit. */
-export const MAX_DELEGATION_DEPTH = 2;
+/**
+ * Delegation depth is enforced here as well as where work is created, so no
+ * caller can opt out of the limit. The limit itself, and every other bound on
+ * delegation, lives in delegation-policy.ts.
+ */
+export { MAX_DELEGATION_DEPTH };
 
 const deny = (code: DenyCode, reason: string, tool?: ToolDescriptor): PolicyDecision => ({ effect: "deny", code, reason, tool });
 
@@ -101,13 +112,13 @@ export function evaluate(
   if (!tool) return deny("unknown_tool", `No tool named "${toolName}" is registered.`);
   if (tool.unimplemented) return deny("not_implemented", `"${toolName}" is declared but has no executor.`, tool);
 
-  const role: AgentRole = roleForPersona(context.personaId);
   if (context.employeePermissions) {
     if (!context.employeePermissions.includes(tool.requiredPermission)) {
       return deny("permission_denied", `This employee does not hold "${tool.requiredPermission}".`, tool);
     }
-  } else if (!hasPermission(role, tool.requiredPermission)) {
-    return deny("permission_denied", `Agent "${role}" does not hold "${tool.requiredPermission}".`, tool);
+  } else if (!actorHolds(context.personaId, tool.requiredPermission)) {
+    const actor = builtInActor(context.personaId)?.name ?? roleForPersona(context.personaId);
+    return deny("permission_denied", `Agent "${actor}" does not hold "${tool.requiredPermission}".`, tool);
   }
 
   // Every anonymous visitor resolves to one shared organization, so a write by
@@ -162,10 +173,9 @@ export function allowedToolNames(
   subject: Pick<PolicySubject, "isGuest">,
   employeePermissions?: readonly Permission[] | null,
 ): string[] {
-  const role = roleForPersona(personaId);
   const holds = (permission: Permission) => employeePermissions
     ? employeePermissions.includes(permission)
-    : hasPermission(role, permission);
+    : actorHolds(personaId, permission);
   return implementedTools()
     .filter((tool) => holds(tool.requiredPermission))
     .filter((tool) => !(subject.isGuest && tool.mutates))
