@@ -407,7 +407,7 @@ export const integrationCatalog: IntegrationProvider[] = [
     readOnly: true,
     note: "Uses OpenAI's Chat Completions API with function calling.",
     baseUrl: "https://api.openai.com/v1",
-    defaultModel: "gpt-6-luna",
+    defaultModel: "gpt-6-sol",
   },
   {
     id: "google_gemini",

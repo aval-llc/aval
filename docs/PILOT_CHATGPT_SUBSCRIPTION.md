@@ -32,9 +32,9 @@ The old `validate:runtime:codex` command still targets the retired SQLite task h
 
 ## Commercial API default
 
-Aval defaults a newly connected OpenAI API account to `gpt-6-luna`. At standard processing rates it costs $0.10 per million input tokens, $0.01 per million cached input tokens, and $0.50 per million output tokens. It supports Aval's structured function tools and is the cost-conscious starting point for pilot traffic. Aval forces `reasoning_effort: "none"` for Luna function calls made through the current Chat Completions adapter, as required by OpenAI.
+Aval defaults a newly connected OpenAI API account to `gpt-6-sol`. At standard processing rates it costs $2 per million input tokens, $0.20 per million cached input tokens, and $10 per million output tokens. OpenAI positions Sol as the balance between intelligence and cost for agentic workflows. Aval forces `reasoning_effort: "none"` for Sol function calls made through the current Chat Completions adapter, as required by OpenAI.
 
-The September 24 live subscription evaluation found all 13 seeded defects with no false approvals, but Luna rejected three valid examples. That makes it suitable for a supervised, cost-focused pilot while showing that it should not be trusted as an unattended final reviewer yet. Use the saved evaluation in `docs/audit/codex-semantic-evaluation.json` when deciding whether a stronger review model justifies its higher cost. API billing and ChatGPT subscription limits remain separate.
+Do not select `gpt-5.6-sol` to save money: its current promotional standard rate is $4 per million input tokens and $20 per million output tokens, twice GPT-6 Sol's rate. GPT-6 Sol passed all 16 cases in Aval's September 24 live subscription evaluation; the saved evidence is in `docs/audit/codex-semantic-evaluation.json`. API billing and ChatGPT subscription limits remain separate.
 
 ## Hosted agent boundary
 
