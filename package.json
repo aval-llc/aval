@@ -39,6 +39,7 @@
     "cloudflare:deploy-config": "node scripts/configure-cloudflare-deploy.mjs",
     "start:local": "node scripts/local-server.mjs",
     "validate:providers": "node scripts/validate-live-providers.mjs",
+    "check:subscription:codex": "node scripts/check-codex-subscription.mjs",
     "evaluate:semantic:codex": "node scripts/evaluate-codex-semantic.mjs docs/audit/codex-semantic-evaluation.json",
     "validate:runtime:codex": "node --import ./tests/integration/module-hooks.mjs scripts/validate-codex-runtime.mjs docs/audit/codex-runtime-validation.json",
     "validate:independence": "node --import ./tests/integration/module-hooks.mjs scripts/validate-independence.mjs",

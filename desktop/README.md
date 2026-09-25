@@ -10,10 +10,17 @@ Requirements: Node.js 22+, the Codex CLI, and a ChatGPT account eligible for Cod
 
 ```sh
 cd desktop
-npm install
+npm ci
 npm test
 npm start
 ```
+
+Inside Aval Desktop, open **Settings → Intelligence** and choose **Connect
+ChatGPT plan**. This uses OpenAI's browser sign-in; no API key is required for
+interactive Ask Aval answers. The hosted dashboard intentionally cannot reuse
+that personal session for background work. The complete pilot procedure and
+local agent evaluation commands are in
+[`docs/PILOT_CHATGPT_SUBSCRIPTION.md`](../docs/PILOT_CHATGPT_SUBSCRIPTION.md).
 
 Set `AVAL_DESKTOP_URL=http://localhost:3000` to point the shell at a local Aval development server. Set `AVAL_CODEX_PATH=/absolute/path/to/codex` only when the CLI is not discoverable on `PATH` or in a standard install location.
 

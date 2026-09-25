@@ -75,6 +75,6 @@ try {
   };
   report.status = Object.values(report.assertions).every(Boolean) ? 'passed' : 'failed';
 } catch (error) { report.status = 'blocked_provider'; report.error = error.message; }
-finally { client?.close(); sqlite?.close(); save(); }
+finally { await client?.close(); sqlite?.close(); save(); }
 console.log(JSON.stringify({ status: report.status, assertions: report.assertions, error: report.error }));
 if (report.status !== 'passed') process.exitCode = 2;
