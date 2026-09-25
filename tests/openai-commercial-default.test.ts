@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { callOpenAiCompatible } from "../lib/ask-aval/openai-compatible.ts";
 
-test("OpenAI commercial default uses GPT-6 Sol", () => {
+test("OpenAI commercial default uses GPT-6 Luna", () => {
   const catalog = readFileSync(new URL("../lib/integrations/catalog.ts", import.meta.url), "utf8");
   const models = readFileSync(new URL("../lib/integrations/model-providers.ts", import.meta.url), "utf8");
-  assert.match(catalog, /id: "openai"[\s\S]*?defaultModel: "gpt-6-sol"/);
-  assert.match(models, /openai: \["gpt-6-sol", "gpt-6-luna"/);
+  assert.match(catalog, /id: "openai"[\s\S]*?defaultModel: "gpt-6-luna"/);
+  assert.match(models, /openai: \["gpt-6-luna", "gpt-6-sol"/);
   assert.match(models, /gpt-6-\(astra\|sol\|luna\)/);
 });
 

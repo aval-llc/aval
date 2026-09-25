@@ -65,7 +65,7 @@ const SUBSCRIPTION_MODELS: Record<string, string[]> = {
   //
   // Live discovery wins. These current models are only the labelled fallback
   // when the local/hosted catalog cannot be reached.
-  chatgpt: ["gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+  chatgpt: ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
 };
 
 /** Pinned in the query string the way the Codex CLI pins it; the backend gates its response on it. */
@@ -206,8 +206,8 @@ export function supportsReasoningEffort(model: string): boolean {
  * a live catalog, discovery still wins — this is the floor, not the ceiling.
  */
 export const KNOWN_MODELS: Record<string, string[]> = {
-  openai: ["gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
-  chatgpt: ["gpt-6-sol", "gpt-6-luna", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+  openai: ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+  chatgpt: ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
   anthropic: ["claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"],
   claude: ["claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"],
   google_gemini: ["gemini-2.5-pro", "gemini-2.5-flash"],

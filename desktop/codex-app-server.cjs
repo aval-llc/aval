@@ -418,7 +418,7 @@ class CodexAppServerService extends EventEmitter {
     }
     let selectedModel = this.state.selectedModel;
     if (!models.some((model) => model.id === selectedModel)) {
-      selectedModel = models.find((model) => model.id === "gpt-6-sol")?.id
+      selectedModel = models.find((model) => model.id === "gpt-6-luna")?.id
         ?? models.find((model) => model.isDefault)?.id
         ?? models[0]?.id
         ?? null;
