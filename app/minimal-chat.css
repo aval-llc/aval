@@ -114,10 +114,14 @@ html:has(.aval-inline-chat[data-detached="true"]), body.aval-chat-popout:has(.av
    instead of floating over the page's content. The rail is reserved with
    shell padding rather than a third grid column: several breakpoints and the
    collapsed sidebar each rewrite the shell's columns, and padding leaves every
-   one of them untouched. `:has` scopes it to shells that mount the assistant. */
+   one of them untouched. `:has` scopes it to shells that mount the assistant.
+   The rail is drawn as a second card in the module's own surface, border and
+   radius, 8px from the module and inside the shell's 10px edge. */
 @media (min-width: 1181px) {
-  .app-shell:has(> .aval-minimal) { --chat-rail-w: 320px; padding-right: var(--chat-rail-w); }
-  .app-shell:has(> .aval-minimal) .aval-inline-chat:not([data-detached="true"]) { right: 20px; bottom: 20px; width: calc(var(--chat-rail-w) - 40px); max-height: calc(100dvh - 40px); }
+  .app-shell:has(> .aval-minimal) { --chat-rail-w: 304px; padding-right: var(--chat-rail-w); }
+  .app-shell:has(> .aval-minimal)::after { content: ''; position: fixed; z-index: 0; top: 10px; right: 10px; bottom: 10px; width: calc(var(--chat-rail-w) - 18px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 2px 8px #00000003; pointer-events: none; }
+  [data-theme="dark"] .app-shell:has(> .aval-minimal)::after { border-color: rgba(255,255,255,.05); box-shadow: inset 0 1px 0 rgba(255,255,255,.04), var(--shadow-sm); }
+  .app-shell:has(> .aval-minimal) .aval-inline-chat:not([data-detached="true"]) { right: 22px; bottom: 22px; width: calc(var(--chat-rail-w) - 42px); max-height: calc(100dvh - 44px); }
   .app-shell:has(> .aval-minimal) .aval-inline-chat[data-expanded="true"]:not([data-detached="true"]) { width: min(450px, calc(100vw - 48px)); }
-  .app-shell:has(> .aval-minimal) .aval-orb-launcher { right: calc((var(--chat-rail-w) - 64px) / 2); }
+  .app-shell:has(> .aval-minimal) .aval-orb-launcher { right: calc((var(--chat-rail-w) - 64px - 8px) / 2); }
 }
