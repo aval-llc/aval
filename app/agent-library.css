@@ -94,3 +94,31 @@
 /* Draft dialogs are portaled above the employee folder dialog. */
 .employee-draft-overlay { z-index: 160; }
 .employee-draft-dialog { z-index: 161; max-height: calc(100dvh - 40px); overflow-y: auto; }
+/* Expertise library: domains collapse to one row each, and a domain opens to
+   its Lead's folder and a quiet grid of Specialists. 266 profiles are never
+   drawn as 266 folders. */
+.expertise-intro { max-width: 720px; margin: 0 0 20px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.expertise-domains { display: grid; gap: 10px; }
+.expertise-domain { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.expertise-domain-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 19px; border: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.expertise-domain-toggle strong { display: block; font-size: 13px; letter-spacing: -.02em; }
+.expertise-domain-toggle small { display: block; margin-top: 4px; font-size: 10px; color: var(--muted); }
+.expertise-domain-toggle svg { flex-shrink: 0; color: var(--muted); transition: transform .2s ease; }
+.expertise-domain[data-open="true"] .expertise-domain-toggle svg { transform: rotate(180deg); }
+.expertise-domain-body { display: grid; gap: 20px; padding: 4px 19px 20px; border-top: 1px solid var(--line); }
+.expertise-lead { margin-top: 20px; grid-template-columns: minmax(0, 320px); }
+.specialist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.specialist-card { display: grid; align-content: start; gap: 8px; padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-soft); color: var(--ink); font: inherit; text-align: left; cursor: pointer; min-width: 0; transition: border-color .2s ease; }
+.specialist-card:hover { border-color: var(--quiet); }
+.specialist-card strong { font-size: 12px; letter-spacing: -.02em; }
+.specialist-card span { color: var(--muted); font-size: 11px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.specialist-card small { color: var(--quiet); font-size: 10px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.specialist-dialog { width: min(680px, calc(100vw - 40px)); }
+.specialist-facts { display: grid; grid-template-columns: minmax(120px, 170px) 1fr; gap: 14px 22px; margin: 22px 0 0; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.7; }
+.specialist-facts dt { color: var(--muted); font-size: 11px; }
+.specialist-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.specialist-facts ul { margin: 0; padding-left: 16px; }
+.specialist-not { display: block; margin-top: 4px; color: var(--muted); }
+.specialist-card:focus-visible, .expertise-domain-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (max-width: 650px) { .specialist-facts { grid-template-columns: 1fr; gap: 4px; } .specialist-facts dd { margin-bottom: 10px; } .expertise-lead { grid-template-columns: 1fr; } .library-filters { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .expertise-domain-toggle svg, .specialist-card { transition: none; } }
