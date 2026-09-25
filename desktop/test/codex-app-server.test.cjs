@@ -138,7 +138,10 @@ test("service handles real completion envelopes after the start acknowledgement"
       let result = {};
       if (message.method === "initialize") result = { userAgent: "fake" };
       if (message.method === "account/read") result = { account: { type: "chatgpt", email: "owner@example.com", planType: "plus", accessToken: "hidden" }, requiresOpenaiAuth: true };
-      if (message.method === "model/list") result = { data: [{ model: "gpt-test", displayName: "GPT Test", hidden: false, isDefault: true }], nextCursor: null };
+      if (message.method === "model/list") result = { data: [
+        { model: "gpt-test", displayName: "GPT Test", hidden: false, isDefault: true },
+        { model: "gpt-6-luna", displayName: "GPT-6 Luna", hidden: false, isDefault: false },
+      ], nextCursor: null };
       if (message.method === "account/rateLimits/read") result = { rateLimits: { primary: null, secondary: null, rateLimitReachedType: null, spendControlReached: false } };
       if (message.method === "account/login/start") result = { type: "chatgpt", loginId: "login-1", authUrl: "https://auth.openai.com/oauth/authorize" };
       if (message.method === "thread/start") result = { thread: { id: "thread-1" } };
@@ -177,6 +180,7 @@ test("service handles real completion envelopes after the start acknowledgement"
   assert.equal(spawnOptions.env.OPENAI_API_KEY, undefined);
   assert.equal(spawnOptions.env.CODEX_HOME, path.join(temporary, "codex-home"));
   assert.deepEqual(service.getState().account, { type: "chatgpt", email: "owner@example.com", planType: "plus" });
+  assert.equal(service.getState().selectedModel, "gpt-6-luna");
   await service.connect();
   assert.equal(openedUrl, "https://auth.openai.com/oauth/authorize");
   assert.deepEqual(requests.find((message) => message.method === "account/login/start")?.params, {

@@ -24,14 +24,17 @@ The local evaluation transport can test the planner, child investigations, revie
 ```powershell
 npm run check:subscription:codex
 npm run evaluate:semantic:codex
-$env:AVAL_CODEX_EVAL_MAX_TOKENS = "180000"
-npm run validate:runtime:codex
-Remove-Item Env:AVAL_CODEX_EVAL_MAX_TOKENS
 ```
 
 Run the readiness check first. It reads ChatGPT account and model metadata without making an inference request. The evaluation commands make real model calls and consume subscription usage.
 
-The current durable-runtime validator uses an isolated synthetic SQLite fixture. It validates agent reasoning and orchestration but does not prove the production Supabase, authentication, scheduler, or PMS paths. Production PostgreSQL tests remain a separate required gate.
+The old `validate:runtime:codex` command still targets the retired SQLite task harness and is not a valid current-runtime gate. It must be ported to a disposable PostgreSQL database before it is used again. The semantic evaluation validates live reviewer behavior; PostgreSQL integration tests separately validate orchestration mechanics without a live model. Neither alone proves the combined production path.
+
+## Commercial API default
+
+Aval defaults a newly connected OpenAI API account to `gpt-6-luna`. At standard processing rates it costs $0.10 per million input tokens, $0.01 per million cached input tokens, and $0.50 per million output tokens. It supports Aval's structured function tools and is the cost-conscious starting point for pilot traffic. Aval forces `reasoning_effort: "none"` for Luna function calls made through the current Chat Completions adapter, as required by OpenAI.
+
+The September 24 live subscription evaluation found all 13 seeded defects with no false approvals, but Luna rejected three valid examples. That makes it suitable for a supervised, cost-focused pilot while showing that it should not be trusted as an unattended final reviewer yet. Use the saved evaluation in `docs/audit/codex-semantic-evaluation.json` when deciding whether a stronger review model justifies its higher cost. API billing and ChatGPT subscription limits remain separate.
 
 ## Hosted agent boundary
 

@@ -12,7 +12,7 @@
  * native Messages API via the official SDK (anthropic.ts).
  */
 
-import { ModelProviderError, type ContentBlock, type Message, type MessagesResponse, type ToolResultBlock, type ToolSchema, type ToolUseBlock } from "./model-types";
+import { ModelProviderError, type ContentBlock, type Message, type MessagesResponse, type ToolResultBlock, type ToolSchema, type ToolUseBlock } from "./model-types.ts";
 
 const TIMEOUT_MS = 25_000;
 
@@ -75,6 +75,7 @@ export async function callOpenAiCompatible(
     tool_choice?: { type: "auto" | "any" | "tool"; name?: string };
     max_tokens?: number;
     timeout_ms?: number;
+    reasoningEffort?: string;
   },
 ): Promise<MessagesResponse> {
   const controller = new AbortController();
@@ -90,6 +91,13 @@ export async function callOpenAiCompatible(
         messages: toOpenAiMessages(params.system, params.messages),
         ...(params.tools ? { tools: toOpenAiTools(params.tools) } : {}),
         ...(params.tool_choice ? { tool_choice: toOpenAiToolChoice(params.tool_choice) } : {}),
+        // GPT-6 Sol/Luna support function calling through Chat Completions
+        // only at `none`. Aval uses function tools for every agent loop, so
+        // enforce the provider contract instead of sending a default medium
+        // reasoning request that OpenAI will reject.
+        ...(params.tools?.length && /^gpt-6-(sol|luna)$/.test(config.model)
+          ? { reasoning_effort: "none" }
+          : params.reasoningEffort ? { reasoning_effort: params.reasoningEffort } : {}),
       }),
     });
 

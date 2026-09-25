@@ -417,7 +417,12 @@ class CodexAppServerService extends EventEmitter {
       rateLimits = publicRateLimits(rateResult);
     }
     let selectedModel = this.state.selectedModel;
-    if (!models.some((model) => model.id === selectedModel)) selectedModel = models.find((model) => model.isDefault)?.id ?? models[0]?.id ?? null;
+    if (!models.some((model) => model.id === selectedModel)) {
+      selectedModel = models.find((model) => model.id === "gpt-6-luna")?.id
+        ?? models.find((model) => model.isDefault)?.id
+        ?? models[0]?.id
+        ?? null;
+    }
     const signedInStatus = account?.type === "chatgpt" ? "connected_chatgpt" : account?.type === "apiKey" ? "connected_api_key" : "signed_out";
     this.#setState({
       available: true,

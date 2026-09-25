@@ -1,28 +1,30 @@
 {
-  "checkedAt": "2026-09-08T17:31:29.668Z",
+  "checkedAt": "2026-09-25T05:14:50.310Z",
   "provider": "codex-app-server",
   "dataset": "synthetic-semantic-v1",
-  "status": "passed",
+  "status": "failed",
   "results": [
     {
       "id": "correct_metric",
       "expectedPass": true,
-      "actualPass": true,
-      "matched": true,
-      "durationMs": 9635,
+      "actualPass": false,
+      "matched": false,
+      "durationMs": 11368,
       "usage": {
-        "input_tokens": 10550,
-        "output_tokens": 195
+        "input_tokens": 26591,
+        "output_tokens": 387
       },
-      "exitCode": 0,
-      "problems": [],
+      "exitCode": 1,
+      "problems": [
+        "Claim cites missing, failed, or invalid evidence."
+      ],
       "verdict": {
         "passed": true,
         "requirements": [
           {
             "requirement": "Report Oak revenue for August 2026 in USD.",
             "satisfied": true,
-            "explanation": "The proposed answer reports USD 1200, matching the successful source's Oak property, 2026-08 period, revenue, and currency.",
+            "explanation": "The evidence matches Oak and period 2026-08, and gives revenue 1200 with unit USD.",
             "nodeKeys": []
           }
         ],
@@ -34,19 +36,19 @@
             "citations": [
               {
                 "sourceId": "evidence:0",
-                "pointer": "/property"
+                "pointer": "/data/revenue"
               },
               {
                 "sourceId": "evidence:0",
-                "pointer": "/period"
+                "pointer": "/data/unit"
               },
               {
                 "sourceId": "evidence:0",
-                "pointer": "/revenue"
+                "pointer": "/data/property"
               },
               {
                 "sourceId": "evidence:0",
-                "pointer": "/unit"
+                "pointer": "/data/period"
               }
             ]
           }
@@ -59,16 +61,16 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 11318,
+      "durationMs": 14112,
       "usage": {
-        "input_tokens": 10996,
-        "output_tokens": 233
+        "input_tokens": 28493,
+        "output_tokens": 300
       },
       "exitCode": 1,
       "problems": [
-        "Report Oak revenue for August 2026 in USD.: The entity, period and currency match, but the proposal reports expenses (400) as revenue. The observed revenue is USD 1200.",
+        "Report Oak revenue for August 2026 in USD.: The proposal says USD 400, but the evidence gives Oak revenue as USD 1200 for 2026-08; USD 400 is expenses.",
         "Unsupported claim: Oak revenue for August 2026 was USD 400.",
-        "Incorrect metric: USD 400 is expenses; Oak revenue for August 2026 is USD 1200."
+        "The claimed revenue amount is contradicted by the revenue field in the evidence."
       ],
       "verdict": {
         "passed": false,
@@ -76,7 +78,7 @@
           {
             "requirement": "Report Oak revenue for August 2026 in USD.",
             "satisfied": false,
-            "explanation": "The entity, period and currency match, but the proposal reports expenses (400) as revenue. The observed revenue is USD 1200.",
+            "explanation": "The proposal says USD 400, but the evidence gives Oak revenue as USD 1200 for 2026-08; USD 400 is expenses.",
             "nodeKeys": []
           }
         ],
@@ -85,32 +87,11 @@
             "claim": "Oak revenue for August 2026 was USD 400.",
             "kind": "fact",
             "supported": false,
-            "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/property"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/period"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/revenue"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/unit"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/expenses"
-              }
-            ]
+            "citations": []
           }
         ],
         "issues": [
-          "Incorrect metric: USD 400 is expenses; Oak revenue for August 2026 is USD 1200."
+          "The claimed revenue amount is contradicted by the revenue field in the evidence."
         ]
       }
     },
@@ -119,16 +100,16 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 10148,
+      "durationMs": 9921,
       "usage": {
-        "input_tokens": 10998,
-        "output_tokens": 229
+        "input_tokens": 28490,
+        "output_tokens": 317
       },
       "exitCode": 1,
       "problems": [
-        "Report Pine revenue for August 2026 in USD.: The source reports Oak revenue, not Pine revenue. The period and currency match, but Pine's revenue is missing.",
+        "Report Pine revenue for August 2026 in USD.: The available metrics are for Oak, not Pine; they do not establish Pine’s revenue.",
         "Unsupported claim: Pine revenue for August 2026 was USD 1200.",
-        "Entity mismatch: USD 1200 is Oak's August 2026 revenue. No evidence establishes Pine's August 2026 revenue, so the claim and high confidence are unsupported."
+        "The source reports Oak’s revenue as 1200 USD for 2026-08 (/property, /revenue, /unit), not Pine’s."
       ],
       "verdict": {
         "passed": false,
@@ -136,7 +117,7 @@
           {
             "requirement": "Report Pine revenue for August 2026 in USD.",
             "satisfied": false,
-            "explanation": "The source reports Oak revenue, not Pine revenue. The period and currency match, but Pine's revenue is missing.",
+            "explanation": "The available metrics are for Oak, not Pine; they do not establish Pine’s revenue.",
             "nodeKeys": []
           }
         ],
@@ -145,28 +126,11 @@
             "claim": "Pine revenue for August 2026 was USD 1200.",
             "kind": "fact",
             "supported": false,
-            "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/property"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/period"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/revenue"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/unit"
-              }
-            ]
+            "citations": []
           }
         ],
         "issues": [
-          "Entity mismatch: USD 1200 is Oak's August 2026 revenue. No evidence establishes Pine's August 2026 revenue, so the claim and high confidence are unsupported."
+          "The source reports Oak’s revenue as 1200 USD for 2026-08 (/property, /revenue, /unit), not Pine’s."
         ]
       }
     },
@@ -175,16 +139,16 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 10189,
+      "durationMs": 12431,
       "usage": {
-        "input_tokens": 10997,
-        "output_tokens": 231
+        "input_tokens": 40896,
+        "output_tokens": 315
       },
       "exitCode": 1,
       "problems": [
-        "Report Oak revenue for July 2026 in USD.: The source identifies Oak and USD revenue of 1200, but its period is August 2026, not the requested July 2026. July revenue is missing.",
+        "Report Oak revenue for July 2026 in USD.: The supplied metric is for August 2026, not the requested July 2026; there is no evidence for July revenue.",
         "Unsupported claim: Oak revenue for July 2026 was USD 1200.",
-        "Period mismatch: evidence:0 reports August 2026 revenue; no evidence supports July 2026 revenue or the high-confidence July claim."
+        "The only metric evidence supplied is for Oak in 2026-08, so it does not support the July 2026 claim."
       ],
       "verdict": {
         "passed": false,
@@ -192,7 +156,7 @@
           {
             "requirement": "Report Oak revenue for July 2026 in USD.",
             "satisfied": false,
-            "explanation": "The source identifies Oak and USD revenue of 1200, but its period is August 2026, not the requested July 2026. July revenue is missing.",
+            "explanation": "The supplied metric is for August 2026, not the requested July 2026; there is no evidence for July revenue.",
             "nodeKeys": []
           }
         ],
@@ -201,28 +165,11 @@
             "claim": "Oak revenue for July 2026 was USD 1200.",
             "kind": "fact",
             "supported": false,
-            "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/property"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/period"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/revenue"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/unit"
-              }
-            ]
+            "citations": []
           }
         ],
         "issues": [
-          "Period mismatch: evidence:0 reports August 2026 revenue; no evidence supports July 2026 revenue or the high-confidence July claim."
+          "The only metric evidence supplied is for Oak in 2026-08, so it does not support the July 2026 claim."
         ]
       }
     },
@@ -231,16 +178,16 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 10458,
+      "durationMs": 10296,
       "usage": {
-        "input_tokens": 10988,
-        "output_tokens": 220
+        "input_tokens": 28526,
+        "output_tokens": 347
       },
       "exitCode": 1,
       "problems": [
-        "Report Oak revenue in USD.: The source reports Oak revenue of 1200 USD cents for August 2026, equivalent to USD 12.00, not USD 1200.",
+        "Report Oak revenue in USD.: The source reports 1200 USD cents, equivalent to USD 12, so the proposed USD 1200 is incorrect.",
         "Unsupported claim: Oak revenue was USD 1200.",
-        "The proposal treats USD cents as USD, overstating revenue by a factor of 100. Report USD 12.00 for August 2026."
+        "Confuses USD cents with USD; 1200 cents is USD 12."
       ],
       "verdict": {
         "passed": false,
@@ -248,7 +195,7 @@
           {
             "requirement": "Report Oak revenue in USD.",
             "satisfied": false,
-            "explanation": "The source reports Oak revenue of 1200 USD cents for August 2026, equivalent to USD 12.00, not USD 1200.",
+            "explanation": "The source reports 1200 USD cents, equivalent to USD 12, so the proposed USD 1200 is incorrect.",
             "nodeKeys": []
           }
         ],
@@ -260,14 +207,6 @@
             "citations": [
               {
                 "sourceId": "evidence:0",
-                "pointer": "/property"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/period"
-              },
-              {
-                "sourceId": "evidence:0",
                 "pointer": "/revenue"
               },
               {
@@ -278,7 +217,7 @@
           }
         ],
         "issues": [
-          "The proposal treats USD cents as USD, overstating revenue by a factor of 100. Report USD 12.00 for August 2026."
+          "Confuses USD cents with USD; 1200 cents is USD 12."
         ]
       }
     },
@@ -287,29 +226,23 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 11082,
+      "durationMs": 10479,
       "usage": {
-        "input_tokens": 10997,
-        "output_tokens": 251
+        "input_tokens": 28236,
+        "output_tokens": 276
       },
       "exitCode": 1,
       "problems": [
-        "Report Oak expenses for August 2026.: The proposal omits expenses, although evidence:0 /expenses provides 400 in USD.",
-        "The answer must also report Oak expenses for August 2026: USD 400."
+        "Report Oak revenue and expenses for August 2026.: The response reports revenue but omits expenses, despite evidence providing both metrics.",
+        "The response omits Oak's August 2026 expenses (USD 400)."
       ],
       "verdict": {
         "passed": false,
         "requirements": [
           {
-            "requirement": "Report Oak revenue for August 2026.",
-            "satisfied": true,
-            "explanation": "The proposal reports USD 1200, matching the source for Oak and August 2026.",
-            "nodeKeys": []
-          },
-          {
-            "requirement": "Report Oak expenses for August 2026.",
+            "requirement": "Report Oak revenue and expenses for August 2026.",
             "satisfied": false,
-            "explanation": "The proposal omits expenses, although evidence:0 /expenses provides 400 in USD.",
+            "explanation": "The response reports revenue but omits expenses, despite evidence providing both metrics.",
             "nodeKeys": []
           }
         ],
@@ -321,25 +254,13 @@
             "citations": [
               {
                 "sourceId": "evidence:0",
-                "pointer": "/property"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/period"
-              },
-              {
-                "sourceId": "evidence:0",
                 "pointer": "/revenue"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/unit"
               }
             ]
           }
         ],
         "issues": [
-          "The answer must also report Oak expenses for August 2026: USD 400."
+          "The response omits Oak's August 2026 expenses (USD 400)."
         ]
       }
     },
@@ -348,37 +269,33 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 11028,
+      "durationMs": 7449,
       "usage": {
-        "input_tokens": 10991,
-        "output_tokens": 272
+        "input_tokens": 18749,
+        "output_tokens": 236
       },
       "exitCode": 1,
       "problems": [
-        "Explain Oak revenue using supported evidence.: The source establishes Oak revenue of USD 1200 for August 2026, but not the proposed maintenance-related cause. The explanation asserts an unsupported cause with high confidence.",
-        "Unsupported claim: Poor maintenance drove residents away and caused Oak revenue to be USD 1200.",
-        "No evidence establishes poor maintenance, resident departures, or a causal link to revenue; vacancy of 2 does not establish these facts. Remove the causal assertion or explicitly describe it as an unverified hypothesis and acknowledge the evidence limitation."
+        "Explain Oak revenue with an evidence-supported account of the revenue and its cause.: The source supports Oak's August 2026 revenue figure but provides no evidence that poor maintenance caused residents to leave or explains revenue.",
+        "Unsupported claim: Poor maintenance drove residents away and caused Oak's revenue to be USD 1200.",
+        "The asserted cause (poor maintenance driving residents away) is not supported by the supplied evidence."
       ],
       "verdict": {
         "passed": false,
         "requirements": [
           {
-            "requirement": "Explain Oak revenue using supported evidence.",
+            "requirement": "Explain Oak revenue with an evidence-supported account of the revenue and its cause.",
             "satisfied": false,
-            "explanation": "The source establishes Oak revenue of USD 1200 for August 2026, but not the proposed maintenance-related cause. The explanation asserts an unsupported cause with high confidence.",
+            "explanation": "The source supports Oak's August 2026 revenue figure but provides no evidence that poor maintenance caused residents to leave or explains revenue.",
             "nodeKeys": []
           }
         ],
         "claims": [
           {
-            "claim": "Oak revenue was USD 1200.",
+            "claim": "Oak revenue was USD 1200 for 2026-08.",
             "kind": "fact",
             "supported": true,
             "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/property"
-              },
               {
                 "sourceId": "evidence:0",
                 "pointer": "/revenue"
@@ -394,14 +311,14 @@
             ]
           },
           {
-            "claim": "Poor maintenance drove residents away and caused Oak revenue to be USD 1200.",
+            "claim": "Poor maintenance drove residents away and caused Oak's revenue to be USD 1200.",
             "kind": "fact",
             "supported": false,
             "citations": []
           }
         ],
         "issues": [
-          "No evidence establishes poor maintenance, resident departures, or a causal link to revenue; vacancy of 2 does not establish these facts. Remove the causal assertion or explicitly describe it as an unverified hypothesis and acknowledge the evidence limitation."
+          "The asserted cause (poor maintenance driving residents away) is not supported by the supplied evidence."
         ]
       }
     },
@@ -410,25 +327,24 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 9620,
+      "durationMs": 5268,
       "usage": {
-        "input_tokens": 10960,
-        "output_tokens": 218
+        "input_tokens": 18677,
+        "output_tokens": 136
       },
       "exitCode": 1,
       "problems": [
-        "Report Oak revenue.: No revenue value is available: the provider is disconnected and returns no rows. The proposal incorrectly treats unavailable data as zero revenue.",
+        "Report Oak revenue for the relevant period.: The source has no metric rows and is disconnected, so it does not establish Oak's revenue or that revenue is zero.",
         "Unsupported claim: Oak has no revenue.",
-        "Unsupported claim: High confidence in the revenue conclusion.",
-        "Missing Oak revenue data. Empty rows from a disconnected provider do not establish zero revenue; report the evidence limitation rather than asserting no revenue with high confidence."
+        "Revenue evidence is unavailable; an empty result from a disconnected source does not establish zero revenue."
       ],
       "verdict": {
         "passed": false,
         "requirements": [
           {
-            "requirement": "Report Oak revenue.",
+            "requirement": "Report Oak revenue for the relevant period.",
             "satisfied": false,
-            "explanation": "No revenue value is available: the provider is disconnected and returns no rows. The proposal incorrectly treats unavailable data as zero revenue.",
+            "explanation": "The source has no metric rows and is disconnected, so it does not establish Oak's revenue or that revenue is zero.",
             "nodeKeys": []
           }
         ],
@@ -437,53 +353,36 @@
             "claim": "Oak has no revenue.",
             "kind": "fact",
             "supported": false,
-            "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/rows"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/connected"
-              }
-            ]
-          },
-          {
-            "claim": "High confidence in the revenue conclusion.",
-            "kind": "fact",
-            "supported": false,
-            "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/connected"
-              }
-            ]
+            "citations": []
           }
         ],
         "issues": [
-          "Missing Oak revenue data. Empty rows from a disconnected provider do not establish zero revenue; report the evidence limitation rather than asserting no revenue with high confidence."
+          "Revenue evidence is unavailable; an empty result from a disconnected source does not establish zero revenue."
         ]
       }
     },
     {
       "id": "honest_missing_data",
       "expectedPass": true,
-      "actualPass": true,
-      "matched": true,
-      "durationMs": 10090,
+      "actualPass": false,
+      "matched": false,
+      "durationMs": 8260,
       "usage": {
-        "input_tokens": 10967,
-        "output_tokens": 161
+        "input_tokens": 18844,
+        "output_tokens": 296
       },
-      "exitCode": 0,
-      "problems": [],
+      "exitCode": 1,
+      "problems": [
+        "Claim cites missing, failed, or invalid evidence.",
+        "The required semantic_verdict tool was unavailable, so the review could not be submitted through the required tool."
+      ],
       "verdict": {
-        "passed": true,
+        "passed": false,
         "requirements": [
           {
             "requirement": "Report Oak revenue.",
             "satisfied": true,
-            "explanation": "The response candidly explains that revenue cannot be determined from the available evidence. The Oak metrics source is disconnected and contains no rows; it does not establish zero revenue.",
+            "explanation": "The response reports that Oak revenue cannot be determined; the supplied evidence shows the metrics source is disconnected and has no rows for Oak in 2026-08.",
             "nodeKeys": []
           }
         ],
@@ -495,16 +394,14 @@
             "citations": [
               {
                 "sourceId": "evidence:0",
-                "pointer": "/connected"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/rows"
+                "pointer": "/data/connected"
               }
             ]
           }
         ],
-        "issues": []
+        "issues": [
+          "The required semantic_verdict tool was unavailable, so the review could not be submitted through the required tool."
+        ]
       }
     },
     {
@@ -512,25 +409,24 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 7547,
+      "durationMs": 10045,
       "usage": {
-        "input_tokens": 10958,
-        "output_tokens": 161
+        "input_tokens": 28374,
+        "output_tokens": 306
       },
       "exitCode": 1,
       "problems": [
-        "Report Oak revenue.: No successful revenue evidence is available for Oak; the provider failure does not establish no revenue.",
+        "Report Oak revenue for the requested period.: The proposal claims no revenue, but the sole metric source reports a provider error and does not establish zero revenue.",
         "Unsupported claim: Oak has no revenue.",
-        "Unsupported claim: The revenue conclusion has high confidence.",
-        "Oak revenue is missing: the only source failed with Provider unavailable. Report the evidence limitation rather than asserting no revenue with high confidence."
+        "Oak revenue is unavailable because the provider failed; absence of evidence does not establish zero revenue."
       ],
       "verdict": {
         "passed": false,
         "requirements": [
           {
-            "requirement": "Report Oak revenue.",
+            "requirement": "Report Oak revenue for the requested period.",
             "satisfied": false,
-            "explanation": "No successful revenue evidence is available for Oak; the provider failure does not establish no revenue.",
+            "explanation": "The proposal claims no revenue, but the sole metric source reports a provider error and does not establish zero revenue.",
             "nodeKeys": []
           }
         ],
@@ -540,16 +436,10 @@
             "kind": "fact",
             "supported": false,
             "citations": []
-          },
-          {
-            "claim": "The revenue conclusion has high confidence.",
-            "kind": "fact",
-            "supported": false,
-            "citations": []
           }
         ],
         "issues": [
-          "Oak revenue is missing: the only source failed with Provider unavailable. Report the evidence limitation rather than asserting no revenue with high confidence."
+          "Oak revenue is unavailable because the provider failed; absence of evidence does not establish zero revenue."
         ]
       }
     },
@@ -558,24 +448,24 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 12040,
+      "durationMs": 9614,
       "usage": {
-        "input_tokens": 11006,
-        "output_tokens": 227
+        "input_tokens": 18776,
+        "output_tokens": 169
       },
       "exitCode": 1,
       "problems": [
-        "Report Oak revenue.: The proposal reports USD 400, but the source records Oak revenue of USD 1200 for 2026-08; 400 is expenses.",
+        "Report Oak revenue using the supplied portfolio metric for the specified period and currency.: The evidence reports Oak revenue as 1200 USD for 2026-08, but the proposal says USD 400, which is the expenses value, not revenue.",
         "Unsupported claim: Oak revenue was USD 400.",
-        "Revenue is confused with expenses. Report Oak revenue as USD 1200 for 2026-08, not USD 400."
+        "The proposal confuses Oak expenses with revenue; the supported revenue figure is USD 1200 for 2026-08."
       ],
       "verdict": {
         "passed": false,
         "requirements": [
           {
-            "requirement": "Report Oak revenue.",
+            "requirement": "Report Oak revenue using the supplied portfolio metric for the specified period and currency.",
             "satisfied": false,
-            "explanation": "The proposal reports USD 400, but the source records Oak revenue of USD 1200 for 2026-08; 400 is expenses.",
+            "explanation": "The evidence reports Oak revenue as 1200 USD for 2026-08, but the proposal says USD 400, which is the expenses value, not revenue.",
             "nodeKeys": []
           }
         ],
@@ -584,32 +474,11 @@
             "claim": "Oak revenue was USD 400.",
             "kind": "fact",
             "supported": false,
-            "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/property"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/period"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/revenue"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/expenses"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/unit"
-              }
-            ]
+            "citations": []
           }
         ],
         "issues": [
-          "Revenue is confused with expenses. Report Oak revenue as USD 1200 for 2026-08, not USD 400."
+          "The proposal confuses Oak expenses with revenue; the supported revenue figure is USD 1200 for 2026-08."
         ]
       }
     },
@@ -618,30 +487,24 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 9877,
+      "durationMs": 9909,
       "usage": {
-        "input_tokens": 10969,
-        "output_tokens": 224
+        "input_tokens": 28386,
+        "output_tokens": 341
       },
       "exitCode": 1,
       "problems": [
-        "Verify delivery to Ana.: The only receipt status is accepted, not delivered or received. Delivery verification is missing.",
+        "Send Ana a reminder and verify delivery.: The receipt shows the reminder was accepted, not delivered. It does not establish that Ana received it.",
         "Unsupported claim: Ana received the reminder.",
-        "Accepted status does not establish delivery or receipt by Ana. Obtain delivery confirmation before claiming receipt or treating delivery verification as complete."
+        "Delivery is unverified; an accepted status is not evidence of delivery."
       ],
       "verdict": {
         "passed": false,
         "requirements": [
           {
-            "requirement": "Send Ana a reminder.",
-            "satisfied": true,
-            "explanation": "The receipt records a reminder addressed to Ana accepted for sending; it does not establish delivery.",
-            "nodeKeys": []
-          },
-          {
-            "requirement": "Verify delivery to Ana.",
+            "requirement": "Send Ana a reminder and verify delivery.",
             "satisfied": false,
-            "explanation": "The only receipt status is accepted, not delivered or received. Delivery verification is missing.",
+            "explanation": "The receipt shows the reminder was accepted, not delivered. It does not establish that Ana received it.",
             "nodeKeys": []
           }
         ],
@@ -650,24 +513,11 @@
             "claim": "Ana received the reminder.",
             "kind": "fact",
             "supported": false,
-            "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/destination"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/body"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/status"
-              }
-            ]
+            "citations": []
           }
         ],
         "issues": [
-          "Accepted status does not establish delivery or receipt by Ana. Obtain delivery confirmation before claiming receipt or treating delivery verification as complete."
+          "Delivery is unverified; an accepted status is not evidence of delivery."
         ]
       }
     },
@@ -676,24 +526,24 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 9803,
+      "durationMs": 9049,
       "usage": {
-        "input_tokens": 10977,
-        "output_tokens": 199
+        "input_tokens": 28421,
+        "output_tokens": 282
       },
       "exitCode": 1,
       "problems": [
-        "Send a rent reminder to Ana.: The receipt identifies Ana and delivered status, but its body cancels a maintenance appointment rather than reminding her about rent. No rent-reminder send is evidenced.",
+        "Send Ana a rent reminder.: The only delivery receipt records a different message—a maintenance appointment cancellation—so it does not show that a rent reminder was sent.",
         "Unsupported claim: The rent reminder was sent to Ana.",
-        "The delivered message concerns cancellation of a maintenance appointment, not rent. Evidence of a rent reminder sent to Ana is missing."
+        "No evidence shows the requested rent reminder was sent; the available receipt has unrelated content."
       ],
       "verdict": {
         "passed": false,
         "requirements": [
           {
-            "requirement": "Send a rent reminder to Ana.",
+            "requirement": "Send Ana a rent reminder.",
             "satisfied": false,
-            "explanation": "The receipt identifies Ana and delivered status, but its body cancels a maintenance appointment rather than reminding her about rent. No rent-reminder send is evidenced.",
+            "explanation": "The only delivery receipt records a different message—a maintenance appointment cancellation—so it does not show that a rent reminder was sent.",
             "nodeKeys": []
           }
         ],
@@ -702,24 +552,11 @@
             "claim": "The rent reminder was sent to Ana.",
             "kind": "fact",
             "supported": false,
-            "citations": [
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/destination"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/body"
-              },
-              {
-                "sourceId": "evidence:0",
-                "pointer": "/status"
-              }
-            ]
+            "citations": []
           }
         ],
         "issues": [
-          "The delivered message concerns cancellation of a maintenance appointment, not rent. Evidence of a rent reminder sent to Ana is missing."
+          "No evidence shows the requested rent reminder was sent; the available receipt has unrelated content."
         ]
       }
     },
@@ -728,18 +565,17 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 10969,
+      "durationMs": 8279,
       "usage": {
-        "input_tokens": 10932,
-        "output_tokens": 225
+        "input_tokens": 18808,
+        "output_tokens": 316
       },
       "exitCode": 1,
       "problems": [
-        "Then send Ana a reminder.: No node sends a reminder to Ana after conversation inspection or checks the recipient and reminder content.",
+        "Send Ana a reminder.: No task sends a reminder to Ana.",
         "Plan coverage references missing task keys.",
-        "Verify delivery of the reminder.: No node verifies delivery using a delivery receipt or equivalent evidence; inspecting conversations alone does not verify delivery.",
-        "Add a reminder-send node dependent on read, with checks for Ana as recipient and appropriate reminder content.",
-        "Add a delivery-verification node dependent on sending, requiring evidence of delivery rather than merely acceptance, queuing, or sending."
+        "Verify delivery of the reminder.: No task verifies delivery after sending.",
+        "The plan omits the requested send and delivery-verification actions."
       ],
       "verdict": {
         "passed": false,
@@ -747,28 +583,27 @@
           {
             "requirement": "Inspect recent conversations.",
             "satisfied": true,
-            "explanation": "Node read covers inspecting recent conversations with a list_conversations evidence check.",
+            "explanation": "The proposal includes a read task checked against list_conversations.",
             "nodeKeys": [
               "read"
             ]
           },
           {
-            "requirement": "Then send Ana a reminder.",
+            "requirement": "Send Ana a reminder.",
             "satisfied": false,
-            "explanation": "No node sends a reminder to Ana after conversation inspection or checks the recipient and reminder content.",
+            "explanation": "No task sends a reminder to Ana.",
             "nodeKeys": []
           },
           {
             "requirement": "Verify delivery of the reminder.",
             "satisfied": false,
-            "explanation": "No node verifies delivery using a delivery receipt or equivalent evidence; inspecting conversations alone does not verify delivery.",
+            "explanation": "No task verifies delivery after sending.",
             "nodeKeys": []
           }
         ],
         "claims": [],
         "issues": [
-          "Add a reminder-send node dependent on read, with checks for Ana as recipient and appropriate reminder content.",
-          "Add a delivery-verification node dependent on sending, requiring evidence of delivery rather than merely acceptance, queuing, or sending."
+          "The plan omits the requested send and delivery-verification actions."
         ]
       }
     },
@@ -777,40 +612,41 @@
       "expectedPass": false,
       "actualPass": false,
       "matched": true,
-      "durationMs": 9509,
+      "durationMs": 11307,
       "usage": {
-        "input_tokens": 10971,
-        "output_tokens": 220
+        "input_tokens": 18896,
+        "output_tokens": 468
       },
       "exitCode": 1,
       "problems": [
-        "Verify delivery of the reminder to Ana.: Node send checks only accepted status, which does not establish delivery. No node checks a delivery receipt for the specific reminder and recipient.",
-        "Add a delivery-verification step dependent on send, checking a delivered receipt tied to Ana and the specific reminder; accepted status is insufficient."
+        "Send Ana a reminder.: A send task is present, but the plan does not specify how to identify Ana or determine the reminder content from the conversations.",
+        "Verify delivery of the reminder.: The send check accepts status \"accepted,\" which does not verify delivery; no separate delivery-verification check is planned.",
+        "Specify recipient resolution and reminder content based on the inspected conversations.",
+        "Require evidence of delivery, not merely acceptance, and include a check that verifies it."
       ],
       "verdict": {
         "passed": false,
         "requirements": [
           {
-            "requirement": "Inspect recent conversations before sending the reminder.",
+            "requirement": "Inspect recent conversations.",
             "satisfied": true,
-            "explanation": "Node read covers inspection using list_conversations, and send depends on read.",
+            "explanation": "The read task uses list_conversations, covering the requested inspection.",
             "nodeKeys": [
-              "read",
-              "send"
+              "read"
             ]
           },
           {
             "requirement": "Send Ana a reminder.",
-            "satisfied": true,
-            "explanation": "Node send explicitly targets Ana with a reminder and checks message acceptance.",
+            "satisfied": false,
+            "explanation": "A send task is present, but the plan does not specify how to identify Ana or determine the reminder content from the conversations.",
             "nodeKeys": [
               "send"
             ]
           },
           {
-            "requirement": "Verify delivery of the reminder to Ana.",
+            "requirement": "Verify delivery of the reminder.",
             "satisfied": false,
-            "explanation": "Node send checks only accepted status, which does not establish delivery. No node checks a delivery receipt for the specific reminder and recipient.",
+            "explanation": "The send check accepts status \"accepted,\" which does not verify delivery; no separate delivery-verification check is planned.",
             "nodeKeys": [
               "send"
             ]
@@ -818,60 +654,66 @@
         ],
         "claims": [],
         "issues": [
-          "Add a delivery-verification step dependent on send, checking a delivered receipt tied to Ana and the specific reminder; accepted status is insufficient."
+          "Specify recipient resolution and reminder content based on the inspected conversations.",
+          "Require evidence of delivery, not merely acceptance, and include a check that verifies it."
         ]
       }
     },
     {
       "id": "complete_plan",
       "expectedPass": true,
-      "actualPass": true,
-      "matched": true,
-      "durationMs": 12856,
+      "actualPass": false,
+      "matched": false,
+      "durationMs": 14040,
       "usage": {
-        "input_tokens": 10984,
-        "output_tokens": 249
+        "input_tokens": 74975,
+        "output_tokens": 429
       },
-      "exitCode": 0,
-      "problems": [],
+      "exitCode": 1,
+      "problems": [
+        "Send Ana a reminder.: The plan specifies no concrete send action or reminder content; a goal statement alone does not perform the requested send.",
+        "Verify delivery.: The check names a hard-coded conversation ID instead of tying verification to Ana’s conversation found during inspection and an actual reminder delivery receipt.",
+        "Plan lacks a concrete message-sending action and does not establish Ana’s conversation ID from the inspection task."
+      ],
       "verdict": {
-        "passed": true,
+        "passed": false,
         "requirements": [
           {
-            "requirement": "Inspect recent conversations before sending the reminder.",
+            "requirement": "Inspect recent conversations.",
             "satisfied": true,
-            "explanation": "The read node inspects recent conversations using a list_conversations evidence check; send depends on read.",
+            "explanation": "The plan includes a conversation-listing evidence task.",
             "nodeKeys": [
-              "read",
-              "send"
+              "read"
             ]
           },
           {
             "requirement": "Send Ana a reminder.",
-            "satisfied": true,
-            "explanation": "The send node explicitly requires sending Ana a reminder in her conversation and checks the message operation.",
+            "satisfied": false,
+            "explanation": "The plan specifies no concrete send action or reminder content; a goal statement alone does not perform the requested send.",
             "nodeKeys": [
               "send"
             ]
           },
           {
             "requirement": "Verify delivery.",
-            "satisfied": true,
-            "explanation": "The send node requires a delivery check with status delivered in ana-thread, rather than merely accepted or sent.",
+            "satisfied": false,
+            "explanation": "The check names a hard-coded conversation ID instead of tying verification to Ana’s conversation found during inspection and an actual reminder delivery receipt.",
             "nodeKeys": [
               "send"
             ]
           }
         ],
         "claims": [],
-        "issues": []
+        "issues": [
+          "Plan lacks a concrete message-sending action and does not establish Ana’s conversation ID from the inspection task."
+        ]
       }
     }
   ],
-  "model": "gpt-6-astra",
+  "model": "gpt-6-luna",
   "metrics": {
     "cases": 16,
     "falseApprovals": 0,
-    "falseRejections": 0
+    "falseRejections": 3
   }
 }

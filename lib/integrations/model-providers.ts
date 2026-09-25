@@ -63,10 +63,9 @@ const SUBSCRIPTION_MODELS: Record<string, string[]> = {
   // someone unable to pick anything at all; a labelled fallback lets them
   // proceed while still saying the list could not be confirmed.
   //
-  // The current flagship family per OpenAI's model docs. `gpt-5.6` is an
-  // alias for `gpt-5.6-sol` and is listed separately because a user who
-  // knows the alias should be able to find it by name.
-  chatgpt: ["gpt-5.6-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"],
+  // Live discovery wins. These current models are only the labelled fallback
+  // when the local/hosted catalog cannot be reached.
+  chatgpt: ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
 };
 
 /** Pinned in the query string the way the Codex CLI pins it; the backend gates its response on it. */
@@ -181,7 +180,7 @@ export async function listModels(provider: string, apiKey: string, accountId?: s
 
 
 /**
- * Reasoning effort levels the flagship GPT-5.6 models accept.
+ * Reasoning effort levels the current OpenAI reasoning models accept.
  *
  * Deliberately separate from the model list: effort is a per-request
  * parameter, not a model, and folding the two together would produce a picker
@@ -192,7 +191,8 @@ export type ReasoningEffort = (typeof REASONING_EFFORT_LEVELS)[number];
 
 /** Whether a model id accepts a reasoning-effort setting. */
 export function supportsReasoningEffort(model: string): boolean {
-  return /^gpt-5\.6(-(sol|terra|luna))?$/.test(model.trim());
+  const value = model.trim();
+  return /^gpt-6-(astra|sol|luna)$/.test(value) || /^gpt-5\.6(-(sol|terra|luna))?$/.test(value);
 }
 
 /**
@@ -206,8 +206,8 @@ export function supportsReasoningEffort(model: string): boolean {
  * a live catalog, discovery still wins — this is the floor, not the ceiling.
  */
 export const KNOWN_MODELS: Record<string, string[]> = {
-  openai: ["gpt-5.6-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"],
-  chatgpt: ["gpt-5.6-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"],
+  openai: ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+  chatgpt: ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
   anthropic: ["claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"],
   claude: ["claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"],
   google_gemini: ["gemini-2.5-pro", "gemini-2.5-flash"],

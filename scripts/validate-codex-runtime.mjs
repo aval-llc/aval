@@ -74,7 +74,13 @@ try {
     independentAnswerReview: report.checks.some(c => c.task_id === root.id && c.exit_code === 0 && c.output_json.semantic?.exitCode === 0),
   };
   report.status = Object.values(report.assertions).every(Boolean) ? 'passed' : 'failed';
-} catch (error) { report.status = 'blocked_provider'; report.error = error.message; }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const providerFailure = Boolean(error?.diagnostics)
+    || /sign in to codex|requested codex model|codex app server|codex inference/i.test(message);
+  report.status = providerFailure ? 'blocked_provider' : 'blocked_harness';
+  report.error = message;
+}
 finally { await client?.close(); sqlite?.close(); save(); }
 console.log(JSON.stringify({ status: report.status, assertions: report.assertions, error: report.error }));
 if (report.status !== 'passed') process.exitCode = 2;
