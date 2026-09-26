@@ -27,6 +27,7 @@ import { LEGACY_DELEGATION_RULES as DELEGATION_RULES } from "../delegation-polic
 import { getTool } from "../registry.ts";
 import { PERSONAS, type PersonaId } from "../../ask-aval/persona-catalog.ts";
 import { toolsForCapabilities, untooledCapabilities } from "./capabilities.ts";
+import { BRIEFING_STANDING } from "./review.ts";
 import { AVAL_ONE, LEADS, leadForDomain, leadRuntimeId } from "./domains.ts";
 import type { ActorKind, DomainId, LeadDefinition, Maturity, SpecialistDefinition } from "./types.ts";
 import { ruleApplies, type OperatingProfile } from "../../organizations/operating-profile.ts";
@@ -158,12 +159,13 @@ function specialistInstructions(specialist: SpecialistDefinition, lead: LeadDefi
     specialist.approvals.length ? `Prepare these for a person's approval rather than doing them: ${list(specialist.approvals)}.` : "",
     lead.domainInstructions,
     "If the work belongs to a different specialist, say which one and stop rather than doing it yourself.",
+    BRIEFING_STANDING,
   ].filter(Boolean).join(" ");
 }
 
 function leadInstructions(lead: LeadDefinition, legacy: string): string {
   const team = specialistsForDomain(lead.domain).map((specialist) => `${specialist.id} (${specialist.name})`).join(", ");
-  return `${legacy}\n\nYou are the ${lead.name}: ${lead.summary} ${lead.domainInstructions} Never: ${list(lead.domainForbidden)}. You coordinate these Aval Specialists and may assign work to them by id: ${team}.`;
+  return `${legacy}\n\nYou are the ${lead.name}: ${lead.summary} ${lead.domainInstructions} Never: ${list(lead.domainForbidden)}. You coordinate these Aval Specialists and may assign work to them by id: ${team}. ${BRIEFING_STANDING}`;
 }
 
 const ACTORS = new Map<string, BuiltInActor>();

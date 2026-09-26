@@ -237,3 +237,16 @@ test("Ask Aval opens durable Work only when a turn asks for specialist work", as
   assert.equal(orchestrationDecision("Open a work order for the broken heater", broker).routing.leads.some((lead) => lead.id === "maintenance"), false,
     "the workspace's business still decides which Leads the Work may reach");
 });
+
+test("the catalogue is guidance, never authority, and regulated text is flagged for review", async () => {
+  const { BRIEFING_STANDING, FIELD_KIND, reviewSpecialist } = await import("../lib/agents/organization/review.ts");
+  for (const actor of builtInActors()) {
+    if (actor.kind === "aval_one" || (actor.kind === "lead" && PERSONAS[actor.id as PersonaId])) continue;
+    assert.ok(actor.instructions.includes(BRIEFING_STANDING), `${actor.id} is told its briefing is not policy`);
+  }
+  assert.deepEqual(new Set(Object.values(FIELD_KIND)), new Set(["routing", "capability", "guidance", "legal"]));
+  for (const specialist of specialistsForDomain("screening")) {
+    assert.ok(reviewSpecialist(specialist).legalReview.length > 0, `${specialist.id} touches screening law and must be flagged`);
+  }
+  for (const specialist of SPECIALISTS) assert.equal(reviewSpecialist(specialist).domainReview, true, "every model-drafted definition needs domain review");
+});
