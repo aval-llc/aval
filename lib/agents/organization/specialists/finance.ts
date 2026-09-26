@@ -259,7 +259,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["month end", "close", "period close", "close checklist", "lock period", "close status"],
     inputs: ["workspace close checklist", "status of reconciliations and reviews", "open finance approvals", "period lock state"],
     outputs: ["close status by task with owner and blocker", "items blocking the period lock"],
-    capabilities: ["accounting.read", "gl.read", "sop.read", "task.route", "report.prepare"],
+    capabilities: ["accounting.read", "gl.read", "sop.read", "report.prepare"],
     execution: "child_run",
     completion: {
       doneWhen: "Every checklist task is complete with its evidence or listed as a blocker with an owner, and the status is with the person who locks the period.",
@@ -297,7 +297,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["anomaly", "duplicate payment", "unusual expense", "fraud check", "outlier", "changed bank details"],
     inputs: ["GL, payable and receivable history", "vendor master changes", "anomaly rules and thresholds"],
     outputs: ["ranked flags naming the rule matched and the transactions cited", "routing of each flag to a reviewer"],
-    capabilities: ["gl.read", "invoice.read", "payment.read", "vendor.read", "analytics.read", "task.route"],
+    capabilities: ["gl.read", "invoice.read", "payment.read", "vendor.read", "analytics.read"],
     execution: "deterministic",
     completion: {
       doneWhen: "Each flag names the rule or threshold matched and the transactions behind it, and is assigned to a named reviewer.",

@@ -11,7 +11,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["new owner", "onboard owner", "new client", "management agreement", "owner setup", "take over management"],
     inputs: ["signed management agreement", "owner and entity details", "owner bank and tax information", "property list"],
     outputs: ["owner record with fee, reserve and approval terms from the agreement", "onboarding checklist with missing items", "portal access request"],
-    capabilities: ["owner.read", "document.read", "document.extract", "property.setup.prepare", "task.route"],
+    capabilities: ["owner.read", "document.read", "document.extract", "property.setup.prepare"],
     execution: "child_run",
     completion: {
       doneWhen: "Every checklist item is complete or listed as missing with an owner, and the fee, reserve and approval terms in the record match the signed agreement.",
@@ -30,7 +30,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["owner portal", "can't log in", "where is my statement", "owner documents", "portal access", "download report"],
     inputs: ["owner's question", "portal help content", "the owner's portal access record"],
     outputs: ["answer or steps", "access issue routed to the person who manages access"],
-    capabilities: ["owner.read", "document.read", "knowledge.read", "communication.read", "task.route"],
+    capabilities: ["owner.read", "document.read", "knowledge.read", "communication.read"],
     execution: "expertise",
     completion: {
       doneWhen: "The owner's question is answered from their own records, or the access issue is assigned to a named person.",
@@ -106,7 +106,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["reserve", "reserve balance", "below reserve", "operating reserve", "low balance"],
     inputs: ["owner balances", "agreed reserve per owner or property", "scheduled payables"],
     outputs: ["reserve status per owner", "dated alert with projected shortfall routed to the account manager"],
-    capabilities: ["owner.read", "ledger.read", "invoice.read", "bank.read", "task.route"],
+    capabilities: ["owner.read", "ledger.read", "invoice.read", "bank.read"],
     execution: "deterministic",
     completion: {
       doneWhen: "Every owner's reserve status is computed for the day and each projected shortfall has an alert assigned to the account manager.",
@@ -125,7 +125,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["owner approval", "needs owner sign-off", "above threshold", "owner consent", "approve repair", "owner decision"],
     inputs: ["item requiring approval with cost and options", "owner approval thresholds from the agreement", "deadline and urgency", "authorized approvers on the owner record"],
     outputs: ["approval request sent to the owner", "recorded decision with approver and time", "reminders until decided"],
-    capabilities: ["owner.read", "document.read", "communication.read", "communication.send", "task.route"],
+    capabilities: ["owner.read", "document.read", "communication.read", "communication.send"],
     execution: "child_run",
     completion: {
       doneWhen: "The owner's approval or decline is recorded with the approver's identity and time and handed back to the work that asked for it.",
@@ -220,7 +220,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["client retention", "owner unhappy", "service review", "at-risk owner", "cancellation notice", "account review"],
     inputs: ["owner communications and response times", "statement and distribution timeliness", "open issues and complaints", "agreement term and renewal date"],
     outputs: ["service review with measured figures", "retention risk flag with reasons", "follow-up plan for the account manager"],
-    capabilities: ["owner.read", "communication.read", "analytics.read", "report.prepare", "task.route"],
+    capabilities: ["owner.read", "communication.read", "analytics.read", "report.prepare"],
     execution: "expertise",
     completion: {
       doneWhen: "The review states measured service figures for the period, and each at-risk account has a follow-up assigned to a named manager.",

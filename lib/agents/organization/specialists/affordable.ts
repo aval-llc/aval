@@ -43,7 +43,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["recertification due", "annual recert", "recert notice", "anniversary date", "certification expiring"],
     inputs: ["household certification history", "program and its notice schedule version", "lease dates"],
     outputs: ["next recertification date per household", "dated notice schedule", "queued outreach tasks"],
-    capabilities: ["affordable.read", "lease.read", "resident.read", "task.route"],
+    capabilities: ["affordable.read", "lease.read", "resident.read"],
     execution: "deterministic",
     completion: { doneWhen: "Each household has its next recertification date and every program-required notice dated, and each notice now due has been prepared and handed to a person.", notDoneWhen: "The due date is on the calendar, but a required advance notice was not issued on time." },
     forbidden: ["use one program's notice intervals for every household", "move a recertification date to fit staff capacity"],

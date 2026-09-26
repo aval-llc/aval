@@ -92,7 +92,8 @@ const byCapability = {};
 for (const lead of LEADS) {
   for (const specialist of specialistsForDomain(lead.domain)) {
     const contract = specialistContract(specialist);
-    if (contract.readiness !== "incomplete") continue;
+    // Accepts the 7d529fb value and the current one, so a run against either tree classifies the same set.
+    if (!["incomplete", "INCOMPLETE"].includes(contract.readiness)) continue;
     const pairs = contract.missing.map((capability) => {
       const override = OVERRIDES[specialist.id]?.[capability];
       const [cls, why, action] = override ?? BY_CAPABILITY[capability] ?? [];

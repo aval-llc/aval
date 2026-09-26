@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SPECIALISTS, builtInActor, specialistById, leadForDomain } from "../lib/agents/organization/index.ts";
+import { SPECIALISTS, builtInActor, specialistById, leadForDomain, leadRuntimeId } from "../lib/agents/organization/index.ts";
 import { specialistContract, isAct, approvalClassOf } from "../lib/agents/organization/contract.ts";
 import { routeObjective } from "../lib/agents/organization/routing.ts";
 import { CAPABILITY_TOOLS, CANONICAL_CAPABILITIES, CONSOLIDATED_CAPABILITIES } from "../lib/agents/organization/capabilities.ts";
@@ -15,6 +15,8 @@ import { getTool } from "../lib/agents/registry.ts";
  * posture. One loop over all 266, so a Specialist added tomorrow is held to the
  * same cases the day it lands — and a renamed generic wrapper fails here.
  */
+
+const leadRuntimeIdFor = (domain: Parameters<typeof leadForDomain>[0]) => leadRuntimeId(leadForDomain(domain));
 
 const objectiveFor = (id: string) => {
   const specialist = specialistById(id)!;
@@ -60,18 +62,40 @@ for (const specialist of SPECIALISTS) {
     assert.equal(contract.fallback.sibling, specialist.notThis.specialist);
     assert.ok(builtInActor(contract.fallback.lead), "falls back to a real Lead");
     assert.equal(builtInActor(contract.fallback.lead)!.domain, leadForDomain(specialist.domain).domain);
-    assert.ok(["complete", "analysis_only", "incomplete"].includes(contract.readiness));
+    assert.ok(["EXECUTION_READY", "ANALYSIS_ONLY_READY", "INCOMPLETE"].includes(contract.readiness));
+
+    // Analysis-only is a contract the runtime keeps, not a label: nothing the
+    // actor is offered can change a record, send or move money.
+    if (contract.readiness === "ANALYSIS_ONLY_READY") {
+      const analysis = contract.analysis!;
+      assert.ok(analysis, "carries its analysis contract");
+      assert.ok(actor.toolNames, "a Specialist's toolset is always an explicit list");
+      const acting = actor.toolNames.filter((name) => getTool(name)?.mutates && getTool(name)?.requiredPermission !== "tasks.manage");
+      assert.deepEqual(acting, [], "an analysis-only Specialist is offered no mutating tool");
+      for (const tool of analysis.evidence.tools) assert.ok(actor.toolNames.includes(tool), `evidence tool ${tool} is offered`);
+      assert.ok(analysis.returns.length > 0, "names the structured analysis it returns");
+      assert.equal(analysis.consumer.lead, leadRuntimeIdFor(specialist.domain), "its Lead consumes the output");
+      assert.ok(analysis.forbiddenToExecute.length > 0);
+      assert.equal(analysis.completion, specialist.completion);
+    } else {
+      assert.equal(contract.analysis, undefined, "only analysis-only Specialists carry an analysis contract");
+    }
+    if (contract.readiness === "EXECUTION_READY") {
+      for (const capability of contract.executes) assert.ok(contract.approvalClasses.includes(approvalClassOf(capability)!), `${capability} carries its approval class`);
+    }
   });
 }
 
 test("readiness is reported honestly across the catalogue", () => {
-  const counts = { complete: 0, analysis_only: 0, incomplete: 0 };
+  const counts = { EXECUTION_READY: 0, ANALYSIS_ONLY_READY: 0, INCOMPLETE: 0 };
   for (const specialist of SPECIALISTS) counts[specialistContract(specialist).readiness]++;
-  assert.equal(counts.complete + counts.analysis_only + counts.incomplete, 266);
-  // An incomplete specialist names exactly what it lacks.
+  assert.equal(counts.EXECUTION_READY + counts.ANALYSIS_ONLY_READY + counts.INCOMPLETE, 266);
   for (const specialist of SPECIALISTS) {
     const contract = specialistContract(specialist);
-    assert.equal(contract.readiness === "incomplete", contract.missing.length > 0, specialist.id);
+    // An incomplete specialist names exactly what it lacks.
+    assert.equal(contract.readiness === "INCOMPLETE", contract.missing.length > 0, specialist.id);
+    // Execution-ready means it can act; a declared-but-unwired tool does not count.
+    for (const capability of contract.executes) assert.ok((CAPABILITY_TOOLS[capability] ?? []).some((name) => getTool(name) && !getTool(name)!.unimplemented), `${specialist.id}: ${capability}`);
   }
 });
 

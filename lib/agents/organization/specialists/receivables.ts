@@ -87,7 +87,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["delinquency", "delinquent", "past due", "arrears", "grace period", "aging"],
     inputs: ["resident ledgers", "workspace delinquency policy and grace period", "open payment plans", "receipts not yet posted"],
     outputs: ["delinquency stage per account with the policy rule matched", "opened delinquency work with an owner"],
-    capabilities: ["delinquency.read", "ledger.read", "payment.read", "task.route"],
+    capabilities: ["delinquency.read", "ledger.read", "payment.read"],
     execution: "deterministic",
     completion: {
       doneWhen: "Every account past the grace period has a policy stage recorded and, where the policy requires it, open delinquency work with an owner.",

@@ -15,7 +15,9 @@
  *               housing, access), cross-checked against the registry;
  *   fallback    the nearest sibling for work that belongs next door, and the
  *               Specialist's Lead for anything else;
- *   status      complete, analysis-only, or incomplete — see `readiness`.
+ *   readiness   execution-ready, analysis-only-ready, or incomplete — see
+ *               `Readiness`; an analysis-only Specialist carries its
+ *               `AnalysisContract`.
  *
  * Tools are never listed here. They are resolved at run time from the
  * capabilities (capabilities.ts), then narrowed by every other layer: the
@@ -26,6 +28,7 @@
 
 import { CAPABILITY_TOOLS, type CanonicalCapability } from "./capabilities.ts";
 import { leadForDomain, leadRuntimeId } from "./domains.ts";
+import { getTool } from "../registry.ts";
 import type { DomainId, SpecialistDefinition } from "./types.ts";
 
 /** The entities a domain is about. A capability on one of them is core to that domain's specialists. */
@@ -55,7 +58,7 @@ const DOMAIN_CORE: Record<DomainId, readonly string[]> = {
 };
 
 /** Verbs that change something, as opposed to reading it or preparing it for a person. */
-const ACTS = new Set(["create", "update", "close", "send", "call", "schedule", "dispatch", "publish", "post", "execute", "request", "intake"]);
+const ACTS = new Set(["create", "update", "close", "send", "call", "schedule", "dispatch", "publish", "post", "execute", "request", "intake", "route"]);
 /** Verbs whose output is a proposal handed to a person, which needs no executor of its own. */
 const PROPOSES = new Set(["prepare", "review", "recommend", "draft"]);
 
@@ -70,7 +73,7 @@ export function isAct(capability: string): boolean { return ACTS.has(verb(capabi
 export function approvalClassOf(capability: string): ApprovalClass | null {
   const ns = namespace(capability);
   if (capability === "owner.distribution.prepare" || capability === "owner.contribution.prepare") return "money";
-  if (["payment", "payment_plan", "charge", "journal_entry", "invoice", "bill", "collections", "deposit"].includes(ns) && (isAct(capability) || PROPOSES.has(verb(capability)))) return "money";
+  if (["payment", "payment_plan", "charge", "journal_entry", "invoice", "bill", "purchase_order", "collections", "deposit"].includes(ns) && (isAct(capability) || PROPOSES.has(verb(capability)))) return "money";
   if (capability === "communication.send" || capability === "communication.call" || capability === "resident.message.send" || capability === "prospect.message.prepare") return "external_communication";
   if (["notice.prepare", "lease.draft", "lease.execute", "violation.prepare"].includes(capability)) return "legal_notice";
   if (["screening", "adverse_action", "accommodation", "fair_housing"].includes(ns)) return "fair_housing";
@@ -79,7 +82,50 @@ export function approvalClassOf(capability: string): ApprovalClass | null {
   return null;
 }
 
-export type Readiness = "complete" | "analysis_only" | "incomplete";
+/**
+ * What a Specialist can be trusted to do today, from what it can execute
+ * rather than from what it lacks.
+ *
+ * `EXECUTION_READY`     every required capability is met, and at least one act
+ *                       has an implemented tool: it changes something, under
+ *                       policy and approval.
+ * `ANALYSIS_ONLY_READY` every required capability is met and it executes
+ *                       nothing: its product is evidence-backed analysis or a
+ *                       proposal a person acts on. Deliberate, not unfinished
+ *                       — see `AnalysisContract`.
+ * `INCOMPLETE`          a required read or act has no implemented tool yet;
+ *                       `missing` names each.
+ *
+ * Proposals (prepare, review, recommend, draft) never need an executor: their
+ * output is handed to a person. An act counts only when its tool is
+ * implemented; a declared-but-unwired tool (`unimplemented` in the registry)
+ * executes nothing.
+ */
+export type Readiness = "EXECUTION_READY" | "ANALYSIS_ONLY_READY" | "INCOMPLETE";
+
+/**
+ * The completion contract of an analysis-only Specialist: what it may read,
+ * what it returns, who consumes it, and what it must never execute. Derived,
+ * like the rest of the contract, so "no tool" is a stated design and never
+ * confused with "broken".
+ */
+export interface AnalysisContract {
+  /** Reads it may use as evidence, and the tools that deliver them. */
+  evidence: { capabilities: CanonicalCapability[]; tools: string[] };
+  /** Declared context it cannot read yet; its analysis must say so rather than guess. */
+  unavailableEvidence: CanonicalCapability[];
+  /** The structured analysis it returns. */
+  returns: readonly string[];
+  /**
+   * Who consumes it: always the Lead that assigned the work, which returns it
+   * to Aval One. A proposal in an approval class goes on to an authorized
+   * person of that class; the Specialist never acts on it.
+   */
+  consumer: { lead: string; approvals: ApprovalClass[] };
+  /** Everything it must never execute. */
+  forbiddenToExecute: string[];
+  completion: SpecialistDefinition["completion"];
+}
 
 export interface SpecialistContract {
   id: string;
@@ -90,14 +136,19 @@ export interface SpecialistContract {
   fallback: { sibling: string; lead: string };
   /** Required capabilities with no executor today. */
   missing: CanonicalCapability[];
-  /**
-   * `complete` — every required capability has a tool.
-   * `analysis_only` — nothing required is missing except proposals a person
-   *   acts on (prepare, review, recommend, draft): the Specialist's product is
-   *   analysis or a draft, which needs no executor of its own.
-   * `incomplete` — a required read or act has no tool yet.
-   */
+  /** Acts it can actually execute: an act capability with an implemented tool. */
+  executes: CanonicalCapability[];
   readiness: Readiness;
+  /** Present exactly when `readiness` is ANALYSIS_ONLY_READY. */
+  analysis?: AnalysisContract;
+}
+
+/** The implemented tools a capability resolves to. A declared-but-unwired tool delivers nothing. */
+function implementedToolsFor(capability: CanonicalCapability): string[] {
+  return (CAPABILITY_TOOLS[capability] ?? []).filter((name) => {
+    const tool = getTool(name);
+    return tool !== undefined && !tool.unimplemented;
+  });
 }
 
 export function specialistContract(specialist: SpecialistDefinition): SpecialistContract {
@@ -109,14 +160,36 @@ export function specialistContract(specialist: SpecialistDefinition): Specialist
   const context = new Set<string>(specialist.contextOnly ?? []);
   const required = specialist.capabilities.filter((capability) => !context.has(capability) && (!anyCore || inCore(capability) || isAct(capability)));
   const optional = specialist.capabilities.filter((capability) => !required.includes(capability));
-  const untooled = required.filter((capability) => !CAPABILITY_TOOLS[capability]?.length);
-  const missing = untooled.filter((capability) => !PROPOSES.has(verb(capability)));
-  const readiness: Readiness = untooled.length === 0 ? "complete" : missing.length === 0 ? "analysis_only" : "incomplete";
+  const proposal = (capability: string) => PROPOSES.has(verb(capability));
+  const missing = required.filter((capability) => !proposal(capability) && implementedToolsFor(capability).length === 0);
+  const executes = specialist.capabilities.filter((capability) => isAct(capability) && implementedToolsFor(capability).length > 0);
   const approvalClasses = [...new Set(specialist.capabilities.map(approvalClassOf).filter((value): value is ApprovalClass => value !== null))];
+  const lead = leadForDomain(specialist.domain);
+  const readiness: Readiness = missing.length > 0 ? "INCOMPLETE" : executes.length > 0 ? "EXECUTION_READY" : "ANALYSIS_ONLY_READY";
+
+  let analysis: AnalysisContract | undefined;
+  if (readiness === "ANALYSIS_ONLY_READY") {
+    const reads = specialist.capabilities.filter((capability) => !isAct(capability) && !proposal(capability));
+    const readable = reads.filter((capability) => implementedToolsFor(capability).length > 0);
+    analysis = {
+      evidence: { capabilities: readable, tools: [...new Set(readable.flatMap(implementedToolsFor))] },
+      unavailableEvidence: reads.filter((capability) => !readable.includes(capability)),
+      returns: specialist.outputs,
+      consumer: { lead: leadRuntimeId(lead), approvals: approvalClasses },
+      forbiddenToExecute: [
+        "any tool that changes a record, sends a message or moves money",
+        ...specialist.capabilities.filter(proposal).map((capability) => `acting on ${capability} (prepare it for a person)`),
+        ...specialist.capabilities.filter((capability) => isAct(capability)).map((capability) => `${capability} (declared, not executable)`),
+        ...specialist.forbidden,
+        ...lead.domainForbidden,
+      ],
+      completion: specialist.completion,
+    };
+  }
   return {
     id: specialist.id,
     required, optional, approvalClasses,
-    fallback: { sibling: specialist.notThis.specialist, lead: leadRuntimeId(leadForDomain(specialist.domain)) },
-    missing, readiness,
+    fallback: { sibling: specialist.notThis.specialist, lead: leadRuntimeId(lead) },
+    missing, executes, readiness, analysis,
   };
 }

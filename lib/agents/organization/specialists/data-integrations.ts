@@ -107,7 +107,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["new message", "inbound email", "sms received", "call transcript", "portal message"],
     inputs: ["raw message and channel metadata", "attachments", "person and property directory"],
     outputs: ["canonical message record with provenance and trust class", "links or an unlinked flag", "Work created for each claim"],
-    capabilities: ["communication.read", "communication.channels.read", "provenance.read", "task.route"],
+    capabilities: ["communication.read", "communication.channels.read", "provenance.read"],
     execution: "expertise",
     completion: { doneWhen: "Each message has a canonical record, is linked or marked unlinked, and every claim in it has become Work.", notDoneWhen: "The message was stored, but a claim in it (a payment made, a repair done) changed a record directly or created no Work." },
     forbidden: ["update a ledger, work order or lease from a message's claim", "link a message to a person on a display name alone"],

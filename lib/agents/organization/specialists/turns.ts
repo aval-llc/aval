@@ -123,7 +123,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["turn status", "when will it be ready", "days vacant", "turn delayed", "ready date"],
     inputs: ["turn plan", "work order status", "target days vacant"],
     outputs: ["projected ready date per turn", "slipping tasks with cause and owner", "ready date shared with leasing"],
-    capabilities: ["turn.read", "work_order.read", "report.prepare", "task.route"],
+    capabilities: ["turn.read", "work_order.read", "report.prepare"],
     execution: "deterministic",
     completion: { doneWhen: "Every active turn has a current projected ready date and each slipping task has a cause and an owner.", notDoneWhen: "A status report was produced while late tasks are unassigned." },
     forbidden: ["give leasing a ready date the dependency plan does not support", "reset a target date to hide slippage"],
