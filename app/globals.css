@@ -1978,3 +1978,20 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 /* Not an error state: the connection worked, and the work still goes on. */
 .pms-session-unsupported { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: 11px; }
 .pms-session-unsupported > svg { flex-shrink: 0; margin-top: 1px; color: var(--quiet); }
+
+/* Utilities uses the existing panel palette with full-size review controls. */
+.utility-workspace { min-width: 0; }
+.utility-workspace label { display: flex; flex-direction: column; gap: 6px; margin-block: 12px; font-size: 14px; }
+.utility-workspace .aval-draft-panel { gap: 10px; padding: 16px; }
+.utility-workspace input, .utility-workspace select, .utility-workspace textarea {
+  box-sizing: border-box; width: 100%; max-width: 100%; min-height: 38px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  color: var(--ink); background: var(--surface-soft); font-size: 14px; font-family: inherit;
+}
+.utility-workspace table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.utility-workspace th, .utility-workspace td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.utility-workspace pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.utility-workspace details { margin-block: 10px; }
+.utility-workspace summary { cursor: pointer; }
+.utility-workspace article { border-top: 1px solid var(--line); padding-top: 12px; }
+.utility-workspace [role="alert"] { color: var(--ink); border-left: 3px solid currentColor; padding: 12px; }

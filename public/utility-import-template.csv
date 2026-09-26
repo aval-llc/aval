@@ -1,0 +1,2 @@
+sourceSystem,externalId,meterId,periodStart,periodEnd,usageAmount,costCents,currency,unitOfMeasure,readingKind,tariffCode,subtotalCents,taxCents
+reviewed-export/COMPANY/ACCOUNT,000001,REPLACE_WITH_METER_ID,2026-01-01,2026-02-01,100,11600,MXN,m3,actual,,10000,1600

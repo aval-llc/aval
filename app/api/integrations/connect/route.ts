@@ -10,6 +10,7 @@ import { authorizationUrl, safeReturnTo } from "@/lib/integrations/oauth";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { providerIsReadOnly } from "@/lib/pms/derive.ts";
+import { byDesignConnectionConfig } from "@/lib/integrations/sap-bydesign/odata.ts";
 
 const bindings = () => env as unknown as Record<string, string | undefined>;
 
@@ -56,6 +57,10 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
   if (typeof body.credentials !== "object" || Array.isArray(body.credentials) || Object.entries(body.credentials).length > 20 || Object.values(body.credentials).some((value) => typeof value !== "string" || value.length > 16000)) return Response.json({ error: "Invalid credentials" }, { status: 400 });
   const missing = (provider.credentialFields ?? []).filter((field) => !body.credentials?.[field.key]?.trim()).map((field) => field.label);
   if (missing.length) return Response.json({ error: "Missing required credentials", missing }, { status: 400 });
+  if (provider.id === "sap_bydesign") {
+    try { byDesignConnectionConfig(body.credentials); }
+    catch { return Response.json({ error: "Check the SAP address, enabled collection path, company and unique record field names with your SAP administrator." }, { status: 400 }); }
+  }
   const encryptionKey = bindings().INTEGRATION_TOKEN_ENCRYPTION_KEY;
   if (!encryptionKey) return Response.json({ error: "Credential encryption is not configured" }, { status: 409 });
   const encrypted = await encryptSecret(JSON.stringify(body.credentials), encryptionKey);

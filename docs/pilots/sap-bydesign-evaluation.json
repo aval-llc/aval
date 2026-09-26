@@ -1,0 +1,93 @@
+{
+  "evaluatedAt": "2026-09-26T01:44:17.656439+00:00",
+  "product": "SAP Business ByDesign",
+  "branch": "khas",
+  "environment": "local PostgreSQL 17, Node 24.19.0, synthetic loopback HTTP",
+  "liveSapValidated": false,
+  "gentorDataValidated": false,
+  "realModelEvaluated": false,
+  "productionChanged": false,
+  "results": {
+    "bydesignContract": {
+      "passed": 15,
+      "failed": 0
+    },
+    "bydesignPostgresWorkflow": {
+      "passed": 4,
+      "failed": 0
+    },
+    "fullPostgres": {
+      "passed": 239,
+      "failed": 0,
+      "skipped": 0
+    },
+    "fullUnit": {
+      "passed": 801,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "Existing Apple-silicon executable check on Windows"
+    },
+    "migration": {
+      "passed": 11,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "localization": "passed: 2362 matching keys",
+    "lint": {
+      "errors": 0,
+      "warnings": 5,
+      "note": "Existing image warnings"
+    },
+    "build": "passed"
+  },
+  "rehearsal": {
+    "evaluatedAt": "2026-09-26T01:39:35.959Z",
+    "mode": "synthetic_bydesign_odata_v2",
+    "liveSapValidated": false,
+    "sourceSchema": "invented fixture, not Gentor or a standard SAP utility service",
+    "sourceRows": 2,
+    "pages": 3,
+    "expected": {
+      "dailyUsageVariancePct": 50,
+      "totalCostCents": 29000,
+      "totalUsageM3": 730
+    },
+    "actual": {
+      "dailyUsageVariancePct": 50,
+      "totalCostCents": 29000,
+      "totalUsageM3": 730
+    },
+    "passed": true,
+    "providerCalls": 0,
+    "modelCalls": 0,
+    "externalWrites": 0,
+    "costUsd": 0,
+    "nextGate": "Real ByDesign tenant, enabled service metadata and customer-approved mappings required"
+  },
+  "agentWorkflow": {
+    "publicTaskRoute": true,
+    "childUtilityRead": true,
+    "semanticReview": "scripted",
+    "cronFinalization": "COMPLETED",
+    "requiresBrowserPolling": false,
+    "internalFollowUpRetry": "one planned task",
+    "externalSapWrites": 0
+  },
+  "newTestSpendUsd": 0,
+  "limitations": [
+    "No licensed ByDesign tenant or real SAP login was used.",
+    "Fixture fields are invented and require replacement with customer-approved metadata mappings.",
+    "Scripted models verify orchestration, not real model judgment.",
+    "Ordered paging cannot guarantee a consistent snapshot during source changes.",
+    "SOAP, OAuth provisioning, live UI connection and automatic sync are not implemented."
+  ],
+  "normalizedSourceSha256": {
+    "lib/integrations/sap-bydesign/odata.ts": "720b05922d94adcc9a393e467310c18b1b0ddae0cc2092d21726145393fcbedb",
+    "lib/integrations/sap-bydesign/utility-mapping.ts": "d31a58e1131b957109a386cae15e560472a1a87e9771fa0e1b63575de0862005",
+    "lib/integrations/sap-bydesign/prepare-import.ts": "5d977f0a7d69245f19c070ebecc36fc8c737c6a64a74602a2fedd07443f7a6dc",
+    "tests/fixtures/sap-bydesign/synthetic.ts": "741d776ab4ef9c958a59f10edd7cc0dede03ee3576d661945b3a2782b45fdff6",
+    "tests/fixtures/sap-bydesign/simulator.mjs": "482ef933005725015f738061ccfb099ac42a228931dd79918d496a617c3eca1e",
+    "tests/sap-bydesign.test.ts": "2b895d5a596a34f8187fe75b54f4ece48d6b1867c81f1423f43c1ae94aa1460e",
+    "tests/postgres/sap-bydesign-cases.mjs": "1c95c437efba1621882504ea60c738623f3958e4746d3cedc90abfa4a1f8f02d"
+  }
+}

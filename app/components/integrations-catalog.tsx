@@ -164,7 +164,7 @@ export function IntegrationsCatalog({
                 <BrandMark provider={p.id} />
                 <div className="catalog-row-copy">
                   <strong>{p.title}</strong>
-                  <small>{p.description}</small>
+                  <small>{p.id === "sap_bydesign" ? t("sapDescription") : p.description}</small>
                 </div>
                 <button
                   className="catalog-row-action"

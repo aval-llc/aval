@@ -56,11 +56,11 @@ export const PERSONA_IDS = Object.keys(PERSONA_PRESETS) as PersonaId[];
  */
 export const PERSONA_TOOL_ACCESS: Record<PersonaId, string[] | null> = {
   general: null,
-  financial: ["get_portfolio_metrics", "get_metric_series", "get_accounting_breakdown", "get_operating_statement", "get_delinquent_accounts"],
+  financial: ["get_portfolio_metrics", "get_metric_series", "get_accounting_breakdown", "get_operating_statement", "get_delinquent_accounts", "get_utility_investigations"],
   brokerage: ["get_leasing_funnel", "get_property_breakdown", "get_metric_series", "get_leasing_velocity"],
   realEstate: ["get_property_breakdown", "get_portfolio_metrics", "get_leasing_velocity"],
   marketResearch: ["get_metric_series", "get_portfolio_metrics", "get_leasing_funnel", "get_leasing_velocity"],
-  maintenance: ["get_portfolio_metrics", "get_delinquent_accounts", "get_maintenance_performance"],
+  maintenance: ["get_portfolio_metrics", "get_delinquent_accounts", "get_maintenance_performance", "get_utility_investigations"],
   riskAnalyst: ["get_delinquent_accounts", "get_portfolio_metrics", "get_accounting_breakdown", "get_operations_insights", "get_data_conflicts"],
   portfolioOutlook: ["get_metric_series", "get_portfolio_metrics", "get_operating_statement", "get_operations_insights"],
   leaseReview: ["list_documents", "read_document"],
@@ -68,6 +68,7 @@ export const PERSONA_TOOL_ACCESS: Record<PersonaId, string[] | null> = {
 
 /** The data tools the Setup diagram draws as source nodes, with their label keys. */
 export const DATA_SOURCE_NODES: { tool: string; labelKey: string }[] = [
+  { tool: "get_utility_investigations", labelKey: "UtilityPilot.investigations" },
   { tool: "get_portfolio_metrics", labelKey: "SetupView.sourcePortfolioMetrics" },
   { tool: "get_property_breakdown", labelKey: "SetupView.sourcePropertyBreakdown" },
   { tool: "get_leasing_funnel", labelKey: "SetupView.sourceLeasingFunnel" },

@@ -11,6 +11,8 @@
     "start": "vinext start",
     "test": "npm run typecheck && npm run i18n:check && npm run build && npm run test:unit",
     "test:unit": "node --test --test-concurrency=1",
+    "test:sap-bydesign": "node --test tests/sap-bydesign.test.ts",
+    "rehearse:sap-bydesign": "node scripts/rehearse-sap-bydesign.mjs",
     "test:runtime": "npm run test:postgres",
     "typecheck": "tsc --noEmit",
     "i18n:check": "node scripts/check-i18n-parity.mjs",
