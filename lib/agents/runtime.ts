@@ -81,6 +81,7 @@ import { TERMINAL_STATES } from "./task-state.ts";
 import { DELEGATION_POLICY } from "./delegation-policy.ts";
 import { PEER_HELP_TOOL, mayRequestPeerHelp, peerReadiness } from "./peer-help.ts";
 import { wakePeerWaiters } from "./work-identity.ts";
+import { PERSON_RESUMABLE, WAIT_TOOL, wakeContext } from "./waits.ts";
 import { assignableActorsPrompt } from "./organization/prompt.ts";
 import { getOperatingProfile } from "@/lib/organizations/operating-profile-store";
 
@@ -150,6 +151,8 @@ export async function advanceTask(dbSession: DbSession,
     return { taskId, status: task.status, stepsRun: 0 };
   }
 
+  // What this run is resuming from, before the claim moves it to RUNNING.
+  const resumedFrom = task.status;
   const readiness = await planReadiness(dbSession, task);
   if(readiness.wait)return {taskId,status:task.status,stepsRun:0};
   // Parked on a peer: runnable only once every peer it asked has settled.
@@ -241,7 +244,7 @@ export async function advanceTask(dbSession: DbSession,
   });
 
   const contract=JSON.parse(task.checkJson??'{}');
-  const support=['render_answer','read_memory','write_memory','read_task_history',...(mayRequestPeerHelp(task)?[PEER_HELP_TOOL]:[])];
+  const support=['render_answer','read_memory','write_memory','read_task_history',...(mayRequestPeerHelp(task)?[PEER_HELP_TOOL]:[]),...(contract.kind==='plan'?[]:[WAIT_TOOL])];
   const selected=contract.kind==='plan'?['plan_goal','get_goal_plan']
     :contract.kind==='evidence'?[...(contract.tools??[]),...(contract.tools?.includes('read_document')?['list_documents']:[])]
     :contract.kind==='delivery'?['create_maintenance_work_order','read_conversation','list_conversations','get_communication_channels','get_marketing_channels','request_execution_plan','send_external_message','place_call','publish_listing']
@@ -277,6 +280,10 @@ Task completion condition: ${task.checkJson}. The harness verifies it independen
 Evidence tools available to children retaining this agent: ${JSON.stringify(evidenceCapabilities)}.
 Use these exact tool names in check.tools; do not invent search tools.${assignableActorsPrompt(task.agentId, { profile: await getOperatingProfile(dbSession, organizationId), objective: task.goal })} For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
   if(readiness.context)system += '\nCurrent dependency/plan results: '+readiness.context.slice(0,16000);
+  // Resuming from a wait: say what was awaited and what woke it, so the run
+  // checks the thing happened instead of assuming it.
+  const woke = PERSON_RESUMABLE.includes(resumedFrom as TaskState) ? wakeContext(task) : undefined;
+  if (woke) system += '\n' + woke;
   const messages: Message[] = safeParseTranscript(task.transcriptJson, task.goal);
   // Evidence must survive invocation boundaries just like the conversation.
   // Rebuild it from persisted tool results before adding anything observed by
@@ -934,6 +941,13 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       const lost = await checkpoint();
       if (lost) return lost;
       if(toolUses.some(u=>u.name==='plan_goal')&&results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name==='plan_goal'&&u.id===r.tool_use_id)))return finish('WAITING_FOR_TOOL');
+      // A wait was recorded: park in the state it names, with its wake time (or
+      // none, for a wait only an event or a person can end).
+      const waitResult = results.find(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name===WAIT_TOOL&&u.id===r.tool_use_id));
+      if (waitResult && waitResult.type==='tool_result') {
+        const parked = JSON.parse(typeof waitResult.content === 'string' ? waitResult.content : '{}') as { waiting?: TaskState; until?: string | null };
+        if (parked.waiting) return finish(parked.waiting, { nextAttemptAt: parked.until ? new Date(parked.until) : undefined });
+      }
       // A peer was asked: wait for it, with a recheck in case its wake-up is lost.
       if(results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name===PEER_HELP_TOOL&&u.id===r.tool_use_id)))return finish('WAITING_FOR_AGENT',{nextAttemptAt:new Date(Date.now()+DELEGATION_POLICY.peerRecheckMs)});
     }

@@ -44,9 +44,6 @@ export const TASK_STATES = [
   // Cannot proceed and has no timer that would change that. Something outside
   // the runtime — a person, a permission, a connection — has to move first.
   "BLOCKED",
-  // Being decomposed into child work. Reserved: a planner today parks in
-  // WAITING_FOR_TOOL once its plan is written.
-  "PLANNING",
   "COMPLETED",
   "FAILED",
   "CANCELLED",
@@ -86,7 +83,7 @@ export const EXTERNAL_WAIT_STATES: ReadonlySet<TaskState> = new Set<TaskState>([
  * the same silent spin that made a parked verification unreachable. These
  * states must name the moment they expect to be worth looking at again.
  */
-export const SCHEDULED_WAKE_ONLY_STATES: ReadonlySet<TaskState> = new Set<TaskState>([...EXTERNAL_WAIT_STATES, "WAITING_FOR_AGENT", "SCHEDULED"]);
+export const SCHEDULED_WAKE_ONLY_STATES: ReadonlySet<TaskState> = new Set<TaskState>([...EXTERNAL_WAIT_STATES, "WAITING_FOR_AGENT", "SCHEDULED", "BLOCKED", "WAITING_FOR_HUMAN"]);
 
 /**
  * States a worker takes the lease from as themselves rather than as `QUEUED`.
@@ -96,7 +93,7 @@ export const SCHEDULED_WAKE_ONLY_STATES: ReadonlySet<TaskState> = new Set<TaskSt
  * is absent on purpose: an approval-parked task takes its lease through the
  * approval path, which has already stamped one by the time the claim would run.
  */
-export const CLAIM_FROM_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["RUNNING", "WAITING_FOR_TOOL", "PENDING_VERIFICATION", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED"]);
+export const CLAIM_FROM_STATES: ReadonlySet<TaskState> = new Set<TaskState>(["RUNNING", "WAITING_FOR_TOOL", "PENDING_VERIFICATION", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED", "BLOCKED", "WAITING_FOR_HUMAN"]);
 
 /**
  * The state a worker should claim `status` from.
@@ -128,8 +125,7 @@ export function claimFromState(status: TaskState): TaskState {
  */
 export const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   QUEUED: ["RUNNING", "CANCELLED", "FAILED", "SUPERSEDED"],
-  PLANNING: ["RUNNING", "WAITING_FOR_TOOL", "FAILED", "CANCELLED"],
-  RUNNING: ["PLANNING", "WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION", "WAITING_FOR_HUMAN", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED", "QUEUED"],
+  RUNNING: ["WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION", "WAITING_FOR_HUMAN", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED", "QUEUED"],
   WAITING_FOR_TOOL: ["RUNNING", "FAILED", "CANCELLED", "SUPERSEDED"],
   WAITING_FOR_APPROVAL: ["RUNNING", "CANCELLED", "FAILED"],
   // Verification either proves the effect, exhausts its budget and becomes a
@@ -151,7 +147,9 @@ export const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   SCHEDULED: ["RUNNING", "WAITING_FOR_HUMAN", "BLOCKED", "FAILED", "CANCELLED"],
   // Blocked work waits on a person or a change of configuration, so it leaves
   // only when something outside the runtime moves it.
-  BLOCKED: ["WAITING_FOR_HUMAN", "CANCELLED", "FAILED"],
+  // …or when a connection is verified and the work is woken to re-check
+  // (lib/agents/waits.ts), which is a run, not a completion.
+  BLOCKED: ["RUNNING", "WAITING_FOR_HUMAN", "CANCELLED", "FAILED"],
   COMPLETED: [],
   FAILED: [],
   CANCELLED: [],

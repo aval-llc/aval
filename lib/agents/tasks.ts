@@ -211,7 +211,13 @@ export async function claimTask(dbSession: DbSession, taskId: string, workerId: 
       where ${agentTasks.id} = ${taskId}
         and ${agentTasks.status} = ${from}
         and (${agentTasks.leaseExpiresAt} is null or ${agentTasks.leaseExpiresAt} < ${now})
-        and (${agentTasks.nextAttemptAt} is null or ${agentTasks.nextAttemptAt} <= ${now})
+        and (
+          ${agentTasks.nextAttemptAt} <= ${now}
+          -- A null wake-up means "runnable now" only for states that run on
+          -- their own. A state waiting on a party, a clock or a person means
+          -- "nothing expected yet", so a direct claim cannot start it early.
+          or (${agentTasks.nextAttemptAt} is null and ${agentTasks.status} <> all(${sql.raw(`array[${[...SCHEDULED_WAKE_ONLY_STATES].map((state) => `'${state}'`).join(",")}]`)}))
+        )
       for update skip locked
     )
     update ${agentTasks} as task

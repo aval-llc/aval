@@ -127,7 +127,7 @@ test("the general agent can reach every implemented tool except the specialist P
   assert.equal(AGENT_PERMISSIONS.riskAnalyst.some((permission) => permission.endsWith(".write") || permission.endsWith(".execute")), false);
   for (const name of allowedToolNames("riskAnalyst", { isGuest: false })) {
     const tool = TOOL_REGISTRY.get(name)!;
-    if (tool.mutates) assert.ok(["plan_goal", "request_peer_help", "write_memory"].includes(name) && tool.requiredPermission === "tasks.manage", `risk analyst may mutate business data through "${name}"`);
+    if (tool.mutates) assert.ok(["plan_goal", "request_peer_help", "wait_for", "write_memory"].includes(name) && tool.requiredPermission === "tasks.manage", `risk analyst may mutate business data through "${name}"`);
   }
 });
 

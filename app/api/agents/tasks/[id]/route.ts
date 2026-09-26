@@ -3,11 +3,12 @@ import { and, eq, asc } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { agentChecks } from "@/db/postgres/schema";
 import { goalPlan } from "@/lib/agents/goal-plan";
-import { getApiIdentity } from "@/lib/integrations/session";
+import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { serializeTraceStep } from "@/lib/agents/trace-view";
 import { getTool } from '@/lib/agents/registry';
 import { getTask, listSteps, requestCancel, TERMINAL_STATES, type TaskState } from "@/lib/agents/tasks";
+import { resumeByPerson } from "@/lib/agents/waits";
 
 /**
  * One task: its state, its execution trace, and the two things a caller can do
@@ -75,9 +76,36 @@ async function DELETEWithSession(dbSession: DbSession, request: Request, context
   }, { headers: { "cache-control": "no-store" } });
 }
 
+/**
+ * POST { action: "resume", note? } — a person moves waiting work on.
+ *
+ * Every waiting state can be resumed by a person (lib/agents/waits.ts): the
+ * resident replied by phone, the document arrived by hand, the connection is
+ * now set up, the decision is made. The note becomes context for the next run,
+ * not an instruction with authority; the resumed task is held to exactly the
+ * policy it was before. Only the person the work belongs to, or the workspace
+ * owner, may resume it.
+ */
+async function POSTWithSession(dbSession: DbSession, request: Request, context: { params: Promise<{ id: string }> }) {
+  const identity = await getApiIdentity(dbSession, request);
+  if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
+  await ensureOrganization(dbSession, identity);
+  if (isGuestIdentity(identity)) return Response.json({ error: "Sign in to resume work." }, { status: 401 });
+  const { id } = await context.params;
+  const body = await request.json().catch(() => ({})) as { action?: string; note?: string };
+  if (body.action !== "resume") return Response.json({ error: "Unknown action." }, { status: 400 });
+  const task = await getTask(dbSession, identity.organizationId, id);
+  if (!task) return Response.json({ error: "No such task" }, { status: 404 });
+  if (task.userId !== identity.userId && identity.role !== "owner") return Response.json({ error: "Only the person this work belongs to, or the workspace owner, can resume it." }, { status: 403 });
+  const resumed = await resumeByPerson(dbSession, identity.organizationId, id, typeof body.note === "string" ? body.note : "");
+  if (!resumed.ok) return Response.json({ error: resumed.reason }, { status: 409 });
+  return Response.json({ id, resumed: true }, { headers: { "cache-control": "no-store" } });
+}
+
 function safeParse(json: string): unknown {
   try { return JSON.parse(json); } catch { return null; }
 }
 
 export const GET = withApiSession(GETWithSession);
 export const DELETE = withApiSession(DELETEWithSession);
+export const POST = withApiSession(POSTWithSession);

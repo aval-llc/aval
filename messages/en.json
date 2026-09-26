@@ -138,7 +138,6 @@
     "risk_medium": "Medium",
     "runGoal": "Run",
     "startFailed": "Couldn't start that run. Try again.",
-    "status_PLANNING": "Planning",
     "status_SUPERSEDED": "Replaced by a newer plan",
     "status_WAITING_FOR_AGENT": "Waiting on a colleague",
     "status_WAITING_FOR_APPLICANT": "Waiting on the applicant",

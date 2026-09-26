@@ -1,4 +1,5 @@
 import { withApiSession } from "@/lib/api/with-session";
+import { wakeOnConfiguration } from "@/lib/agents/waits";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { verifyCredentials } from "@/lib/integrations/credential-verification";
 import { env } from "cloudflare:workers";
@@ -30,6 +31,8 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
     const now = new Date();
     const saved = await db.update(integrationConnections).set({ status: "connected", externalAccountId: verified.accountId, externalAccountName: verified.accountName, metadataJson: JSON.stringify({ ...JSON.parse(connection.metadataJson), ...verified.metadata, verifiedAt: now.toISOString() }), updatedAt: now }).where(and(eq(integrationConnections.id, connection.id), eq(integrationConnections.accessTokenCiphertext, connection.accessTokenCiphertext))).returning({ id: integrationConnections.id });
     if (!saved.length) return Response.json({ error: "Connection changed during verification. Retry with the current credentials." }, { status: 409 });
+    // Work blocked on a missing connection re-checks whether it can proceed.
+    await wakeOnConfiguration(dbSession, identity.organizationId);
     return Response.json({ connection: { id: connection.id, provider: connection.provider, status: "connected", externalAccountName: verified.accountName } });
   } catch (error) {
     await db.update(integrationConnections).set({ status: "verification_failed", updatedAt: new Date() }).where(and(eq(integrationConnections.id, connection.id), eq(integrationConnections.accessTokenCiphertext, connection.accessTokenCiphertext)));

@@ -1,4 +1,5 @@
 import { withApiSession } from "@/lib/api/with-session";
+import { wakeOnConfiguration } from "@/lib/agents/waits";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { verifyOAuthReadAccess } from "@/lib/integrations/verification";
 import { env } from "cloudflare:workers";
@@ -52,6 +53,8 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
       lastSyncAt: null, metadataJson: JSON.stringify({ readOnly: providerIsReadOnly(provider.id, provider.readOnly), webhook: provider.webhook, quickbooksEnvironment: provider.id === "quickbooks" ? config.QUICKBOOKS_ENVIRONMENT ?? "production" : undefined }), updatedAt: now,
     };
     await db.insert(integrationConnections).values({ id: crypto.randomUUID(), organizationId: identity.organizationId, provider: provider.id, category: provider.category, createdBy: identity.userId, createdAt: now, ...values }).onConflictDoUpdate({ target: [integrationConnections.organizationId, integrationConnections.provider], set: values });
+    // Work blocked on a missing connection re-checks whether it can proceed.
+    if (account.id) await wakeOnConfiguration(dbSession, identity.organizationId);
     const redirect = new URL(safeReturnTo(state.returnTo, url.origin), url.origin);
     redirect.searchParams.set("connected", provider.id);
     return Response.redirect(redirect.toString());

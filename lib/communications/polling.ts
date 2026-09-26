@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm';
+import { wakeOnInboundMessage } from '@/lib/agents/waits';
 import type { DbSession } from "@/db/postgres/session";
 import { conversations, messages } from "@/db/postgres/schema";
 import { connectedAccount } from './connection';
@@ -53,6 +54,8 @@ export async function pollInbox(dbSession: DbSession, org:string,provider:string
     const inserted=await db.insert(messages).values({id:crypto.randomUUID(),conversationId:thread.id,externalMessageId:message.id,direction:'inbound',body:message.body.slice(0,10000),createdAt:message.at}).onConflictDoNothing().returning({id:messages.id});
     if(inserted.length){
       imported++;
+      // Work waiting on whoever writes on this thread re-checks now.
+      await wakeOnInboundMessage(dbSession, org, thread.id);
       if(message.at.getTime()>thread.lastMessageAt.getTime())await db.update(conversations).set({lastMessageAt:message.at,updatedAt:now}).where(eq(conversations.id,thread.id));
       // Historical mailbox refreshes should not initiate surprise outreach.
       if(message.at.getTime()>Date.now()-5*60000)await queueInboundTask(dbSession, org,thread.id,message.id,message.body);

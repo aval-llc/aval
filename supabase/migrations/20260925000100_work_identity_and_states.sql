@@ -54,7 +54,7 @@ BEGIN
     WHERE conname = 'agent_tasks_status_check' AND conrelid = 'public.agent_tasks'::regclass
   ) THEN
     ALTER TABLE public.agent_tasks ADD CONSTRAINT agent_tasks_status_check CHECK (status IN (
-      'QUEUED', 'PLANNING', 'RUNNING',
+      'QUEUED', 'RUNNING',
       'WAITING_FOR_TOOL', 'WAITING_FOR_APPROVAL', 'PENDING_VERIFICATION', 'WAITING_FOR_HUMAN',
       'WAITING_FOR_PROVIDER', 'WAITING_FOR_RESIDENT', 'WAITING_FOR_OWNER', 'WAITING_FOR_VENDOR',
       'WAITING_FOR_APPLICANT', 'WAITING_FOR_DOCUMENT', 'WAITING_FOR_AGENT',

@@ -138,7 +138,6 @@
     "risk_medium": "Medio",
     "runGoal": "Ejecutar",
     "startFailed": "No se pudo iniciar esa ejecución. Inténtalo de nuevo.",
-    "status_PLANNING": "Planeando",
     "status_SUPERSEDED": "Reemplazado por un plan más reciente",
     "status_WAITING_FOR_AGENT": "Esperando a un colega",
     "status_WAITING_FOR_APPLICANT": "Esperando al solicitante",
