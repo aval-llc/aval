@@ -13,6 +13,7 @@ import { runConversationCases } from "./conversation-cases.mjs";
 import { runPlannerCases } from "./planner-cases.mjs";
 import { runReplanCases } from "./replan-cases.mjs";
 import { runAuthRouteCases } from "./auth-route-cases.mjs";
+import { runByDesignCases } from "./sap-bydesign-cases.mjs";
 import { runUtilityCases } from "./utility-cases.mjs";
 import { runPilotCases } from "./pilot-cases.mjs";
 import { runBackupCases } from "./backup-cases.mjs";
@@ -226,6 +227,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
       .where(and(eq(properties.organizationId, personalOrganization(userA)), eq(properties.id, propertyId))));
     assert.equal(ownRows.length, 1);
     await runUtilityCases(t, {session,userA,userB,propertyId,administrator,config});
+    await runByDesignCases(t, {session,config,administrator,userB});
     await runMaintenanceCases(t, { session, userA, userB, propertyId });
     await runConversationCases(t, { session, userA, userB });
     await runPilotCases(t, { session, userA, userB, config, administrator });

@@ -87,7 +87,7 @@ The PostgreSQL suites refuse remote hosts. The legacy migration rehearsal additi
 The Gentor pilot owner and Aval release owner must record:
 
 - The named SEISA/Astra properties/sites, exact meter list and staff who can access the workspace. Confirm the relationship between Gentor, SEISA and Astra rather than inferring it from names.
-- SAP edition, source system/client/company identifiers, export owner, field dictionary and a de-identified sample. Applications and lease records are not assumed to live in SAP.
+- SAP Business ByDesign is now confirmed as the product. Its enabled services, source system/company identifiers, export owner, field dictionary and a de-identified sample still need confirmation. Applications and lease records are not assumed to live in SAP.
 - Whether meters/submeters exist, who reads them, actual versus estimated readings, source date conventions, billing cadence, currencies and tariff/tax fields.
 - Approved data handling, retention/deletion and staff access arrangements before personal or customer data enters the hosted pilot. Start with utility records without resident personal data.
 - A named Gentor reviewer for Spanish explanation quality and a named Aval reviewer for release evidence.
@@ -97,3 +97,5 @@ Run the first real sample in staging and require exact reconciliation of importe
 For each live-model explanation, the Gentor reviewer scores four criteria from 0–2: correct interpretation, traceable evidence, clear Spanish, and actionable follow-up with appropriate uncertainty. Require at least 7/8, with no invented source, unsupported causal claim or incorrect number. Exact calculations and access controls remain separate all-pass gates. Record the model/version, prompt, source IDs, output and reviewer decision. This manual quality evaluation is not yet run.
 
 Live SAP authentication/sync/write-back, lease-expiration enhancements and application workflows remain later work. Phase 1 prepares a controlled utilities pilot using reviewed exports; it does not certify unattended operation.
+
+Independent ByDesign connector work and simulated agent coverage are documented in [the ByDesign rehearsal report](sap-bydesign-independent-testing.md).
