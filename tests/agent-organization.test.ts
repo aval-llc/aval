@@ -11,6 +11,7 @@ import { AGENT_PERMISSIONS, type AgentRole } from "../lib/agents/permissions.ts"
 import { PERSONAS, type PersonaId } from "../lib/ask-aval/persona-catalog.ts";
 import { DOMAIN_IDS } from "../lib/agents/organization/types.ts";
 import { MAX_DELEGATION_DEPTH, DELEGATION_POLICY } from "../lib/agents/delegation-policy.ts";
+import { EMPTY_PROFILE, isMixedPortfolio, normalizeProfile } from "../lib/organizations/operating-profile.ts";
 import { getTool } from "../lib/agents/registry.ts";
 
 /**
@@ -154,15 +155,30 @@ test("pricing specialists carry the antitrust boundary", () => {
 });
 
 test("routing reaches only the domains a workspace's business applies to", () => {
-  const hoa = eligibleDomains(["association"]);
+  const profile = (businessModels: string[], assetClasses: string[] = []) => normalizeProfile({ businessModels, assetClasses });
+  const hoa = eligibleDomains(profile(["association_management"], ["association"]));
   assert.equal(hoa.has("hoa"), true);
-  assert.equal(hoa.has("leasing-marketing"), false, "no leasing for a pure HOA manager");
+  assert.equal(hoa.has("leasing-marketing"), false, "no leasing for a pure association manager");
   assert.equal(hoa.has("affordable"), false);
-  const marketRate = eligibleDomains(["multifamily_owner_operator"]);
-  assert.equal(marketRate.has("affordable"), false, "no recertification for market-rate only");
-  assert.equal(marketRate.has("commercial"), false, "no CAM for ordinary residential");
-  assert.equal(marketRate.has("owner-services"), false, "no client services for an owner/operator");
-  assert.equal(eligibleDomains([]).size, 22, "a workspace that has not said reaches every domain, as before");
+  const ownerOperator = eligibleDomains(profile(["owner_operator"], ["multifamily"]));
+  assert.equal(ownerOperator.has("affordable"), false, "no recertification for market-rate only");
+  assert.equal(ownerOperator.has("commercial"), false, "no CAM for ordinary residential");
+  assert.equal(ownerOperator.has("owner-services"), false, "no client services for an owner/operator");
+  assert.equal(ownerOperator.has("leasing-marketing"), true);
+  const brokerage = eligibleDomains(profile(["brokerage_leasing"], ["commercial"]));
+  assert.equal(brokerage.has("leasing-marketing"), true);
+  assert.equal(brokerage.has("maintenance"), false, "a broker does not run the buildings");
+  assert.equal(brokerage.has("commercial"), true);
+  const corporate = eligibleDomains(profile(["real_estate_corporate"], ["commercial"]));
+  assert.equal(corporate.has("lease-admin"), true, "an occupier administers its own leases");
+  assert.equal(corporate.has("screening"), false);
+  assert.equal(corporate.has("resident-experience"), false);
+  const mixed = profile(["property_management", "association_management"], ["multifamily", "association", "commercial"]);
+  assert.equal(isMixedPortfolio(mixed), true, "a mixed portfolio is any profile with more than one entry");
+  for (const domain of ["hoa", "commercial", "leasing-marketing", "owner-services"] as const) assert.ok(eligibleDomains(mixed).has(domain), domain);
+  assert.equal(eligibleDomains(profile(["property_management"])).has("hoa"), true, "an axis left empty never rules a domain out");
+  assert.equal(eligibleDomains(EMPTY_PROFILE).size, 22, "a workspace that has not said reaches every domain, as before");
+  assert.deepEqual(normalizeProfile({ businessModels: ["property_management", "bogus"], assetClasses: [42] }).businessModels, ["property_management"], "unknown ids are dropped, never trusted");
 });
 
 test("a Specialist works inside its Lead's PMS deployments", () => {
@@ -177,4 +193,26 @@ test("the delegation limit supports Aval One → Lead → Specialist → peer, a
   assert.equal(DELEGATION_POLICY.maxDepth, 3);
   assert.ok(DELEGATION_POLICY.maxFanout >= 1 && DELEGATION_POLICY.maxConcurrentChildren >= 1);
   assert.ok(DELEGATION_POLICY.maxTasksPerWork >= 1 + DELEGATION_POLICY.maxFanout);
+});
+
+test("the router names candidates only inside the workspace's business, deterministically", async () => {
+  const { routeObjective } = await import("../lib/agents/organization/routing.ts");
+  const profile = (businessModels: string[], assetClasses: string[]) => normalizeProfile({ businessModels, assetClasses });
+  const leak = "A resident reports a water leak under the kitchen sink";
+  const manager = routeObjective(leak, profile(["property_management"], ["multifamily"]));
+  assert.equal(manager.leads[0].id, "maintenance", "a leak reaches Maintenance for a property manager");
+  assert.ok(manager.specialists.some((row) => row.domain === "maintenance"));
+  const broker = routeObjective(leak, profile(["brokerage_leasing"], ["commercial"]));
+  assert.equal(broker.leads.some((row) => row.id === "maintenance"), false, "a broker does not run the buildings, so Maintenance is no candidate");
+  const hoa = routeObjective("An owner submitted an architectural request to repaint their house", profile(["association_management"], ["association"]));
+  assert.equal(hoa.specialists[0].id, "hoa.architectural-request");
+  assert.equal(hoa.singleDomain, true);
+  const cam = routeObjective("Reconcile the CAM charges for the retail tenants this year", profile(["property_management"], ["commercial"]));
+  assert.equal(cam.specialists[0].id, "commercial.cam-reconciliation");
+  const noCommercial = routeObjective("Reconcile the CAM charges for the retail tenants this year", profile(["property_management"], ["multifamily"]));
+  assert.equal(noCommercial.specialists.some((row) => row.domain === "commercial"), false);
+  const affordable = routeObjective("Prepare the recertification for the tenant income review", profile(["property_management"], ["affordable"]));
+  assert.equal(affordable.leads[0].id, "lead.affordable");
+  assert.equal(routeObjective("hello there", EMPTY_PROFILE).leads.length, 0, "small talk routes nowhere");
+  assert.deepEqual(routeObjective(leak, profile(["property_management"], ["multifamily"])), manager, "the same objective and profile always route the same way");
 });

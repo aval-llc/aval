@@ -1345,6 +1345,22 @@
     "joined": "You've joined the workspace.",
     "failed": "That didn't work. Try again."
   },
+  "BusinessProfile": {
+    "loading": "Loading your business profile…",
+    "loadFailed": "Couldn't load the business profile. Try again shortly.",
+    "businessModelsTitle": "How you work",
+    "businessModelsHint": "Choose every one that applies. A mixed business is simply more than one.",
+    "assetClassesTitle": "What you run",
+    "assetClassesHint": "Choose every kind of property you hold or manage.",
+    "reachTitle": "What Aval brings to your work",
+    "reachHint": "These Leads, and their Specialists, are available to your work. Anything else stays out of reach.",
+    "reachEverything": "Nothing chosen yet, so every Lead is available — exactly as before.",
+    "save": "Save profile",
+    "saving": "Saving…",
+    "saved": "Saved.",
+    "saveFailed": "Couldn't save. Try again.",
+    "ownersOnly": "Only the workspace owner can change the business profile."
+  },
   "SettingsModule": {
     "subtitle": "Make Aval feel like your workspace.",
     "personal": "Personal",
@@ -1360,6 +1376,7 @@
     "loading": "Loading your settings…",
     "unavailable": "These settings could not be loaded. Reopen Settings to try again.",
     "sections": {
+      "business": "Business profile",
       "profile": "Profile",
       "appearance": "Appearance",
       "preferences": "Preferences",
@@ -1370,6 +1387,7 @@
       "security": "Security & connections"
     },
     "descriptions": {
+      "business": "What your business runs. It decides which Leads and Specialists Aval brings to your work.",
       "profile": "Your identity in Aval.",
       "appearance": "A little more you. Give your profile and agents their own character.",
       "preferences": "Set your language and the way Aval responds.",

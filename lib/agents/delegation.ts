@@ -14,7 +14,8 @@ import { checkDelegation, type DelegationRefusal } from "./delegation-rules.ts";
 import { DELEGATION_POLICY } from "./delegation-policy.ts";
 import { createTask, getTask, type TaskRecord } from "./tasks.ts";
 import { employeeScopes } from "./employees.ts";
-import { actorMayDelegateTo, builtInActor, isOrchestrator, resolveActorId } from "./organization/index.ts";
+import { actorEligible, actorMayDelegateTo, builtInActor, isOrchestrator, resolveActorId } from "./organization/index.ts";
+import { getOperatingProfile } from "@/lib/organizations/operating-profile-store";
 import { findDuplicateWork, unfinishedChildren, workIdOf, workSize } from "./work-identity.ts";
 import type { TaskCheck } from "./checks.ts";
 
@@ -184,6 +185,12 @@ export async function delegationRefusal(
   }
 
   const childBuiltIn = toColleague ? null : builtInActor(childActor);
+  // The workspace's business decides which domains its work may reach. This is
+  // enforced here, not only by what the planner was told, so a plan naming an
+  // out-of-profile Lead or Specialist is refused whoever wrote it.
+  if (childBuiltIn && !actorEligible(childBuiltIn.id, await getOperatingProfile(dbSession, organizationId))) {
+    return `${childBuiltIn.name} is outside this workspace's business profile. Update the profile in Settings if the workspace does this work.`;
+  }
   if (toColleague || (parent.employeeId && isOrchestrator(parent.agentId))) {
     if (childBuiltIn && childBuiltIn.kind !== "aval_one") return null;
     if (!parent.employeeId) return `Only an employee may hand work to another employee.`;

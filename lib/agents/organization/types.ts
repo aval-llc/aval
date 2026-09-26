@@ -13,6 +13,7 @@
  */
 
 import type { CanonicalCapability } from "./capabilities.ts";
+import type { EligibilityRule } from "../../organizations/operating-profile.ts";
 
 export const DOMAIN_IDS = [
   "leasing-marketing",
@@ -40,26 +41,6 @@ export const DOMAIN_IDS = [
 ] as const;
 
 export type DomainId = (typeof DOMAIN_IDS)[number];
-
-/**
- * The kinds of business a workspace can run (directive §10). A domain is
- * eligible for routing only where the workspace runs a business it applies to,
- * so a pure HOA manager is never routed into leasing, and a market-rate
- * portfolio is never routed into recertification.
- */
-export const CUSTOMER_TYPES = [
-  "third_party_residential",
-  "multifamily_owner_operator",
-  "single_family_rental",
-  "commercial",
-  "association",
-  "affordable",
-  "student",
-  "mixed_use",
-  "asset_manager",
-] as const;
-
-export type CustomerType = (typeof CUSTOMER_TYPES)[number];
 
 /** Internal maturity (directive §32). Never shown raw in customer UI. */
 export type Maturity =
@@ -126,8 +107,8 @@ export interface LeadDefinition {
   legacyPersonaId?: string;
   /** Other domains this Lead may consult. */
   relatedDomains: readonly DomainId[];
-  /** Business types this domain applies to. Empty means every type. */
-  appliesTo: readonly CustomerType[];
+  /** Which workspaces this domain applies to, as a rule over their operating profile. */
+  eligibility: EligibilityRule;
   /** Standing forbidden actions for every specialist in the domain. */
   domainForbidden: readonly string[];
   /** Standing instructions every run in this domain receives. */

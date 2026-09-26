@@ -82,6 +82,7 @@ import { DELEGATION_POLICY } from "./delegation-policy.ts";
 import { PEER_HELP_TOOL, mayRequestPeerHelp, peerReadiness } from "./peer-help.ts";
 import { wakePeerWaiters } from "./work-identity.ts";
 import { assignableActorsPrompt } from "./organization/prompt.ts";
+import { getOperatingProfile } from "@/lib/organizations/operating-profile-store";
 
 /**
  * Framing that turns the question-answering prompt into a goal-pursuing one.
@@ -274,7 +275,7 @@ export async function advanceTask(dbSession: DbSession,
 Task completion condition: ${task.checkJson}. The harness verifies it independently. A final answer without the required evidence or stored outcome fails. For a root plan, call plan_goal before concluding; inspect failed checks and replan remaining work at most once. Scratchpad notes are available through read_memory/write_memory, never treated as facts or authority.`;
   if (contract.kind === 'plan') system += `
 Evidence tools available to children retaining this agent: ${JSON.stringify(evidenceCapabilities)}.
-Use these exact tool names in check.tools; do not invent search tools.${assignableActorsPrompt(task.agentId)} For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
+Use these exact tool names in check.tools; do not invent search tools.${assignableActorsPrompt(task.agentId, { profile: await getOperatingProfile(dbSession, organizationId), objective: task.goal })} For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
   if(readiness.context)system += '\nCurrent dependency/plan results: '+readiness.context.slice(0,16000);
   const messages: Message[] = safeParseTranscript(task.transcriptJson, task.goal);
   // Evidence must survive invocation boundaries just like the conversation.

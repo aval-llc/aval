@@ -28,7 +28,8 @@ import { getTool } from "../registry.ts";
 import { PERSONAS, type PersonaId } from "../../ask-aval/persona-catalog.ts";
 import { toolsForCapabilities, untooledCapabilities } from "./capabilities.ts";
 import { AVAL_ONE, LEADS, leadForDomain, leadRuntimeId } from "./domains.ts";
-import type { ActorKind, CustomerType, DomainId, LeadDefinition, Maturity, SpecialistDefinition } from "./types.ts";
+import type { ActorKind, DomainId, LeadDefinition, Maturity, SpecialistDefinition } from "./types.ts";
+import { ruleApplies, type OperatingProfile } from "../../organizations/operating-profile.ts";
 
 import { SPECIALISTS as LEASING_MARKETING } from "./specialists/leasing-marketing.ts";
 import { SPECIALISTS as SCREENING } from "./specialists/screening.ts";
@@ -319,15 +320,18 @@ export function specialistMaturity(specialist: SpecialistDefinition): Maturity {
 }
 
 /**
- * The domains a workspace's routing may reach. An empty list — a workspace that
- * has not said what business it runs — reaches every domain, which is what it
- * did before this existed.
+ * The domains a workspace's routing may reach, from its operating profile.
+ * A workspace that has not said what business it runs reaches every domain,
+ * which is what it did before profiles existed.
  */
-export function eligibleDomains(customerTypes: readonly CustomerType[]): ReadonlySet<DomainId> {
-  if (customerTypes.length === 0) return new Set(LEADS.map((lead) => lead.domain));
-  return new Set(LEADS
-    .filter((lead) => lead.appliesTo.length === 0 || lead.appliesTo.some((type) => customerTypes.includes(type)))
-    .map((lead) => lead.domain));
+export function eligibleDomains(profile: OperatingProfile): ReadonlySet<DomainId> {
+  return new Set(LEADS.filter((lead) => ruleApplies(lead.eligibility, profile)).map((lead) => lead.domain));
+}
+
+/** Whether an actor's domain is open to a workspace. Aval One and unknown actors belong to no domain and are never excluded here. */
+export function actorEligible(id: string, profile: OperatingProfile): boolean {
+  const domain = builtInActor(id)?.domain;
+  return !domain || eligibleDomains(profile).has(domain);
 }
 
 /**

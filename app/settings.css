@@ -155,3 +155,13 @@
   .settings-content .financial-policy-limits { grid-template-columns: 1fr; }
   .settings-content .provider-row-summary { flex-wrap: wrap; }
 }
+/* Business profile: each axis is a set of independent toggles, never a single
+   choice — a mixed business is simply more than one. */
+.business-profile-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; margin-top: 14px; }
+.business-profile-option { display: grid; gap: 5px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .18s ease, background .18s ease; }
+.business-profile-option strong { font-size: 12px; font-weight: 600; }
+.business-profile-option span { font-size: 11px; line-height: 1.55; color: var(--muted); }
+.business-profile-option[aria-pressed="true"] { border-color: var(--ink); background: var(--surface-soft); box-shadow: inset 0 0 0 1px var(--ink); }
+.business-profile-option:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.business-profile-reach { margin: 12px 0 18px; font-size: 12px; line-height: 1.8; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .business-profile-option { transition: none; } }

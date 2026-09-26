@@ -1345,6 +1345,22 @@
     "joined": "Te uniste al espacio de trabajo.",
     "failed": "No funcionó. Inténtalo de nuevo."
   },
+  "BusinessProfile": {
+    "loading": "Cargando tu perfil de negocio…",
+    "loadFailed": "No se pudo cargar el perfil de negocio. Inténtalo de nuevo en un momento.",
+    "businessModelsTitle": "Cómo trabajas",
+    "businessModelsHint": "Elige todas las que apliquen. Un negocio mixto es simplemente más de una.",
+    "assetClassesTitle": "Qué operas",
+    "assetClassesHint": "Elige todos los tipos de propiedad que tienes o administras.",
+    "reachTitle": "Lo que Aval trae a tu trabajo",
+    "reachHint": "Estos Líderes y sus Especialistas están disponibles para tu trabajo. Lo demás queda fuera de alcance.",
+    "reachEverything": "Aún no eliges nada, así que todos los Líderes están disponibles, igual que antes.",
+    "save": "Guardar perfil",
+    "saving": "Guardando…",
+    "saved": "Guardado.",
+    "saveFailed": "No se pudo guardar. Inténtalo de nuevo.",
+    "ownersOnly": "Solo el propietario del espacio puede cambiar el perfil del negocio."
+  },
   "SettingsModule": {
     "subtitle": "Haz que Aval se sienta como tu espacio.",
     "personal": "Personal",
@@ -1360,6 +1376,7 @@
     "loading": "Cargando tus ajustes…",
     "unavailable": "No se pudieron cargar estos ajustes. Vuelve a abrir Ajustes para intentarlo de nuevo.",
     "sections": {
+      "business": "Perfil del negocio",
       "profile": "Perfil",
       "appearance": "Apariencia",
       "preferences": "Preferencias",
@@ -1370,6 +1387,7 @@
       "security": "Seguridad y conexiones"
     },
     "descriptions": {
+      "business": "Lo que opera tu negocio. Decide qué Líderes y Especialistas trae Aval a tu trabajo.",
       "profile": "Tu identidad en Aval.",
       "appearance": "Dale tu toque. Personaliza tu perfil y tus agentes.",
       "preferences": "Elige tu idioma y cómo responde Aval.",

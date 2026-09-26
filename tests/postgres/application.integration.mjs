@@ -25,6 +25,7 @@ import { runEmployeeFolderCases } from "./employee-folder-cases.mjs";
 import { runEmployeeCases } from "./employee-cases.mjs";
 import { runOrganizationCases } from "./organization-cases.mjs";
 import { runPaymentSafetyCases } from "./payment-safety-cases.mjs";
+import { runOperatingProfileCases } from "./operating-profile-cases.mjs";
 import { runExpertiseCases } from "./expertise-cases.mjs";
 import { runNoPmsCases } from "./no-pms-cases.mjs";
 import { runEmployeeApiCases } from "./employee-api-cases.mjs";
@@ -241,6 +242,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runEmployeeCases(t, { session, userA, userB, administrator });
     await runOrganizationCases(t, { session, userA, config, administrator });
     await runPaymentSafetyCases(t, { session });
+    await runOperatingProfileCases(t, { session });
     await runExpertiseCases(t, { session, userA, userB });
     await runSeatSenderCases(t, { session, userA, userB });
     await runBrowserWriteCases(t, { session, userA, userB, administrator });
