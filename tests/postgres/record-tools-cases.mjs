@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { runRecordTool } from "../../lib/ask-aval/record-tools.ts";
-import { createVendor } from "../../lib/operations/maintenance.ts";
+import { eq } from "drizzle-orm";
+import { withDbSession } from "../../db/postgres/session.ts";
+import { ownershipEntities, properties } from "../../db/postgres/schema.ts";
+import { completeWorkOrder, createVendor, createWorkOrder } from "../../lib/operations/maintenance.ts";
 import { createLead, createLease } from "../../lib/operations/leasing.ts";
 import { createProperty, createUnit } from "../../lib/operations/portfolio.ts";
 import { createMeter, recordBill } from "../../lib/infrastructure/meters.ts";
@@ -11,7 +14,7 @@ import { createMeter, recordBill } from "../../lib/infrastructure/meters.ts";
  * workspace's rows, says plainly when there are none, and is invisible to
  * every other workspace.
  */
-export async function runRecordToolsCases(t, { session }) {
+export async function runRecordToolsCases(t, { session, config, administrator }) {
   const owner = `records_${randomUUID()}`, stranger = `records_${randomUUID()}`;
   const run = (work) => session(owner, (s) => work(s, s.identity.organizationId));
   const other = (work) => session(stranger, (s) => work(s, s.identity.organizationId));
@@ -58,5 +61,57 @@ export async function runRecordToolsCases(t, { session }) {
     }
     assert.equal((await other((s, org) => runRecordTool(s, "get_expiring_leases", { within_days: 365 }, org))).json.expiring_leases.length, 0);
     assert.equal((await other((s, org) => runRecordTool(s, "get_available_units", {}, org))).json.units.length, 0);
+  });
+
+  await t.test("owners are read through the properties a person can see, never the whole workspace", async () => {
+    const now = new Date();
+    const [ownerA, ownerB] = [`owner_${randomUUID()}`, `owner_${randomUUID()}`];
+    const second = await run((s, org) => createProperty(s, org, { name: `Records B ${randomUUID().slice(0, 6)}` }));
+    await run(async (s, org) => {
+      await s.db.insert(ownershipEntities).values([
+        { id: ownerA, organizationId: org, name: "Alder Holdings", legalName: "Alder Holdings LLC", createdAt: now, updatedAt: now },
+        { id: ownerB, organizationId: org, name: "Birch Partners", createdAt: now, updatedAt: now },
+      ]);
+      await s.db.update(properties).set({ ownershipEntityId: ownerA }).where(eq(properties.id, property.id));
+      await s.db.update(properties).set({ ownershipEntityId: ownerB }).where(eq(properties.id, second.id));
+    });
+    const everyone = (await read("get_owners")).json;
+    assert.deepEqual(everyone.owners.map((row) => row.name), ["Alder Holdings", "Birch Partners"]);
+    assert.equal(everyone.owners[0].properties[0].id, property.id);
+    assert.equal(Object.keys(everyone.owners[0]).sort().join(), "id,legal_name,name,properties,status", "no contact or banking details");
+
+    // A person granted only the first property sees its owner and not the other,
+    // although ownership_entities itself is visible to the whole workspace.
+    const scoped = `scoped_${randomUUID()}`;
+    await session(scoped, async () => {});
+    const org = await run(async (_s, organizationId) => organizationId);
+    await administrator.query("insert into access_grants (id,organization_id,principal_id,role,organization_scope,property_id,created_at,updated_at) values ($1,$2,$3,'operator',false,$4,now(),now())", [randomUUID(), org, scoped, property.id]);
+    const narrow = await withDbSession(config, { principalId: scoped, organizationId: org, actorId: scoped, requestId: randomUUID() }, (s) => runRecordTool(s, "get_owners", {}, org));
+    assert.deepEqual(narrow.json.owners.map((row) => row.name), ["Alder Holdings"], "a property grant reaches that property's owner only");
+    assert.equal((await other((s, orgId) => runRecordTool(s, "get_owners", {}, orgId))).json.available, false, "another workspace sees no owner");
+  });
+
+  await t.test("a turn is derived from unit status, the move-out and the unit's work since, and says what is not recorded", async () => {
+    assert.equal((await read("get_turns")).json.turns.length, 0, "an occupied or ready unit is not a turn");
+    const moveOut = new Date(Date.now() - 6 * 86400_000);
+    const turning = await run((s, org) => createUnit(s, org, { propertyId: property.id, unitNumber: "3C", status: "vacant_not_ready", vacantSince: moveOut }));
+    await run((s, org) => createLease(s, org, { unitId: turning.id, status: "expired", startDate: new Date("2025-01-01"), endDate: moveOut, rentCents: 160_000, depositCents: 160_000 }));
+    await run((s, org) => createWorkOrder(s, org, { propertyId: property.id, unitId: turning.id, category: "general", summary: "Paint and patch", estimateCents: 45_000 }));
+    await run(async (s, org) => {
+      const old = await createWorkOrder(s, org, { propertyId: property.id, unitId: turning.id, summary: "Closed before the move-out", reportedAt: new Date("2025-06-01") });
+      await completeWorkOrder(s, org, old.id, { at: new Date("2025-06-03"), actualCostCents: 9_900 });
+    });
+    const turns = (await read("get_turns")).json;
+    assert.equal(turns.turns.length, 1);
+    const [turn] = turns.turns;
+    assert.equal(turn.phase, "make_ready");
+    assert.equal(turn.move_out_on, moveOut.toISOString().slice(0, 10));
+    assert.ok(turn.days_vacant >= 5);
+    assert.equal(turn.open_work_orders, 1, "work reported before the move-out is not this turn's");
+    assert.equal(turn.estimate_cents, 45_000);
+    assert.equal(turn.actual_cost_cents, 0, "cost closed before the move-out is not this turn's");
+    assert.deepEqual(turns.not_recorded, ["turn scope", "turn budget", "target ready date"]);
+    assert.equal((await read("get_turns", { phase: "upcoming" })).json.turns.length, 0);
+    assert.equal((await other((s, org) => runRecordTool(s, "get_turns", {}, org))).json.turns.length, 0, "another workspace sees no turn");
   });
 }

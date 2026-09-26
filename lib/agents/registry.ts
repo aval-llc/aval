@@ -127,6 +127,8 @@ const DESCRIPTORS: ToolDescriptor[] = [
   { ...READ_DEFAULTS, name: "get_utility_bills", summary: "Utility meters and recorded bills.", requiredPermission: "portfolio.read" },
   { ...READ_DEFAULTS, name: "get_connection_health", summary: "Connected systems' status and last sync.", requiredPermission: "provenance.read" },
   { ...READ_DEFAULTS, name: "get_workspace_staff", summary: "Workspace members' display names and roles.", requiredPermission: "portfolio.read" },
+  { ...READ_DEFAULTS, name: "get_owners", summary: "Ownership entities behind the properties the caller can see.", requiredPermission: "portfolio.read" },
+  { ...READ_DEFAULTS, name: "get_turns", summary: "Units in a turn, derived from unit status, leases and work orders.", requiredPermission: "maintenance.read" },
   /* ── reads: portfolio and accounting ─────────────────────────────────── */
   { ...READ_DEFAULTS, name: "get_portfolio_metrics", summary: "Portfolio-level NOI, rent, occupancy and work-order counts.", requiredPermission: "portfolio.read" },
   { ...READ_DEFAULTS, name: "get_metric_series", summary: "A time series for one metric with genuine multi-point data.", requiredPermission: "market.read" },

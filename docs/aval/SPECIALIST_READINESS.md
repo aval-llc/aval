@@ -10,7 +10,7 @@ Readiness says what the code can do. It is not provider validation: no Specialis
 
 Internal only. Readiness is never shown in customer UI.
 
-**Totals:** 24 execution-ready, 114 analysis-only-ready, 128 incomplete (of 266).
+**Totals:** 28 execution-ready, 128 analysis-only-ready, 110 incomplete (of 266).
 
 ## Leasing & Marketing Lead
 
@@ -111,16 +111,16 @@ Internal only. Readiness is never shown in customer UI.
 
 | Specialist | Readiness | Required | Optional | Executes | Approval classes | Missing |
 |---|---|---|---|---|---|---|
-| Move-Out Scope Intake | incomplete | turn.read, inspection.read, work_order.read | lease.read, unit.read | — | — | turn.read, inspection.read |
-| Turn Scope Creation | incomplete | turn.read, turn.prepare, inspection.read | unit.read, sop.read | — | — | turn.read, inspection.read |
-| Turn Budget | incomplete | turn.read, turn.prepare, vendor.read | budget.read | — | — | turn.read |
-| Turn Vendor & Technician Sequencing | incomplete | turn.read, work_order.create, vendor.read, vendor.insurance.read, vendor.dispatch | staff.read | work_order.create, vendor.dispatch | provider_write | turn.read |
-| Cleaning/Paint/Repair Coordination | incomplete | work_order.read, work_order.update, work_order.close, turn.read | communication.read | work_order.update, work_order.close | provider_write | turn.read |
-| Turn Utility Coordination | incomplete | turn.read | utility.read, utility.prepare, lease.read | — | — | turn.read |
-| Rent-Ready Verification | incomplete | turn.read, turn.prepare, inspection.read, work_order.read, key_access.read | unit.read | — | access | turn.read, inspection.read, key_access.read |
-| Turn Timeline | incomplete | turn.read, work_order.read | report.prepare | — | — | turn.read |
-| Key & Access Reset | incomplete | key_access.read, turn.read, work_order.create | unit.read | work_order.create | access, provider_write | key_access.read, turn.read |
-| Turn Cost Variance | incomplete | turn.read | invoice.read, budget.read, report.prepare | — | — | turn.read |
+| Move-Out Scope Intake | incomplete | turn.read, inspection.read, work_order.read | lease.read, unit.read | — | — | inspection.read |
+| Turn Scope Creation | incomplete | turn.read, turn.prepare, inspection.read | unit.read, sop.read | — | — | inspection.read |
+| Turn Budget | analysis-only-ready | turn.read, turn.prepare, vendor.read | budget.read | — | — | — |
+| Turn Vendor & Technician Sequencing | execution-ready | turn.read, work_order.create, vendor.read, vendor.insurance.read, vendor.dispatch | staff.read | work_order.create, vendor.dispatch | provider_write | — |
+| Cleaning/Paint/Repair Coordination | execution-ready | work_order.read, work_order.update, work_order.close, turn.read | communication.read | work_order.update, work_order.close | provider_write | — |
+| Turn Utility Coordination | analysis-only-ready | turn.read | utility.read, utility.prepare, lease.read | — | — | — |
+| Rent-Ready Verification | incomplete | turn.read, turn.prepare, inspection.read, work_order.read, key_access.read | unit.read | — | access | inspection.read, key_access.read |
+| Turn Timeline | analysis-only-ready | turn.read, work_order.read | report.prepare | — | — | — |
+| Key & Access Reset | incomplete | key_access.read, turn.read, work_order.create | unit.read | work_order.create | access, provider_write | key_access.read |
+| Turn Cost Variance | analysis-only-ready | turn.read | invoice.read, budget.read, report.prepare | — | — | — |
 
 ## Inspections & Property Condition Lead
 
@@ -200,18 +200,18 @@ Internal only. Readiness is never shown in customer UI.
 
 | Specialist | Readiness | Required | Optional | Executes | Approval classes | Missing |
 |---|---|---|---|---|---|---|
-| Owner & Client Onboarding | incomplete | owner.read | document.read, document.extract, property.setup.prepare | — | — | owner.read |
-| Owner Portal Support | incomplete | owner.read | document.read, knowledge.read, communication.read | — | — | owner.read |
-| Owner Statement | incomplete | owner.read, financial.statement.read, owner.statement.prepare | ledger.read, bank.read | — | — | owner.read |
-| Owner Distribution Preparation | incomplete | owner.read, owner.distribution.prepare | ledger.read, invoice.read | — | money | owner.read |
-| Owner Contribution Request | incomplete | owner.read, owner.contribution.prepare | ledger.read, invoice.read, document.read | — | money | owner.read |
-| Property Reserve Monitor | incomplete | owner.read | ledger.read, invoice.read, bank.read | — | — | owner.read |
-| Owner Approval Coordination | incomplete | owner.read, communication.send | document.read, communication.read | communication.send | external_communication | owner.read |
-| Owner Communication | incomplete | owner.read, communication.send | ledger.read, work_order.read, communication.read | communication.send | external_communication | owner.read |
-| Property Performance Brief | incomplete | owner.read, financial.statement.read | occupancy.read, maintenance.read, delinquency.read, report.prepare | — | — | owner.read |
-| Management Fee Review | incomplete | owner.read | document.read, ledger.read, gl.read, journal_entry.prepare | — | money | owner.read |
-| Client Fit & Profitability | incomplete | owner.read | gl.read, staff.read, analytics.read, report.prepare | — | — | owner.read |
-| Client Retention & Service Review | incomplete | owner.read | communication.read, analytics.read, report.prepare | — | — | owner.read |
+| Owner & Client Onboarding | analysis-only-ready | owner.read | document.read, document.extract, property.setup.prepare | — | — | — |
+| Owner Portal Support | analysis-only-ready | owner.read | document.read, knowledge.read, communication.read | — | — | — |
+| Owner Statement | analysis-only-ready | owner.read, financial.statement.read, owner.statement.prepare | ledger.read, bank.read | — | — | — |
+| Owner Distribution Preparation | analysis-only-ready | owner.read, owner.distribution.prepare | ledger.read, invoice.read | — | money | — |
+| Owner Contribution Request | analysis-only-ready | owner.read, owner.contribution.prepare | ledger.read, invoice.read, document.read | — | money | — |
+| Property Reserve Monitor | analysis-only-ready | owner.read | ledger.read, invoice.read, bank.read | — | — | — |
+| Owner Approval Coordination | execution-ready | owner.read, communication.send | document.read, communication.read | communication.send | external_communication | — |
+| Owner Communication | execution-ready | owner.read, communication.send | ledger.read, work_order.read, communication.read | communication.send | external_communication | — |
+| Property Performance Brief | analysis-only-ready | owner.read, financial.statement.read | occupancy.read, maintenance.read, delinquency.read, report.prepare | — | — | — |
+| Management Fee Review | analysis-only-ready | owner.read | document.read, ledger.read, gl.read, journal_entry.prepare | — | money | — |
+| Client Fit & Profitability | analysis-only-ready | owner.read | gl.read, staff.read, analytics.read, report.prepare | — | — | — |
+| Client Retention & Service Review | analysis-only-ready | owner.read | communication.read, analytics.read, report.prepare | — | — | — |
 
 ## Lease Administration & Legal Operations Lead
 
@@ -394,8 +394,8 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 
 ### Listing Readiness (`leasing-marketing.listing-readiness`)
 
-- **Evidence it may read:** unit.read, listing.read via `get_property_breakdown`, `get_available_units`.
-- **Declared but unreadable today (stated, never guessed):** turn.read, inspection.read, compliance.read.
+- **Evidence it may read:** unit.read, listing.read, turn.read via `get_property_breakdown`, `get_available_units`, `get_turns`.
+- **Declared but unreadable today (stated, never guessed):** inspection.read, compliance.read.
 - **Returns:** pass or fail with each missing item named; the source record behind each checked item.
 - **Consumed by:** `brokerage`, which returns it to Aval One.
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; pass a unit whose turn is not verified rent-ready unless the workspace allows pre-leasing and the listing says so; pass a listing that has no approved asking rent; steer a prospect toward or away from a unit on any protected characteristic; promise approval, pricing or availability the records do not support.
@@ -578,8 +578,8 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 
 ### Renewal Incentive Strategy (`renewals.renewal-incentive-strategy`)
 
-- **Evidence it may read:** renewal.read, analytics.read via `get_expiring_leases`, `get_metric_series`, `get_operations_insights`.
-- **Declared but unreadable today (stated, never guessed):** turn.read, budget.read.
+- **Evidence it may read:** renewal.read, turn.read, analytics.read via `get_expiring_leases`, `get_turns`, `get_metric_series`, `get_operations_insights`.
+- **Declared but unreadable today (stated, never guessed):** budget.read.
 - **Returns:** incentive policy proposal with cost and expected effect; negotiation authority ranges.
 - **Consumed by:** `lead.renewals`, which returns it to Aval One.
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on report.prepare (prepare it for a person); coordinate incentive levels with other owners or managers outside the workspace; target incentives by a protected characteristic or a proxy for one; offer terms outside the approved renewal policy; send a rent increase notice that jurisdiction rules have not cleared.
@@ -620,8 +620,8 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 
 ### Spend Approval Preparation (`maintenance.spend-approval-preparation`)
 
-- **Evidence it may read:** work_order.read via `get_maintenance_performance`.
-- **Declared but unreadable today (stated, never guessed):** budget.read, owner.read.
+- **Evidence it may read:** work_order.read, owner.read via `get_maintenance_performance`, `get_owners`.
+- **Declared but unreadable today (stated, never guessed):** budget.read.
 - **Returns:** approval request with amount, rationale and alternatives; named approver per policy.
 - **Consumed by:** `maintenance`, which returns it to Aval One; proposals go to an authorized person (money).
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on purchase_order.prepare (prepare it for a person); split one repair into smaller requests to stay under a threshold; mark spend as approved on an approver's behalf; tell a resident to perform unsafe work; draw a licensed-trade conclusion about gas, electrical, structural or life-safety conditions; treat a vendor's word as verified completion where verification is required.
@@ -650,6 +650,40 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 - **Consumed by:** `maintenance`, which returns it to Aval One.
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on report.prepare (prepare it for a person); attribute a repeat fault to a resident's conduct without evidence in the work orders; state a root cause the work-order history does not support; tell a resident to perform unsafe work; draw a licensed-trade conclusion about gas, electrical, structural or life-safety conditions; treat a vendor's word as verified completion where verification is required.
 - **Done when:** Each repeat pattern is listed with its work orders and a recommended next step routed to the Lead. **Not done when:** A count of repeats was produced but no next step was recorded or routed.
+
+### Turn Budget (`turns.turn-budget`)
+
+- **Evidence it may read:** turn.read, vendor.read via `get_turns`, `get_vendors`.
+- **Declared but unreadable today (stated, never guessed):** budget.read.
+- **Returns:** priced scope with the price source per line; total against budget and threshold; approval request where required.
+- **Consumed by:** `lead.turns`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on turn.prepare (prepare it for a person); split one turn's cost into parts to stay under an approval threshold; price a line from a model estimate where the price book or a bid has a figure; mark a unit rent-ready before its final inspection passes; activate a listing for a unit that is not rent-ready.
+- **Done when:** Every scope line is priced from a cited source and any approval the threshold requires is recorded. **Not done when:** An estimate was produced but the threshold approval it needs is missing.
+
+### Turn Utility Coordination (`turns.turn-utility-coordination`)
+
+- **Evidence it may read:** utility.read, turn.read, lease.read via `get_utility_bills`, `get_turns`, `list_documents`, `read_document`.
+- **Returns:** service confirmed for each dependent task date; meter reads recorded; requests to utilities for gaps.
+- **Consumed by:** `lead.turns`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on utility.prepare (prepare it for a person); let service be shut off in a vacant unit where freeze, mould or inspection risk depends on it; bill vacancy-period usage to the outgoing or incoming resident; mark a unit rent-ready before its final inspection passes; activate a listing for a unit that is not rent-ready.
+- **Done when:** Service is confirmed for every task and inspection date in the plan, and move-out and move-in meter reads are recorded. **Not done when:** A transfer request was made but service is not confirmed before the dependent task.
+
+### Turn Timeline (`turns.turn-timeline`)
+
+- **Evidence it may read:** turn.read, work_order.read via `get_turns`, `get_maintenance_performance`.
+- **Returns:** projected ready date per turn; slipping tasks with cause and owner; ready date shared with leasing.
+- **Consumed by:** `lead.turns`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on report.prepare (prepare it for a person); give leasing a ready date the dependency plan does not support; reset a target date to hide slippage; mark a unit rent-ready before its final inspection passes; activate a listing for a unit that is not rent-ready.
+- **Done when:** Every active turn has a current projected ready date and each slipping task has a cause and an owner. **Not done when:** A status report was produced while late tasks are unassigned.
+
+### Turn Cost Variance (`turns.turn-cost-variance`)
+
+- **Evidence it may read:** turn.read via `get_turns`.
+- **Declared but unreadable today (stated, never guessed):** invoice.read, budget.read.
+- **Returns:** actual against budget by line; explained variances above threshold; price book update proposals.
+- **Consumed by:** `lead.turns`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on report.prepare (prepare it for a person); count an unmatched or unapproved invoice as an actual turn cost; move cost between turns or to capital to shrink a variance; mark a unit rent-ready before its final inspection passes; activate a listing for a unit that is not rent-ready.
+- **Done when:** Each completed turn has actual against budget by line with every variance above threshold explained. **Not done when:** Variance was computed before all the turn's invoices were matched.
 
 ### General Ledger Review (`finance.general-ledger-review`)
 
@@ -887,6 +921,90 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; send a renewal or termination notice to a vendor; pay an invoice; dispatch a vendor whose insurance has lapsed; approve spend above an approval threshold.
 - **Done when:** Each upcoming date inside the alert horizon has an alert acknowledged by its contract owner before the notice window closes. **Not done when:** An alert was generated but nobody acknowledged it and the auto-renewal window passed.
 
+### Owner & Client Onboarding (`owner-services.owner-and-client-onboarding`)
+
+- **Evidence it may read:** owner.read, document.read, document.extract via `get_owners`, `list_documents`, `read_document`.
+- **Returns:** owner record with fee, reserve and approval terms from the agreement; onboarding checklist with missing items; portal access request.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on property.setup.prepare (prepare it for a person); record owner bank details received only by unverified email; set approval thresholds that differ from the signed agreement; execute a distribution; share one owner's data with another.
+- **Done when:** Every checklist item is complete or listed as missing with an owner, and the fee, reserve and approval terms in the record match the signed agreement. **Not done when:** The owner record was created but the agreement terms and bank details were not verified.
+
+### Owner Portal Support (`owner-services.owner-portal-support`)
+
+- **Evidence it may read:** owner.read, document.read, knowledge.read, communication.read via `get_owners`, `list_documents`, `read_document`, `read_conversation`, `list_conversations`.
+- **Returns:** answer or steps; access issue routed to the person who manages access.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; change an owner's portal permissions; reset access without identity verification; execute a distribution; share one owner's data with another.
+- **Done when:** The owner's question is answered from their own records, or the access issue is assigned to a named person. **Not done when:** The owner was sent generic portal instructions that do not address the question asked.
+
+### Owner Statement (`owner-services.owner-statement`)
+
+- **Evidence it may read:** owner.read, ledger.read, financial.statement.read via `get_owners`, `get_delinquent_accounts`, `get_operating_statement`.
+- **Declared but unreadable today (stated, never guessed):** bank.read.
+- **Returns:** owner statement with beginning and ending balance; notes on material items; reconciliations the statement depends on.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on owner.statement.prepare (prepare it for a person); build a statement from an unreconciled period; adjust a statement figure without a posted entry behind it; execute a distribution; share one owner's data with another.
+- **Done when:** The statement is built only from accounts reconciled for the period, its beginning balance equals the prior ending balance, and it is approved for issue. **Not done when:** The statement was generated and the owner's distribution was treated as done.
+
+### Owner Distribution Preparation (`owner-services.owner-distribution-preparation`)
+
+- **Evidence it may read:** owner.read, ledger.read via `get_owners`, `get_delinquent_accounts`.
+- **Declared but unreadable today (stated, never guessed):** invoice.read.
+- **Returns:** distribution calculation with each deduction named; prepared distribution request; approval request.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One; proposals go to an authorized person (money).
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on owner.distribution.prepare (prepare it for a person); prepare a distribution that takes the owner's balance below the agreed reserve; prepare a distribution to a bank account changed since the last verified one; execute a distribution; share one owner's data with another.
+- **Done when:** The approved request has been handed to the payment service, and execution is reported only once the service returns a transaction reference. **Not done when:** The distribution was approved and reported to the owner as paid before the payment service returned a transaction reference.
+
+### Owner Contribution Request (`owner-services.owner-contribution-request`)
+
+- **Evidence it may read:** owner.read, ledger.read, document.read via `get_owners`, `get_delinquent_accounts`, `list_documents`, `read_document`.
+- **Declared but unreadable today (stated, never guessed):** invoice.read.
+- **Returns:** prepared contribution request with amount, reason and due date; supporting bills or estimates; follow-up schedule.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One; proposals go to an authorized person (money).
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on owner.contribution.prepare (prepare it for a person); request more than the documented shortfall and need; hold a safety repair pending a contribution without escalating it; execute a distribution; share one owner's data with another.
+- **Done when:** An approved request has been sent to the owner and the contribution is confirmed as received on the owner ledger. **Not done when:** The owner was told funds were needed but no request with amount and due date was issued, or it was issued and never followed up.
+
+### Property Reserve Monitor (`owner-services.property-reserve-monitor`)
+
+- **Evidence it may read:** owner.read, ledger.read via `get_owners`, `get_delinquent_accounts`.
+- **Declared but unreadable today (stated, never guessed):** invoice.read, bank.read.
+- **Returns:** reserve status per owner; dated alert with projected shortfall routed to the account manager.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; hold a scheduled payable to keep a balance above reserve; use a reserve amount other than the agreement's; execute a distribution; share one owner's data with another.
+- **Done when:** Every owner's reserve status is computed for the day and each projected shortfall has an alert assigned to the account manager. **Not done when:** A low balance was noticed but no dated alert with an amount was routed.
+
+### Property Performance Brief (`owner-services.property-performance-brief`)
+
+- **Evidence it may read:** owner.read, financial.statement.read, occupancy.read, maintenance.read, delinquency.read via `get_owners`, `get_operating_statement`, `get_portfolio_metrics`, `get_property_breakdown`, `get_maintenance_performance`, `get_delinquent_accounts`.
+- **Returns:** brief with each claim tied to a figure and its period; items needing owner attention.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on report.prepare (prepare it for a person); present a projected figure as achieved; omit an adverse variance the statement shows; execute a distribution; share one owner's data with another.
+- **Done when:** Every figure in the brief names its period and source, and the brief is approved to send with the statement. **Not done when:** A narrative was written without figures, or with figures from different periods.
+
+### Management Fee Review (`owner-services.management-fee-review`)
+
+- **Evidence it may read:** owner.read, document.read, ledger.read, gl.read via `get_owners`, `list_documents`, `read_document`, `get_delinquent_accounts`, `get_accounting_breakdown`.
+- **Returns:** recomputed fees with the term applied; differences from fees charged; prepared correcting entries.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One; proposals go to an authorized person (money).
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on journal_entry.prepare (prepare it for a person); apply a fee rate other than the owner's signed agreement; offset an overcharge against a future period without approval; execute a distribution; share one owner's data with another.
+- **Done when:** Every fee charged in the period is recomputed from a cited agreement term and either matches or has a prepared correction. **Not done when:** Fees were checked against a standard rate rather than the owner's agreement.
+
+### Client Fit & Profitability (`owner-services.client-fit-and-profitability`)
+
+- **Evidence it may read:** owner.read, gl.read, staff.read, analytics.read via `get_owners`, `get_accounting_breakdown`, `get_workspace_staff`, `get_metric_series`, `get_operations_insights`.
+- **Returns:** profitability and fit assessment with figures for a named window; options such as repricing or offboarding for a manager.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on report.prepare (prepare it for a person); share the assessment with the client; use an owner's personal characteristics as a fit factor; execute a distribution; share one owner's data with another.
+- **Done when:** The assessment shows revenue and cost per account for a named window with sources and is delivered to the company's decision maker. **Not done when:** An account was labelled unprofitable without the cost figures behind it.
+
+### Client Retention & Service Review (`owner-services.client-retention-and-service-review`)
+
+- **Evidence it may read:** owner.read, communication.read, analytics.read via `get_owners`, `read_conversation`, `list_conversations`, `get_metric_series`, `get_operations_insights`.
+- **Returns:** service review with measured figures; retention risk flag with reasons; follow-up plan for the account manager.
+- **Consumed by:** `lead.owner-services`, which returns it to Aval One.
+- **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on report.prepare (prepare it for a person); offer a fee reduction or credit to retain an owner; contact an owner about cancelling without the account manager; execute a distribution; share one owner's data with another.
+- **Done when:** The review states measured service figures for the period, and each at-risk account has a follow-up assigned to a named manager. **Not done when:** A risk score was produced without the service figures behind it or anyone to follow up.
+
 ### Lease Abstract (`lease-admin.lease-abstract`)
 
 - **Evidence it may read:** lease.read, document.read, document.extract via `list_documents`, `read_document`.
@@ -990,8 +1108,7 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 
 ### Property Setup (`property-operations.property-setup`)
 
-- **Evidence it may read:** property.read, document.read, document.extract via `get_property_breakdown`, `list_documents`, `read_document`.
-- **Declared but unreadable today (stated, never guessed):** owner.read.
+- **Evidence it may read:** property.read, owner.read, document.read, document.extract via `get_property_breakdown`, `get_owners`, `list_documents`, `read_document`.
 - **Returns:** property record with buildings, entity and jurisdiction; list of missing setup fields.
 - **Consumed by:** `realEstate`, which returns it to Aval One.
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on property.setup.prepare (prepare it for a person); guess a property's jurisdiction from a mailing address without checking the physical location; attach the property to an owner entity the documents do not name; change occupancy state without a source record.
@@ -1007,8 +1124,7 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 
 ### Occupancy State Coordination (`property-operations.occupancy-state-coordination`)
 
-- **Evidence it may read:** unit.read, occupancy.read, lease.read, data.conflicts.read via `get_property_breakdown`, `get_available_units`, `get_portfolio_metrics`, `list_documents`, `read_document`, `get_data_conflicts`.
-- **Declared but unreadable today (stated, never guessed):** turn.read.
+- **Evidence it may read:** unit.read, occupancy.read, lease.read, turn.read, data.conflicts.read via `get_property_breakdown`, `get_available_units`, `get_portfolio_metrics`, `list_documents`, `read_document`, `get_turns`, `get_data_conflicts`.
 - **Returns:** units whose state disagrees with a source record; state changes proposed with the source record cited.
 - **Consumed by:** `realEstate`, which returns it to Aval One.
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; mark a unit occupied without an executed lease or recorded move-in; change occupancy state without a source record.
@@ -1084,8 +1200,7 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 
 ### Occupancy & Vacancy Analysis (`portfolio-strategy.occupancy-and-vacancy-analysis`)
 
-- **Evidence it may read:** occupancy.read, unit.read, portfolio.series.read, lease.read via `get_portfolio_metrics`, `get_property_breakdown`, `get_available_units`, `get_metric_series`, `list_documents`, `read_document`.
-- **Declared but unreadable today (stated, never guessed):** turn.read.
+- **Evidence it may read:** occupancy.read, unit.read, portfolio.series.read, lease.read, turn.read via `get_portfolio_metrics`, `get_property_breakdown`, `get_available_units`, `get_metric_series`, `list_documents`, `read_document`, `get_turns`.
 - **Returns:** physical and economic occupancy by property and unit type; vacancy concentration findings; forward exposure from notices.
 - **Consumed by:** `portfolioOutlook`, which returns it to Aval One.
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; count a leased-not-moved-in unit as occupied without saying so; count a unit down for renovation as available vacancy; present a scenario as a forecast; fabricate a valuation.
@@ -1093,8 +1208,8 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 
 ### Reserve Strategy (`portfolio-strategy.reserve-strategy`)
 
-- **Evidence it may read:** financial.statement.read via `get_operating_statement`.
-- **Declared but unreadable today (stated, never guessed):** budget.read, owner.read.
+- **Evidence it may read:** owner.read, financial.statement.read via `get_owners`, `get_operating_statement`.
+- **Declared but unreadable today (stated, never guessed):** budget.read.
 - **Returns:** recommended reserve level and contribution rate; funding gap by year.
 - **Consumed by:** `portfolioOutlook`, which returns it to Aval One.
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; acting on report.prepare (prepare it for a person); change an agreed reserve amount; recommend a level that leaves plan items unfunded without stating the gap; present a scenario as a forecast; fabricate a valuation.
@@ -1245,8 +1360,7 @@ Every analysis-only-ready Specialist, with what it may read, what it returns, wh
 
 ### Entity Deduplication (`data-integrations.entity-deduplication`)
 
-- **Evidence it may read:** provenance.read, data.conflicts.read, resident.read, vendor.read via `get_operations_insights`, `get_data_conflicts`, `read_maintenance_context`, `get_vendors`.
-- **Declared but unreadable today (stated, never guessed):** owner.read.
+- **Evidence it may read:** provenance.read, data.conflicts.read, resident.read, owner.read, vendor.read via `get_operations_insights`, `get_data_conflicts`, `read_maintenance_context`, `get_owners`, `get_vendors`.
 - **Returns:** proposed merges with evidence and conflicting fields; accept or reject decision.
 - **Consumed by:** `lead.data-integrations`, which returns it to Aval One.
 - **Forbidden to execute:** any tool that changes a record, sends a message or moves money; merge records without a person's acceptance; use a protected characteristic, or one inferred from a name, as match evidence; overwrite provider-authoritative data with a derived value.

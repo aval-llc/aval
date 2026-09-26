@@ -249,7 +249,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runOperatingProfileCases(t, { session });
     await runAskOrchestrationCases(t, { config, administrator });
     await runWaitsCases(t, { session, userA });
-    await runRecordToolsCases(t, { session });
+    await runRecordToolsCases(t, { session, config, administrator });
     await runHierarchyE2ECases(t, { config, administrator });
     await runExpertiseCases(t, { session, userA, userB });
     await runSeatSenderCases(t, { session, userA, userB });

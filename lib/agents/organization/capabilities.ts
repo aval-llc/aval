@@ -138,6 +138,7 @@ export const CAPABILITY_TOOLS: Partial<Record<CanonicalCapability, readonly stri
   "property.read": ["get_property_breakdown"],
   "unit.read": ["get_property_breakdown", "get_available_units"],
   "occupancy.read": ["get_portfolio_metrics", "get_property_breakdown"],
+  "owner.read": ["get_owners"],
 
   "lead.read": ["get_leads", "get_leasing_funnel"],
   "listing.read": ["get_available_units"],
@@ -196,6 +197,10 @@ export const CAPABILITY_TOOLS: Partial<Record<CanonicalCapability, readonly stri
   "work_order.update": ["update_work_order_status"],
   "work_order.close": ["close_work_order"],
   "vendor.dispatch": ["dispatch_vendor"],
+  // A turn is derived, not stored: units on notice or vacant-not-ready, their
+  // move-out and their work orders. Scope, budget and target date are not
+  // recorded anywhere, and the read says so.
+  "turn.read": ["get_turns"],
 
   "analytics.read": ["get_metric_series", "get_operations_insights"],
   "provenance.read": ["get_operations_insights", "get_data_conflicts"],

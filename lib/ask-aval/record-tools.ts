@@ -14,10 +14,11 @@ import type { DbSession } from "@/db/postgres/session";
  * capabilities.ts) is what brings them to the Specialists that need them.
  */
 
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import type { ToolSchema } from "./model-types";
 import { noDataAvailable } from "./portfolio-data";
-import { integrationConnections, leases, organizationMembers, units, users } from "@/db/postgres/schema";
+import { integrationConnections, leases, organizationMembers, ownershipEntities, properties, units, users, workOrders } from "@/db/postgres/schema";
+import { OPEN_WORK_ORDER_STATUSES } from "@/lib/operations/types";
 import { listVendors } from "@/lib/operations/maintenance";
 import { listLeads, availableUnits } from "@/lib/operations/leasing";
 import { listBills, listMeters } from "@/lib/infrastructure/meters";
@@ -57,6 +58,16 @@ export const RECORD_TOOLS: ToolSchema[] = [
     name: "get_workspace_staff",
     description: "The people in this workspace and their roles (display names only). Use for routing staff work, on-call and access reviews.",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_owners",
+    description: "The ownership entities (owners, management clients) behind the properties you can see, each with its properties. No contact or banking details. Use for owner statements, distributions, owner communication and client reviews.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_turns",
+    description: "Units in a turn, derived from records: on notice (upcoming) or vacant and not ready (make-ready), with the move-out date, days vacant and the unit's work orders since. Turn scope, budget and target ready date are not recorded and are reported as such. Use for turn scope, sequencing, timeline and cost.",
+    input_schema: { type: "object", properties: { phase: { type: "string", enum: ["upcoming", "make_ready"] } } },
   },
 ];
 
@@ -111,6 +122,60 @@ export async function runRecordTool(dbSession: DbSession, name: string, input: R
     case "get_workspace_staff": {
       const rows = await dbSession.db.select({ name: users.displayName, role: organizationMembers.role }).from(organizationMembers).innerJoin(users, eq(users.id, organizationMembers.userId)).where(eq(organizationMembers.organizationId, organizationId)).orderBy(desc(organizationMembers.createdAt));
       return { json: { available: true, staff: rows }, numbers: [] };
+    }
+    case "get_owners": {
+      // Owners are reached through properties, not read directly:
+      // ownership_entities is visible org-wide under RLS, while properties are
+      // filtered by the person's resource grants. A person granted one property
+      // therefore sees that property's owner and no other.
+      const rows = await dbSession.db
+        .select({ id: ownershipEntities.id, name: ownershipEntities.name, legalName: ownershipEntities.legalName, status: ownershipEntities.status, propertyId: properties.id, propertyName: properties.name })
+        .from(properties)
+        .innerJoin(ownershipEntities, and(eq(ownershipEntities.organizationId, properties.organizationId), eq(ownershipEntities.id, properties.ownershipEntityId)))
+        .where(eq(properties.organizationId, organizationId))
+        .orderBy(ownershipEntities.name, properties.name)
+        .limit(500);
+      if (!rows.length) return { json: noDataAvailable("ownership records for the properties you can see"), numbers: [] };
+      const owners = new Map<string, { id: string; name: string; legal_name: string | null; status: string; properties: { id: string; name: string }[] }>();
+      for (const row of rows) {
+        const owner = owners.get(row.id) ?? { id: row.id, name: row.name, legal_name: row.legalName, status: row.status, properties: [] };
+        owner.properties.push({ id: row.propertyId, name: row.propertyName });
+        owners.set(row.id, owner);
+      }
+      return { json: { available: true, owners: [...owners.values()] }, numbers: [] };
+    }
+    case "get_turns": {
+      const phases = input.phase === "upcoming" ? ["notice"] : input.phase === "make_ready" ? ["vacant_not_ready"] : ["notice", "vacant_not_ready"];
+      const turning = await dbSession.db.select().from(units).where(and(eq(units.organizationId, organizationId), inArray(units.status, phases))).orderBy(units.vacantSince).limit(100);
+      if (!turning.length) return { json: { available: true, turns: [], note: "No unit is on notice or vacant and not ready.", derived_from: ["units", "leases", "work_orders"] }, numbers: [] };
+      const ids = turning.map((unit) => unit.id);
+      const [unitLeases, unitOrders] = await Promise.all([
+        dbSession.db.select({ unitId: leases.unitId, endDate: leases.endDate, status: leases.status }).from(leases).where(and(eq(leases.organizationId, organizationId), inArray(leases.unitId, ids))).orderBy(desc(leases.endDate)),
+        dbSession.db.select().from(workOrders).where(and(eq(workOrders.organizationId, organizationId), inArray(workOrders.unitId, ids))).orderBy(desc(workOrders.reportedAt)),
+      ]);
+      const open = new Set<string>(OPEN_WORK_ORDER_STATUSES);
+      const turns = turning.map((unit) => {
+        const moveOut = unitLeases.find((lease) => lease.unitId === unit.id && lease.endDate)?.endDate ?? null;
+        // The turn's work is what was reported on the unit since it became
+        // vacant, or since the move-out date for a unit still on notice.
+        const since = unit.vacantSince ?? moveOut;
+        const orders = unitOrders.filter((order) => order.unitId === unit.id && (open.has(order.status) || (since !== null && order.reportedAt >= since)));
+        const sum = (values: (number | null)[]) => values.reduce<number>((total, value) => total + (value ?? 0), 0);
+        return {
+          unit_id: unit.id, property_id: unit.propertyId, unit: unit.unitNumber,
+          phase: unit.status === "notice" ? "upcoming" : "make_ready",
+          move_out_on: iso(moveOut),
+          days_vacant: unit.vacantSince ? Math.floor((now.getTime() - unit.vacantSince.getTime()) / DAY) : null,
+          work_orders: orders.map((order) => ({ id: order.id, category: order.category, status: order.status, summary: order.summary, vendor_id: order.vendorId, estimate_cents: order.estimateCents, actual_cost_cents: order.actualCostCents })),
+          open_work_orders: orders.filter((order) => open.has(order.status)).length,
+          estimate_cents: sum(orders.map((order) => order.estimateCents)),
+          actual_cost_cents: sum(orders.map((order) => order.actualCostCents)),
+        };
+      });
+      return {
+        json: { available: true, derived_from: ["units", "leases", "work_orders"], not_recorded: ["turn scope", "turn budget", "target ready date"], turns },
+        numbers: turns.flatMap((turn) => [turn.days_vacant, turn.estimate_cents, turn.actual_cost_cents, turn.open_work_orders].filter((value): value is number => typeof value === "number")),
+      };
     }
   }
   return null;
