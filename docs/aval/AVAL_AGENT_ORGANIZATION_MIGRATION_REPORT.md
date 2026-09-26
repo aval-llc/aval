@@ -1,7 +1,7 @@
 # Aval Agent Organization — Migration Report
 
-**Phase covered:** B (organizational model), per directive §38, plus the gap-closure pass (items 1–8, §12)
-**Date:** 2026-09-25
+**Phase covered:** B (organizational model), per directive §38, plus the gap-closure pass (items 1–8, §12) and the capability-architecture pass (§13)
+**Date:** 2026-09-25, §13 on 2026-09-26
 **Branch:** `phase-b-agent-organization`
 **Audit this builds on:** `docs/aval/AGENT_ORGANIZATION_EXISTING_SYSTEM_AUDIT.md`
 
@@ -254,3 +254,101 @@ Every item was tested against Postgres through the public routes, with only the 
 - The 24-step root left a Specialist under a Lead with 3 steps (see §2).
 
 **Limits.** The model is scripted, and providers are fixtures. This proves the orchestration and its failure handling, not model quality or any live provider.
+
+## 13. Capability architecture (2026-09-26)
+
+Does the 266-Specialist organization map cleanly onto Aval's capabilities and runtime? It now maps as **Specialist → canonical capability → tool resolver**, with every gap named. No Specialist-specific tool was added.
+
+### Requirement audit
+
+`SPECIALIST_REQUIREMENT_AUDIT.md` classifies every missing requirement of the 138 incomplete Specialists at `7d529fb`: 189 pairs over 34 capabilities, each exactly one class, with evidence.
+
+| A wrong mapping | B new capability | C provider workflow | D analysis by design | E decision support | F duplicate | G invalid |
+|---|---|---|---|---|---|---|
+| 13 | 99 | 52 | 0 | 1 | 22 | 2 |
+
+D≈0 is a finding. The Specialists whose product is analysis had already been separated out. What remained were missing *reads*.
+
+### Normalization (`511e68a`, `8c1dd97`)
+
+- **A:** `document.extract`, `sop.read` and `knowledge.read` now resolve to the document reads. Vendor COI reads `vendor.insurance.read`. Three domain-core reads became `contextOnly` where the Specialist's boundary shows they are context.
+- **F:** six duplicate reads were folded into one canonical each (`CONSOLIDATED_CAPABILITIES`). Only Credit Screening Coordination orders a screening report. `task.route` was declared by 43 Specialists to mean "hand this off", which is the hierarchy's job. It now stays only on Staff Task Routing, and `route` is an act.
+- **G/E:** On-call no longer claims to route. Workload balancing proposes rather than routes. `task.read` and `staff.schedule.read` name the reads those Specialists need.
+- **Readiness is now what a Specialist can execute.** Four "analysis-only" Specialists held executing tools (including `payment_plan.create`), and 77 "complete" ones executed nothing. `lease.execute` counted as tooled although `execute_lease` is unimplemented.
+
+### Readiness now
+
+| | Count |
+|---|---|
+| EXECUTION_READY | 28 |
+| ANALYSIS_ONLY_READY | 128 |
+| INCOMPLETE | 110 |
+
+Every analysis-only Specialist carries a derived `AnalysisContract`: the evidence it may read and the tools for it, the evidence it cannot read yet, what it returns, the Lead that consumes it, the approval class of its proposals, what it must never execute, and its completion contract. The evaluation suite asserts each one is offered no mutating tool (`SPECIALIST_READINESS.md`).
+
+### Canonical capabilities
+
+- **Built** (`f70f216`): `owner.read` (`get_owners`) and `turn.read` (`get_turns`), over records Aval already holds.
+  - Owners are reached through grant-filtered properties, because `ownership_entities` RLS is org-wide. A one-property grant sees one owner (Postgres case).
+  - A turn is derived from unit status, move-out and work orders. It states that scope, budget and target date are not recorded.
+- **Defined** (`8255174`): the 26 capabilities still missing. Each has a contract in `capability-contracts.ts`, grouped by domain: what it returns, its risk class, possible sources with what exists in this repo (none), verification, evidence, and what it is blocked on. A test holds the list equal to the live gap set.
+
+### Budgets (`d7ddf66`)
+
+The halving rule was replaced (`budget-model.ts`):
+- orchestration: 12 steps at any depth;
+- Specialist execution, by contract: 12 execution-ready, 8 analysis-only, 6 incomplete;
+- peer help: at most 6;
+- retry: no step;
+- replan: attempt-policy count;
+- waiting on children, peers, approvals or providers: no step.
+
+All of it comes from one pool per Work (120 steps / 600k tokens), reserved under a lock. A child is funded in full or refused, and delegating takes nothing from the delegator. `rootMaxSteps` is gone.
+
+Proven in unit and Postgres cases:
+- the three hierarchy shapes;
+- a four-way fan-out where the fourth Specialist gets what the first got (the old rule left it 2 steps);
+- two delegations racing for a Work's last room: exactly one is funded;
+- exhaustion is refused without writing a task;
+- a superseded node refunds what it did not spend.
+
+### Invariants at every level (`1cf1e79`, `23a87fb`)
+
+`invariant-matrix-cases.mjs` runs one real chain (Aval One → Lead → Specialist → related Lead as peer) and the same probes through `executeTool` at each level. Each denial is asserted for its named cause:
+- unheld permission;
+- no widening through a peer;
+- held acts gated;
+- another person refused;
+- peer cycles refused;
+- employee grants, with a control;
+- cancellation;
+- revoked membership.
+
+**Defect found and fixed:** the approval-resume path executed calls that shared the approved call's message without the offered-tools gate. That bypassed expertise narrowing, the PMS matrix and employee capability grants (never permission). A regression test fails on the old code.
+
+Attempt history, retry versus replan, evidence flowing upward and waits are asserted through the E2Es at the Lead and Specialist levels. Every level runs the same `advanceTask`.
+
+### Organization E2E (`5d7f588`)
+
+`organization-e2e-cases.mjs`, through the public routes:
+- 16 ready Lead domains complete the whole chain with evidence flowing upward.
+- The 6 domains with no ready Specialist are refused by name and handed to a person with the gap in the reason.
+- Peer help completes.
+- A connection revoked between two turns is refused at execution.
+- A provider wait parks without spending steps and completes on reconnection.
+
+With `hierarchy-e2e-cases.mjs`, every requested injection is covered.
+
+Middleware changes this exposed:
+- A plan that assigns a Specialist tools it is not offered is refused with the missing capability.
+- A planner's hand-off carries the planning refusal.
+
+### Not validated
+
+- **Payments:** `post_payment`/`create_payment_plan` guards pass against fixtures only. No sandbox or live PMS ledger has been exercised: fixture ≠ sandbox ≠ live.
+- **Providers:** none of the 26 defined capabilities has a provider. No provider path was exercised against a live tenant.
+- **Signed-in UI:** unverified. This machine has no container runtime, so local Supabase Auth cannot run. The Library was checked only in the fixture harness (§7).
+- **Employees:** employee-owned Work must be granted coordination (`plan_goal`, `get_goal_plan`) explicitly, like any other capability. This is by design, but setup should surface it.
+
+**Checks at `5d7f588`:** typecheck; 1,066 unit; 281/281 Postgres (harness cluster); i18n parity; production build; lint 0 errors (5 pre-existing warnings in untouched UI files).
+
