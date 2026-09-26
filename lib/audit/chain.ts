@@ -63,6 +63,8 @@ export type AuditEntryKind =
   // workspace, so the record of what it was permitted to become belongs beside
   // the record of what it did.
   | "employee_created"
+  // The workspace changed what business it runs, and so which Leads its work may reach.
+  | "operating_profile_changed"
   | "employee_updated"
   | "employee_activated"
   | "employee_paused"

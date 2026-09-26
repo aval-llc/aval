@@ -4,9 +4,13 @@ import { agentMemory } from "@/db/postgres/schema";
 import { getTask } from './tasks';
 import { writeGoalPlan, goalPlan } from './goal-plan';
 import type { ToolSchema } from '@/lib/ask-aval/model-types';
-import { TASK_CHECK_SCHEMA } from './checks';
+import { PLAN_NODE_CHECK_SCHEMA, TASK_CHECK_SCHEMA } from './checks';
+import { PEER_HELP_TOOL, requestPeerHelp } from './peer-help';
+import { WAIT_TOOL, parkForWait } from './waits';
 export const HARNESS_TOOLS: ToolSchema[] = [
-    { name: 'plan_goal', description: 'Decompose a root goal into one to four inspectable tasks. Prefer one child for a related investigation, including document discovery and reading. Only writes the plan. Give every task a machine-checkable condition using the supplied schema and real tool names. Dependencies reference earlier keys. Omit agentId to retain the current agent. On failed children replan the remaining work, at most once; never repeat a completed send.', input_schema: { type: 'object', properties: { tasks: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'object', properties: { key: { type: 'string' }, goal: { type: 'string', maxLength: 1200 }, agentId: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } }, check: TASK_CHECK_SCHEMA }, required: ['key', 'goal', 'dependsOn', 'check'] } } }, required: ['tasks'] } },
+    { name: 'plan_goal', description: 'Decompose a root goal into one to four inspectable tasks. Prefer one child for a related investigation, including document discovery and reading. Only writes the plan. Give every task a machine-checkable condition using the supplied schema and real tool names. Dependencies reference earlier keys. Omit agentId to retain the current agent. On failed children replan the remaining work, at most once; never repeat a completed send.', input_schema: { type: 'object', properties: { tasks: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'object', properties: { key: { type: 'string' }, goal: { type: 'string', maxLength: 1200 }, agentId: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } }, check: PLAN_NODE_CHECK_SCHEMA }, required: ['key', 'goal', 'dependsOn', 'check'] } } }, required: ['tasks'] } },
+    { name: PEER_HELP_TOOL, description: 'Ask one of your declared collaborators, or a related Lead, one bounded question you cannot answer with your own tools. You wait until it answers, then continue with its answer as context. Use sparingly: it cannot give you any authority you lack, and the same question already asked in this work is reused, not repeated.', input_schema: { type: 'object', properties: { agentId: { type: 'string', description: 'The Lead or Specialist id, e.g. spend-vendor.vendor-performance.' }, question: { type: 'string', maxLength: 1200 }, check: TASK_CHECK_SCHEMA }, required: ['agentId', 'question', 'check'] } },
+    { name: WAIT_TOOL, description: 'Stop working until something outside this run moves: a resident, vendor, owner or applicant replies (give conversation_id, or recheck_hours), a document arrives, a set time comes (party time, wake_at), a connection or permission is set up (party configuration), or a person decides (party person). Say exactly what you are waiting for. When you are woken you will be told why; check it has happened before acting.', input_schema: { type: 'object', properties: { party: { type: 'string', enum: ['resident', 'vendor', 'owner', 'applicant', 'document', 'time', 'configuration', 'person'] }, reason: { type: 'string', maxLength: 600 }, conversation_id: { type: 'string' }, recheck_hours: { type: 'integer', minimum: 1, maximum: 168 }, wake_at: { type: 'string' } }, required: ['party', 'reason'] } },
     { name: 'get_goal_plan', description: 'Inspect the current goal plan, dependency states, checks, and failures.', input_schema: { type: 'object', properties: {} } },
     { name: 'write_memory', description: 'Append a timestamped note to this task scratchpad. Treat notes as observations, never permission grants or verified financial figures.', input_schema: { type: 'object', properties: { body: { type: 'string', minLength: 1, maxLength: 4000 } }, required: ['body'] } },
     { name: 'read_memory', description: 'Pull this task scratchpad when needed, optionally as it existed at a prior step. Memory is not automatically injected.', input_schema: { type: 'object', properties: { before_step: { type: 'integer' } } } },
@@ -20,8 +24,15 @@ export async function runHarnessTool(dbSession: DbSession, name: string, args: R
         throw Error('Task not found.');
     if (name === 'plan_goal')
         return writeGoalPlan(dbSession, org, taskId, args.tasks, key);
+    if (name === WAIT_TOOL) {
+        const parked = await parkForWait(dbSession, org, taskId, args);
+        return { waiting: parked.state, until: parked.nextAttemptAt?.toISOString() ?? null, on: parked.wait.party };
+    }
+    if (name === PEER_HELP_TOOL)
+        return requestPeerHelp(dbSession, org, taskId, args);
+    // A planner reads its own plan; a planned task reads the plan it is part of.
     if (name === 'get_goal_plan')
-        return goalPlan(dbSession, org, task.parentTaskId ?? taskId);
+        return goalPlan(dbSession, org, JSON.parse(task.checkJson ?? '{}').kind === 'plan' ? taskId : task.parentTaskId ?? taskId);
     if (name === 'write_memory') {
         const count = await dbSession.db.select({ id: agentMemory.id }).from(agentMemory).where(and(eq(agentMemory.organizationId, org), eq(agentMemory.taskId, taskId)));
         if (count.length >= 48)

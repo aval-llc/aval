@@ -1,7 +1,10 @@
 "use client";
 
-/** Built-in personas and paginated employees share a folder UI; identities and
- * ownership remain distinct so work is never attributed by a matching role. */
+/** Aval One, the Leads and paginated employees share a folder UI; identities
+ * and ownership remain distinct so work is never attributed by a matching role.
+ * Four tabs (directive §28): All agents, Your employees, Aval One & Leads, and
+ * the Expertise library. Customer-created employees are kept apart from the
+ * built-in Leads, and the 266 Specialists live only in the library. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -10,6 +13,8 @@ import { belongsToAgent } from "./agent-library-model";
 import { EmployeeWorkspace, type EmployeeWorkProps } from "./employee-workspace";
 import { AvalAgentAvatar } from "./agent-avatar/AgentAvatar";
 import { PERSONA_PRESETS } from "./agent-avatar/personas";
+import { ExpertiseLibrary, LeadCards, presetFor, type Organization } from "./organization-library";
+import { AVAL_ONE, LEADS, leadRuntimeId } from "@/lib/agents/organization/domains";
 import { Check, Pause, Play, Archive, Plus, Search, Xmark, NavArrowRight, Circle, Folder, Link } from "iconoir-react";
 
 interface Employee {
@@ -41,6 +46,24 @@ interface ConnectionProvider { id: string; name: string; connection: { id: strin
 interface EmployeeDetail { scopes: Partial<Record<string, string[]>>; openWork: number }
 interface LibraryAgent { id: string; name: string; role: string; objective: string | null; employee?: Employee; preset: typeof PERSONA_PRESETS.general }
 const PAGE_SIZE = 24;
+/**
+ * Aval One and the Leads as they are known before the catalogue arrives, so
+ * the built-in organization is on screen at first paint rather than after a
+ * round trip. Only the Specialist counts wait for the server.
+ */
+const INITIAL_ORGANIZATION: Organization = {
+  avalOne: { id: AVAL_ONE.legacyPersonaId, alias: AVAL_ONE.id, name: AVAL_ONE.name, subtitle: AVAL_ONE.subtitle, summary: AVAL_ONE.summary },
+  leads: LEADS.map(lead => ({ id: leadRuntimeId(lead), alias: lead.id, domain: lead.domain, name: lead.name, summary: lead.summary, historical: Boolean(lead.legacyPersonaId), specialistCount: 0, relatedLeads: [] })),
+  counts: { leads: LEADS.length, specialists: 0, domains: LEADS.length },
+};
+const TABS = ["all", "employees", "leads", "expertise"] as const;
+type Tab = (typeof TABS)[number];
+/** The tab a link asked for. `builtIn` is the tab's name before it was split. */
+function tabFromUrl(): Tab {
+  if (typeof window === "undefined") return "all";
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab === "builtIn" ? "leads" : (TABS as readonly string[]).includes(tab ?? "") ? tab as Tab : "all";
+}
 
 /** Which lifecycle actions make sense from where the employee currently is. */
 function actionsFor(status: Employee["status"]): ("activate" | "pause" | "resume" | "archive")[] {
@@ -66,10 +89,19 @@ export function EmployeeDirectory({ work: draftWork }: { work?: EmployeeWorkProp
   const [workError, setWorkError] = useState(false);
   const [employeeDetails, setEmployeeDetails] = useState<Record<string, EmployeeDetail>>({});
   const [providers, setProviders] = useState<ConnectionProvider[]>([]);
-  const [custom, setCustom] = useState<LibraryAgent[]>([]);
-  const [filter, setFilter] = useState("all");
+  const [organization, setOrganization] = useState<Organization | null>(INITIAL_ORGANIZATION);
+  const [expertiseState, setExpertiseState] = useState<"idle" | "loading" | "failed">("idle");
+  const [filter, setFilterState] = useState<Tab>(tabFromUrl);
+  const setFilter = useCallback((tab: Tab) => {
+    setFilterState(tab);
+    // The tab is part of the link, so a shared or reloaded library opens where
+    // it was. `agent` deep links are left untouched.
+    const url = new URL(window.location.href);
+    if (tab === "all") url.searchParams.delete("tab"); else url.searchParams.set("tab", tab);
+    window.history.replaceState(window.history.state, "", url);
+  }, []);
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState({ name: "", role: "", objective: "" });
+  const [draft, setDraft] = useState<{ name: string; role: string; objective: string; templateSlug?: string }>({ name: "", role: "", objective: "" });
 
   const fetchDirectory = useCallback(async (): Promise<Directory | null> => {
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
@@ -161,13 +193,27 @@ export function EmployeeDirectory({ work: draftWork }: { work?: EmployeeWorkProp
       const data = await r.json() as { providers?: ConnectionProvider[] };
       if (!controller.signal.aborted) setProviders(data.providers ?? []);
     }).catch(() => {});
-    void fetch("/api/agents", { signal: controller.signal }).then(async r => {
+    // Former custom personas are employees now, listed with the rest of the
+    // directory; there is no second list to fetch.
+    void fetch("/api/agents/organization", { signal: controller.signal }).then(async r => {
       if (!r.ok) throw new Error();
-      const data = await r.json() as { personas: { id: string; label: string; focusDescription: string }[] };
-      if (!controller.signal.aborted) setCustom(data.personas.map(p => ({ id: p.id, name: p.label, role: t("AgentLibrary.customAgent"), objective: p.focusDescription, preset: { ...PERSONA_PRESETS.general, icon: undefined } })));
+      const data = await r.json() as Organization;
+      if (!controller.signal.aborted) setOrganization(current => current?.specialists ? { ...data, specialists: current.specialists } : data);
     }).catch(() => { if (!controller.signal.aborted) setError(t("Employees.loadFailed")); });
     return () => controller.abort();
   }, [t, selected]);
+
+  // The specialist catalogue is only fetched once somebody opens the library.
+  useEffect(() => {
+    if (filter !== "expertise" || organization?.specialists || expertiseState !== "idle") return;
+    queueMicrotask(() => setExpertiseState("loading"));
+    void fetch("/api/agents/organization?include=specialists").then(async r => {
+      if (!r.ok) throw new Error();
+      const data = await r.json() as Organization;
+      setOrganization(data);
+      setExpertiseState("idle");
+    }).catch(() => setExpertiseState("failed"));
+  }, [filter, organization?.specialists, expertiseState]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -182,21 +228,31 @@ export function EmployeeDirectory({ work: draftWork }: { work?: EmployeeWorkProp
     return () => controller.abort();
   }, [directory]);
 
-  const builtIns: LibraryAgent[] = Object.values(PERSONA_PRESETS).map(preset => ({ id: preset.id, name: t(preset.labelKey), role: t("AgentLibrary.builtIn"), objective: null, preset }));
+  // Aval One and the Leads, as the folder dialog opens them.
+  const builtIns: LibraryAgent[] = useMemo(() => organization ? [
+    { id: organization.avalOne.id, name: organization.avalOne.name, role: t("AgentLibrary.avalOneSubtitle"), objective: organization.avalOne.summary, preset: presetFor(organization.avalOne.id) },
+    ...organization.leads.map(lead => ({ id: lead.id, name: lead.name, role: t("AgentLibrary.leadSubtitle"), objective: lead.summary, preset: presetFor(lead.id) })),
+  ] : [], [organization, t]);
   const employees = directory?.employees ?? [];
-  const agents: LibraryAgent[] = [
-    ...(filter === "employees" ? [] : [...builtIns, ...(filter === "builtIn" ? [] : custom)].filter(a => `${a.name} ${a.role}`.toLowerCase().includes(search.toLowerCase()))),
-    ...(filter === "builtIn" ? [] : employees.map(employee => ({ id: employee.id, name: employee.name, role: employee.role, objective: employee.objective, employee, preset: { ...PERSONA_PRESETS.general, icon: undefined } }))),
-  ];
+  const showsLeads = filter === "all" || filter === "leads";
+  const agents: LibraryAgent[] = filter === "leads" || filter === "expertise" ? [] : employees.map(employee => ({ id: employee.id, name: employee.name, role: employee.role, objective: employee.objective, employee, preset: { ...PERSONA_PRESETS.general, icon: undefined } }));
+  const openBuiltIn = (id: string) => { const agent = builtIns.find(row => row.id === id); if (agent) setSelected(agent); };
   useEffect(() => {
     if (openedLink.current) return;
     const id = new URLSearchParams(window.location.search).get("agent");
     if (!id) { openedLink.current = true; return; }
-    const preset = Object.values(PERSONA_PRESETS).find(preset => preset.id === id);
-    const employee = directory?.employees.find(employee => employee.id === id);
-    const match: LibraryAgent | undefined = preset ? { id, name: t(preset.labelKey), role: t("AgentLibrary.builtIn"), objective: null, preset } : employee ? { id, name: employee.name, role: employee.role, objective: employee.objective, employee, preset: { ...PERSONA_PRESETS.general, icon: undefined } } : custom.find(agent => agent.id === id);
-    if (match) { openedLink.current = true; queueMicrotask(() => setSelected(match)); }
-  }, [directory, custom, t]);
+    if (!organization || !directory) return;
+    // Every historical link still opens: the eight legacy agent ids are the
+    // Leads' own ids, `aval-one` and `lead.<domain>` are aliases, and a former
+    // custom persona's id is now its employee's id.
+    const lead = organization.leads.find(row => row.id === id || row.alias === id);
+    const builtIn = builtIns.find(row => row.id === (id === organization.avalOne.alias ? organization.avalOne.id : lead?.id ?? id));
+    const employee = directory.employees.find(employee => employee.id === id);
+    const match: LibraryAgent | undefined = builtIn ?? (employee ? { id, name: employee.name, role: employee.role, objective: employee.objective, employee, preset: { ...PERSONA_PRESETS.general, icon: undefined } } : undefined);
+    openedLink.current = true;
+    if (match) queueMicrotask(() => setSelected(match));
+    else if (/^[a-z-]+\.[a-z0-9-]+$/.test(id)) queueMicrotask(() => setFilter("expertise"));
+  }, [directory, organization, builtIns, setFilter]);
   const pages = useMemo(() => Math.max(1, Math.ceil((directory?.total ?? 0) / PAGE_SIZE)), [directory?.total]);
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const agentWork = (agent: LibraryAgent) => work.filter(task => belongsToAgent(task, agent.id, !!agent.employee));
@@ -215,13 +271,15 @@ export function EmployeeDirectory({ work: draftWork }: { work?: EmployeeWorkProp
     </div>
     <div className="library-toolbar">
       <div className="library-filters" aria-label={t("AgentLibrary.filter")}>
-        {["all", "employees", "builtIn"].map(value => <button type="button" key={value} aria-pressed={filter === value} onClick={() => { setFilter(value); setOffset(0); }}>{t(`AgentLibrary.${value}`)}</button>)}
+        {TABS.map(value => <button type="button" key={value} aria-pressed={filter === value} onClick={() => { setFilter(value); setOffset(0); }}>{t(`AgentLibrary.tab_${value}`)}</button>)}
       </div>
       <label className="employee-search"><Search width={16} height={16}/><input placeholder={t("Employees.searchPlaceholder")} value={search} aria-label={t("Employees.searchPlaceholder")} onChange={event => { setOffset(0); setSearch(event.target.value); }}/></label>
     </div>
-    {error && <p className="employee-error" role="alert">{error}</p>}
+    {error && !creating && <p className="employee-error" role="alert">{error}</p>}
     {workError && <p className="employee-error" role="status">{t("AgentLibrary.workUnavailable")}</p>}
+    {filter === "expertise" ? <ExpertiseLibrary organization={organization} loading={expertiseState === "loading"} failed={expertiseState === "failed"} search={search} work={work} onOpenLead={openBuiltIn}/> : <>
     <div className="agent-folder-grid">
+      {showsLeads && organization && <LeadCards organization={organization} work={work} search={search} onOpen={openBuiltIn} part={filter === "all" ? "avalOne" : "both"}/>}
       {agents.map((agent) => {
         const tasks = agentWork(agent);
         const pending = reviews.filter(review => belongsToAgent(review, agent.id, !!agent.employee)).length;
@@ -239,17 +297,19 @@ export function EmployeeDirectory({ work: draftWork }: { work?: EmployeeWorkProp
           </span>
         </button>;
       })}
+      {filter === "all" && organization && <LeadCards organization={organization} work={work} search={search} onOpen={openBuiltIn} part="leads"/>}
     </div>
-    {!agents.length && <p className="library-empty">{directory ? t("AgentLibrary.noResults") : t("AgentTrace.loadingTasks")}</p>}
-    {pages > 1 && filter !== "builtIn" && <div className="employee-pager"><button className="soft-button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>{t("Employees.previous")}</button><span>{t("Employees.pageOf", { page, pages })}</span><button className="soft-button" disabled={page >= pages} onClick={() => setOffset(offset + PAGE_SIZE)}>{t("Employees.next")}</button></div>}
+    {!agents.length && !showsLeads && <p className="library-empty">{!directory ? t("AgentTrace.loadingTasks") : filter === "employees" && !search ? t("AgentLibrary.noEmployeesYet") : t("AgentLibrary.noResults")}</p>}
+    {pages > 1 && filter !== "leads" && <div className="employee-pager"><button className="soft-button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>{t("Employees.previous")}</button><span>{t("Employees.pageOf", { page, pages })}</span><button className="soft-button" disabled={page >= pages} onClick={() => setOffset(offset + PAGE_SIZE)}>{t("Employees.next")}</button></div>}
+    </>}
 
     <Dialog.Root open={creating} onOpenChange={setCreating}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="agent-library-dialog agent-create-dialog">
       <div className="library-dialog-heading"><div><p className="eyebrow">{t("AgentLibrary.yourTeam")}</p><Dialog.Title>{t("AgentLibrary.newAgent")}</Dialog.Title></div><Dialog.Close className="icon-button" aria-label={t("Overview.close")}><Xmark width={20} height={20}/></Dialog.Close></div>
       <Dialog.Description>{t("AgentLibrary.createDescription")}</Dialog.Description>
       <form className="employee-form" onSubmit={event => { event.preventDefault(); void create(); }}>
-        <label>{t("AgentLibrary.responsibilities")}<textarea required rows={4} value={draft.objective} placeholder={t("Employees.objectivePlaceholder")} onChange={e => setDraft({ ...draft, objective: e.target.value })}/></label>
-        <div className="employee-form-row"><label>{t("AgentLibrary.name")}<input required value={draft.name} placeholder={t("Employees.namePlaceholder")} onChange={e => setDraft({ ...draft, name: e.target.value })}/></label><label>{t("AgentLibrary.role")}<input required value={draft.role} placeholder={t("Employees.rolePlaceholder")} onChange={e => setDraft({ ...draft, role: e.target.value })}/></label></div>
-        {!!directory?.templates.length && <details className="library-templates"><summary>{t("Employees.templateHint")}</summary><div className="employee-templates">{directory.templates.map(template => <button key={template.slug} type="button" className="employee-template-chip" onClick={() => setDraft({ name: template.name, role: template.role, objective: template.objective })}>{template.role}</button>)}</div></details>}
+        <label>{t("AgentLibrary.responsibilities")}<textarea required rows={4} value={draft.objective} placeholder={t("Employees.objectivePlaceholder")} onChange={e => setDraft({ ...draft, objective: e.target.value, templateSlug: undefined })}/></label>
+        <div className="employee-form-row"><label>{t("AgentLibrary.name")}<input required value={draft.name} placeholder={t("Employees.namePlaceholder")} onChange={e => setDraft({ ...draft, name: e.target.value })}/></label><label>{t("AgentLibrary.role")}<input required value={draft.role} placeholder={t("Employees.rolePlaceholder")} onChange={e => setDraft({ ...draft, role: e.target.value, templateSlug: undefined })}/></label></div>
+        {!!directory?.templates.length && <details className="library-templates"><summary>{t("Employees.templateHint")}</summary><div className="employee-templates">{directory.templates.map(template => <button key={template.slug} type="button" className="employee-template-chip" aria-pressed={draft.templateSlug === template.slug} onClick={() => setDraft({ name: template.name, role: template.role, objective: template.objective, templateSlug: template.slug })}>{template.role}</button>)}</div></details>}
         <p className="employee-form-note">{t("AgentLibrary.createNote")}</p>
         {error && <p role="alert" className="employee-error">{error}</p>}
         <div className="employee-form-actions"><Dialog.Close type="button" className="soft-button" disabled={busy !== null}>{t("AgentLibrary.cancel")}</Dialog.Close><button className="primary-button" disabled={busy !== null || !draft.name.trim() || !draft.role.trim() || !draft.objective.trim()}>{busy === "new" ? t("SetupView.saving") : t("Employees.createConfirm")}</button></div>

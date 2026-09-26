@@ -10,7 +10,7 @@
 
 import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
-import { accessGrants, agentExecutionPolicies, agentFinancialOperations } from "@/db/postgres/schema";
+import { accessGrants, agentExecutionPolicies, agentFinancialOperations, leases } from "@/db/postgres/schema";
 import {
   DEFAULT_FINANCIAL_POLICY,
   approvalTierFor,
@@ -171,8 +171,16 @@ export async function evaluateFinancialProposal(dbSession: DbSession,
 
   const amountCents = args[tool.financial.amountField] as number;
   const currency = args[tool.financial.currencyField] as string;
-  const accountFingerprint = await fingerprintAccount(args[tool.financial.accountField] as string);
-  if (!policy.allowedAccountFingerprints.includes(accountFingerprint)) {
+  const destination = args[tool.financial.accountField] as string;
+  const accountFingerprint = await fingerprintAccount(destination);
+  if (tool.financial.destination === "ledger") {
+    // A ledger entry is authorized by whose ledger it is: the lease must be a
+    // record of this workspace, by Aval id or by the provider's own id.
+    const [lease] = await dbSession.db.select({ id: leases.id }).from(leases)
+      .where(and(eq(leases.organizationId, organizationId), or(eq(leases.id, destination), eq(leases.externalId, destination))))
+      .limit(1);
+    if (!lease) return { ok: false, reason: "The lease is not a record of this workspace, so nothing may be posted to its ledger." };
+  } else if (!policy.allowedAccountFingerprints.includes(accountFingerprint)) {
     return { ok: false, reason: "The proposed destination is not on the workspace financial allowlist." };
   }
 

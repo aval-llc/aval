@@ -25,6 +25,7 @@ import { pmsToolAvailability } from "@/lib/pms/assembly";
 import { allowedToolNames } from "./policy.ts";
 import { effectiveEmployeeAccess } from "./employee-access";
 import { getTool } from "./registry.ts";
+import { deploymentActorId } from "./organization/index.ts";
 
 export interface ToolsetRequest {
   employeeId?: string;
@@ -58,6 +59,14 @@ export interface AssembledToolset {
 }
 
 /**
+ * Tools that change only the task itself — its scratchpad, its wait, its
+ * question to a peer — and never anything in the business. Expertise bounds
+ * what a Specialist may change in the business, so it does not remove these;
+ * the runtime's completion contract still decides which a run is offered.
+ */
+const TASK_SELF_TOOLS: ReadonlySet<string> = new Set(["wait_for", "request_peer_help", "write_memory"]);
+
+/**
  * The tools this work may actually use.
  *
  * Every narrowing is an intersection and none of them can add anything, so the
@@ -82,7 +91,7 @@ export async function assembleToolset(
 
   // 3. Provider capability: which PMS writes this workspace can actually reach,
   //    for this agent's deployments. Fail-closed on error, inside that module.
-  const pms = await pmsToolAvailability(dbSession, request.organizationId, request.agentId ?? "");
+  const pms = await pmsToolAvailability(dbSession, request.organizationId, deploymentActorId(request.agentId ?? ""));
 
   // 4. Employee scope, when the work has an owner.
   const employeeScoped = request.employeeCapabilities == null
@@ -111,7 +120,7 @@ export async function assembleToolset(
     if (!permitted.has(tool.name)) { excluded[tool.name] = "permission"; continue; }
     if (providerWrite && !pms.toolNames.has(tool.name)) { excluded[tool.name] = "provider"; continue; }
     if (employeeScoped && !employeeScoped.has(tool.name)) { excluded[tool.name] = "employee"; continue; }
-    if (expertiseScoped && !expertiseScoped.has(tool.name) && getTool(tool.name)?.mutates) {
+    if (expertiseScoped && !expertiseScoped.has(tool.name) && getTool(tool.name)?.mutates && !TASK_SELF_TOOLS.has(tool.name)) {
       // Expertise narrows what may be *changed*, not what may be read: an
       // employee briefed on maintenance still needs to look things up.
       excluded[tool.name] = "expertise";

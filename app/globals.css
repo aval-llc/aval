@@ -1873,6 +1873,7 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 .employee-templates > span { font-size: 10px; color: var(--quiet); }
 .employee-template-chip { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 10px; color: var(--ink); cursor: pointer; transition: border-color .18s var(--ease-snap), background .18s var(--ease-snap); }
 .employee-template-chip:hover { border-color: var(--line-strong); background: var(--surface-soft); }
+.employee-template-chip[aria-pressed="true"] { border-color: var(--ink); background: var(--surface-soft); box-shadow: inset 0 0 0 1px var(--ink); }
 
 .employee-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 9px; }
 .employee-card { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); min-width: 0; }

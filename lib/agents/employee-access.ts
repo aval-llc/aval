@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
 import type { DbSession } from '@/db/postgres/session';
-import { integrationConnections, conversations } from '@/db/postgres/schema';
+import { integrationConnections, conversations, leases } from '@/db/postgres/schema';
 import { employeeScopes, getEmployee } from './employees';
 import { employeeEnvelope, allowedToolNames } from './policy';
 import { isPmsWriteTool } from '@/lib/pms/tool-map';
@@ -44,7 +44,14 @@ export async function employeeExecutionRefusal(session:DbSession,org:string,id:s
  }
  if(tool==='place_call')provider='twilio';
  if(provider&&!access.connections.some(c=>c.provider===provider))return 'This connection is not assigned to the employee or is no longer connected.';
- const property=typeof args.property_id==='string'?args.property_id:typeof args.propertyId==='string'?args.propertyId:null;
+ let property=typeof args.property_id==='string'?args.property_id:typeof args.propertyId==='string'?args.propertyId:null;
+ // A ledger write names a lease, not a property. The lease's property is what
+ // the employee's resource scope is checked against.
+ if(!property&&typeof args.lease_id==='string'&&access.scopes.property?.length){
+  const [lease]=await session.db.select({propertyId:leases.propertyId}).from(leases).where(and(eq(leases.organizationId,org),or(eq(leases.id,args.lease_id),eq(leases.externalId,args.lease_id)))).limit(1);
+  if(!lease)return 'This lease is not a record of this workspace.';
+  property=lease.propertyId;
+ }
  if(property&&access.scopes.property?.length&&!access.scopes.property.includes(property))return 'This property is outside the employee’s granted resource scope.';
  return null;
 }

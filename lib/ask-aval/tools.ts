@@ -26,6 +26,7 @@ import { COMMUNICATION_TOOLS, runCommunicationTool } from "@/lib/communications/
 import { PMS_WRITE_TOOL_SCHEMAS, runPmsWriteTool } from "@/lib/pms/tools.ts";
 import { isPmsWriteTool } from "@/lib/pms/tool-map.ts";
 import { OPERATIONS_TOOLS, runOperationsTool } from "./operations-tools";
+import { RECORD_TOOLS, runRecordTool } from "./record-tools";
 import { METRIC_KEYS, deltaPct, noDataAvailable, readFunnel, readMetricSeries, readMetrics, type MetricKey } from "./portfolio-data";
 import { PREFERENCE_TOPICS, recordPreference, describePreference, type PreferenceTopic } from "./preferences";
 
@@ -200,7 +201,7 @@ const COMPOSE_DOCUMENT_TOOL: ToolSchema = {
  * what they can answer rather than which table they read.
  */
 const ALL_DATA_TOOLS: ToolSchema[] = [
-  ...DATA_TOOLS, ...OPERATIONS_TOOLS, ...COMMUNICATION_TOOLS, ...HARNESS_TOOLS,
+  ...DATA_TOOLS, ...OPERATIONS_TOOLS, ...RECORD_TOOLS, ...COMMUNICATION_TOOLS, ...HARNESS_TOOLS,
   // Present in the schema list, absent from any given request unless the
   // capability matrix assembled it in (lib/agents/runtime.ts). Listing them
   // here is what makes that filter mean something — before this, it narrowed a
@@ -262,6 +263,8 @@ export async function runTool(dbSession: DbSession, name: string, input: Record<
   // does not own and for the two shared names on a workspace with no records,
   // so the snapshot executors below stay reachable for workspaces whose
   // connectors only push aggregates.
+  const fromRecords = await runRecordTool(dbSession, name, input, organizationId);
+  if (fromRecords) return fromRecords;
   const fromOperations = await runOperationsTool(dbSession, name, input, organizationId);
   if (fromOperations) return fromOperations;
 

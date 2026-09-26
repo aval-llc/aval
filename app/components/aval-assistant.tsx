@@ -301,7 +301,17 @@ export function AvalAssistant({ view, onCreateDraft }: { view: string; onCreateD
           if (!response.ok) throw Error(m('requestFailed'));
           answer = await desktop.bridge.ask<Answer>({ conversationId: 'ask-aval', question: text, locale, context: { ...await response.json(), focusedModule: module, selectedAgent: t('AvalAssistant.askAval') } });
         } else {
-          const response = await fetch('/api/assistant/ask', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' }, body: JSON.stringify({ question: text, view, locale, personaId: 'general', moduleLabel: module?.label, moduleSnapshot: module?.snapshot }) });
+          const response = await fetch('/api/assistant/ask', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' }, body: JSON.stringify({ question: text, view, locale, personaId: 'general', chatMessageId: user.id, moduleLabel: module?.label, moduleSnapshot: module?.snapshot }) });
+          // Aval One decided this needs specialists: the turn became durable
+          // Work, and the chat follows its run exactly as it follows agent work.
+          if (response.headers.get('x-aval-work')) {
+            const opened = await response.json() as { work?: { taskId: string; taskAgentId: string } };
+            if (!opened.work?.taskId) throw Error(m('requestFailed'));
+            const run: ChatMessage = { id: user.id + '-run', role: 'assistant', taskId: opened.work.taskId, taskAgentId: opened.work.taskAgentId };
+            setMessages(current => [...current.filter(row => row.id !== run.id), run]);
+            retryTurn.current = null;
+            return;
+          }
           const data = await readAskStream(response, event => {
             setProgress(event);
             // Only documented public progress fields enter the activity history.

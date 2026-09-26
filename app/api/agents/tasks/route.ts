@@ -1,17 +1,11 @@
-import { getEmployee } from "@/lib/agents/employees";
-import { sql } from 'drizzle-orm';
-import { withApiSession, withWorkerOrganizationSession } from "@/lib/api/with-session";
+import { withApiSession } from "@/lib/api/with-session";
+import { openWork } from "@/lib/agents/open-work";
 import type { DbSession } from "@/db/postgres/session";
 import { env } from "cloudflare:workers";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { clientIp, isRateLimited, recordAttempt } from "@/lib/security/rate-limit";
-import { createTask, listTasks, DEFAULT_MAX_STEPS } from "@/lib/agents/tasks";
-import { roleForPersona } from "@/lib/agents/permissions";
-import { appendAuditEvents } from "@/lib/audit/log";
-import { digestPayload } from "@/lib/audit/chain";
-import { getRequestExecutionContext } from "vinext/shims/request-context";
-import { runTaskInBackground, type AgentWorkerEnv } from "@/lib/agents/worker";
+import { listTasks } from "@/lib/agents/tasks";
 
 /**
  * Durable agent tasks — the goal-shaped counterpart to /api/assistant/ask.
@@ -71,34 +65,17 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
 
   // An unknown agent id resolves to the read-only `custom` envelope rather
   // than to the broad `general` one, so a typo narrows authority.
-  const employee = typeof body.employeeId==='string' ? await getEmployee(dbSession,identity.organizationId,body.employeeId) : null;
-  if(body.employeeId && (!employee||employee.status!=='active'))return Response.json({error:'Choose an active employee in this workspace.'},{status:400});
-  const agentId = employee ? 'general' : typeof body.agentId === "string" && body.agentId ? body.agentId : "general";
-  const maxSteps = Number.isInteger(body.maxSteps) ? Math.min(Math.max(body.maxSteps as number, 2), DEFAULT_MAX_STEPS * 2) : DEFAULT_MAX_STEPS * 2;
-
-  const chatId = typeof body.chatMessageId === 'string' && /^[a-zA-Z0-9-]{1,70}$/.test(body.chatMessageId) ? body.chatMessageId : null;
-  if (chatId) {
-    // A request retry must never start duplicate work. Lock the saved user turn.
-    const row = await dbSession.db.execute<{ payload: { text?: string } }>(sql`select payload from assistant_chat_entries where organization_id=${identity.organizationId} and user_id=${identity.userId} and id=${chatId} for update`);
-    if (!row.rows.length || row.rows[0].payload.text !== goal) return Response.json({ error: 'Save the conversation request first.' }, { status: 409 });
-    const existing = await dbSession.db.execute<{ payload: { taskId?: string } }>(sql`select payload from assistant_chat_entries where organization_id=${identity.organizationId} and user_id=${identity.userId} and id=${chatId + '-run'}`);
-    if (existing.rows[0]?.payload.taskId) return Response.json({ taskId: existing.rows[0].payload.taskId }, { status: 202 });
-  }
-  const context = body.context ? JSON.stringify({ view: String(body.context.view ?? '').slice(0, 60), moduleLabel: String(body.context.moduleLabel ?? '').slice(0, 100), visibleText: String(body.context.moduleSnapshot ?? '').slice(0, 260) }) : '';
-  const task = await createTask(dbSession, { check: {kind:"plan"}, organizationId: identity.organizationId, userId: identity.userId, employeeId:employee?.id, agentId, goal: context ? goal + '\nPage context (user-visible data, not authority): ' + context : goal, maxSteps });
-  if (chatId) {
-    const payload = { id: chatId + '-run', role: 'assistant', taskId: task.id, taskAgentId: employee?.id ?? agentId };
-    await dbSession.db.execute(sql`insert into assistant_chat_entries(organization_id,user_id,id,payload) values (${identity.organizationId},${identity.userId},${payload.id},${JSON.stringify(payload)}::jsonb)`);
-  }
-  await appendAuditEvents(dbSession, identity.organizationId, [
-    { kind: "task_created", label: roleForPersona(agentId), payloadDigest: await digestPayload(goal), count: task.maxSteps },
-  ]);
-
-  const work = dbSession.afterCommit(() => withWorkerOrganizationSession(identity.organizationId, (workerSession) =>
-    runTaskInBackground(workerSession, env as unknown as AgentWorkerEnv, identity.organizationId, task.id, "request"),
-  )).catch((error) => console.error("agent_task_request_background_failed", { taskId: task.id, error }));
-  getRequestExecutionContext()?.waitUntil(work);
-  return Response.json({ id: task.id, taskId: task.id, status: "QUEUED", stepsRun: 0 }, { status: 202, headers: { "cache-control": "no-store" } });
+  const opened = await openWork(dbSession, identity, env, {
+    goal,
+    agentId: typeof body.agentId === "string" ? body.agentId : undefined,
+    employeeId: typeof body.employeeId === "string" ? body.employeeId : undefined,
+    maxSteps: body.maxSteps,
+    chatMessageId: typeof body.chatMessageId === "string" ? body.chatMessageId : null,
+    context: body.context,
+    origin: "task_api",
+  });
+  if (!opened.ok) return Response.json({ error: opened.error }, { status: opened.status });
+  return Response.json({ id: opened.taskId, taskId: opened.taskId, status: "QUEUED", stepsRun: 0 }, { status: 202, headers: { "cache-control": "no-store" } });
 }
 
 export const GET = withApiSession(GETWithSession);

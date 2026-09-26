@@ -4,7 +4,7 @@ export type VisualActivity = 'idle' | 'listening' | 'connecting' | 'searching' |
 // Keep runtime states distinct; the visual language is deliberately simpler.
 export const getThinkingOrbState = (activity: VisualActivity) => activity === 'idle' ? 'solving' : activity === 'listening' ? 'listening' : 'searching';
 export type SafeStep = { id: string; kind: string; tool?: string | null; mutates?: boolean; at?: string | number; policy?: string | null };
-export const settledRun = (status: string) => ['COMPLETED', 'FAILED', 'CANCELLED'].includes(status);
+export const settledRun = (status: string) => ['COMPLETED', 'FAILED', 'CANCELLED', 'SUPERSEDED'].includes(status);
 export function visualActivity(input: { voice?: string; busy?: boolean; progress?: AskProgress; status?: string; steps?: SafeStep[] }): VisualActivity {
   if (input.voice === 'live') return 'listening';
   if (input.voice === 'requesting') return 'connecting';

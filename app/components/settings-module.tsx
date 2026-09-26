@@ -4,7 +4,8 @@ import { ChatWindowPreferences } from "./chat-window-preferences";
 import { useEffect, useState, type ReactNode } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useLocale, useTranslations } from "next-intl";
-import { Coins, Language, NavArrowRight, Settings, ShieldCheck, SoundHigh, SunLight, User, Group, Cpu, ControlSlider } from "iconoir-react";
+import { Coins, Language, NavArrowRight, Settings, ShieldCheck, SoundHigh, SunLight, User, Group, Cpu, ControlSlider, City } from "iconoir-react";
+import { BusinessProfileSettings } from "./business-profile-settings";
 import { usePathname, useRouter } from "@/app/[locale]/navigation";
 import { useExperience } from "./experience";
 import { useAppearance } from "./appearance-provider";
@@ -18,7 +19,7 @@ import { OnboardingPreferences } from "./onboarding";
 
 const GROUPS = [
   { id: "personal", sections: [{ id: "profile", icon: User }, { id: "appearance", icon: SunLight }, { id: "preferences", icon: ControlSlider }] },
-  { id: "workspace", sections: [{ id: "team", icon: Group }, { id: "intelligence", icon: Cpu }, { id: "agents", icon: Settings }, { id: "billing", icon: Coins }, { id: "security", icon: ShieldCheck }] },
+  { id: "workspace", sections: [{ id: "team", icon: Group }, { id: "business", icon: City }, { id: "intelligence", icon: Cpu }, { id: "agents", icon: Settings }, { id: "billing", icon: Coins }, { id: "security", icon: ShieldCheck }] },
 ] as const;
 type SectionId = typeof GROUPS[number]["sections"][number]["id"];
 
@@ -64,6 +65,7 @@ export function SettingsModule({ header, openConnections, displayName, email }: 
           <p className="settings-muted settings-preferences-note">{t("SettingsModule.devicePreferences")}</p>
         </Tabs.Content>
         <Tabs.Content value="team" forceMount hidden={section !== "team"}>{workspaceContent(<WorkspaceMembers/>)}</Tabs.Content>
+        <Tabs.Content value="business" forceMount hidden={section !== "business"}>{workspaceContent(section === "business" ? <BusinessProfileSettings/> : null)}</Tabs.Content>
         <Tabs.Content value="intelligence" forceMount hidden={section !== "intelligence"}><IntelligenceSettings/></Tabs.Content>
         <Tabs.Content value="agents" forceMount hidden={section !== "agents"}>{workspaceContent(<FinancialAgentControls/>)}</Tabs.Content>
         <Tabs.Content value="billing" forceMount hidden={section !== "billing"}>{workspaceContent(<BillingSettings/>)}</Tabs.Content>

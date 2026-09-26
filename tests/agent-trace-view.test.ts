@@ -142,7 +142,7 @@ test("the view's settled set matches the runtime's terminal states exactly", () 
   // app/components/agent-trace.tsx duplicates this set to avoid importing
   // storage code into the client bundle. A drift would either poll a finished
   // task forever or stop polling a live one.
-  const SETTLED_IN_VIEW = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+  const SETTLED_IN_VIEW = new Set(["COMPLETED", "FAILED", "CANCELLED", "SUPERSEDED"]);
   assert.deepEqual([...SETTLED_IN_VIEW].sort(), [...TERMINAL_STATES].sort());
   for (const state of SETTLED_IN_VIEW) assert.ok((TASK_STATES as readonly string[]).includes(state));
 });

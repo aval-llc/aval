@@ -1,69 +1,64 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canOrchestrate, hasPermission, roleForPersona, ORCHESTRATION_PERMISSIONS } from "../lib/agents/permissions.ts";
+import { hasPermission, roleForPersona } from "../lib/agents/permissions.ts";
 import { DELEGATION_RULES } from "../lib/agents/delegation-rules.ts";
+import { actorHolds, actorMayDelegateTo, actorOrchestrates, builtInActor, NEVER_ROUTABLE, SPECIALISTS } from "../lib/agents/organization/index.ts";
 import { deterministicTaskId, COORDINATOR_AGENT_ID } from "../lib/agents/intake-rules.ts";
 
 /**
- * The coordinator routes domain writes; it never performs them. Both halves
+ * The coordinator routes domain work; it never performs it. Both halves
  * matter: without routing there is no orchestration, and without the refusal
  * the coordinator has quietly become an agent with every write permission.
+ *
+ * These read the resolver the runtime actually uses (lib/agents/organization),
+ * not a parallel table — a test of a function production no longer calls
+ * would pass while the real boundary moved.
  */
 
-test("the coordinator cannot itself exercise any PMS write", () => {
-  const general = roleForPersona(COORDINATOR_AGENT_ID);
-  assert.equal(general, "general");
-  for (const permission of ["pms.maintenance.write", "pms.arrears.write", "pms.leasing.write"] as const) {
-    assert.equal(hasPermission(general, permission), false, `general must not hold ${permission}`);
+test("the coordinator cannot itself exercise any domain write", () => {
+  assert.equal(roleForPersona(COORDINATOR_AGENT_ID), "general");
+  for (const permission of ["pms.maintenance.write", "pms.arrears.write", "pms.leasing.write", "maintenance.create", "vendor.dispatch"] as const) {
+    assert.equal(actorHolds(COORDINATOR_AGENT_ID, permission), false, `general must not hold ${permission}`);
   }
 });
 
-test("the coordinator may route each PMS write to a specialist", () => {
-  const general = roleForPersona(COORDINATOR_AGENT_ID);
+test("the coordinator may route each PMS write to the Lead or Specialist that holds it", () => {
   for (const permission of ["pms.maintenance.write", "pms.arrears.write", "pms.leasing.write"] as const) {
-    assert.equal(canOrchestrate(general, permission), true, `general must be able to route ${permission}`);
+    assert.equal(actorOrchestrates(COORDINATOR_AGENT_ID, permission), true, `general must be able to route ${permission}`);
   }
 });
 
-test("routing is not a back door to unrelated authority", () => {
-  const general = roleForPersona(COORDINATOR_AGENT_ID);
-  // Routing covers PMS domain writes only. Nothing else is routable.
-  assert.equal(canOrchestrate(general, "vendor.dispatch"), false);
-  assert.equal(canOrchestrate(general, "maintenance.create"), false);
-  assert.equal(canOrchestrate(general, "preferences.write"), false);
+test("routing is not a back door to authority nobody below may exercise", () => {
+  // Money movement, contract execution and access changes are never routed,
+  // and neither is the workspace's own memory.
+  for (const permission of NEVER_ROUTABLE) {
+    assert.equal(actorOrchestrates(COORDINATOR_AGENT_ID, permission), false, `general must not route ${permission}`);
+  }
+  // Everything the coordinator may route is held by some actor it may reach.
+  for (const permission of builtInActor(COORDINATOR_AGENT_ID)!.orchestrates) {
+    const holder = [...builtInActor(COORDINATOR_AGENT_ID)!.delegatesTo].find((id) => actorHolds(id, permission));
+    assert.ok(holder, `nothing the coordinator reaches holds ${permission}`);
+  }
 });
 
 test("no specialist may route anything", () => {
-  // Only the coordinator orchestrates. A specialist that could route would be
-  // able to reach a peer's authority, which invariant 8 forbids.
-  for (const role of Object.keys(ORCHESTRATION_PERMISSIONS)) {
-    assert.equal(role, "general", `only general may orchestrate; found ${role}`);
+  // A specialist that could route would reach a peer's authority, which
+  // invariant 8 forbids: a peer can do no more than the specialist asking.
+  for (const specialist of SPECIALISTS) {
+    assert.deepEqual(builtInActor(specialist.id)!.orchestrates, [], `${specialist.id} routes`);
   }
-  for (const role of ["maintenance", "financial", "brokerage", "riskAnalyst", "custom"] as const) {
-    assert.equal(canOrchestrate(role, "pms.maintenance.write"), false);
-  }
-});
-
-test("every routable permission is held by some specialist the coordinator may delegate to", () => {
-  // A routable permission no reachable specialist holds would be a dead edge:
-  // the coordinator could plan work that nothing can execute.
-  const reachable = DELEGATION_RULES.general ?? [];
-  for (const permission of ORCHESTRATION_PERMISSIONS.general ?? []) {
-    const holder = reachable.find((role) => hasPermission(role, permission));
-    assert.ok(holder, `no delegate of general holds ${permission}`);
-  }
+  assert.equal(actorOrchestrates("custom", "pms.maintenance.write"), false);
 });
 
 test("the coordinator can delegate to brokerage", () => {
-  // pms.leasing.write is held only by brokerage. Before this edge existed the
-  // permission was unreachable from the coordinator entirely.
-  assert.ok((DELEGATION_RULES.general ?? []).includes("brokerage"));
+  // pms.leasing.write is held only by brokerage among the historical agents.
+  // Before this edge existed the permission was unreachable from the coordinator.
+  assert.ok(actorMayDelegateTo(COORDINATOR_AGENT_ID, "brokerage"));
   assert.equal(hasPermission("brokerage", "pms.leasing.write"), true);
 });
 
 test("delegation remains a narrowing graph", () => {
-  // Adding brokerage must not have made the graph reflexive or cyclic at depth 1.
   for (const [from, targets] of Object.entries(DELEGATION_RULES)) {
     assert.ok(!(targets ?? []).includes(from as never), `${from} delegates to itself`);
   }

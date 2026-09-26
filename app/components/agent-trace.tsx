@@ -113,7 +113,7 @@ interface PendingApproval {
 }
 
 /** Terminal states, mirroring TERMINAL_STATES in lib/agents/task-state.ts. A task in one of these never changes again, so it is never polled. */
-const SETTLED = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+const SETTLED = new Set(["COMPLETED", "FAILED", "CANCELLED", "SUPERSEDED"]);
 
 /** Tool name → the same readable label the Setup diagram uses, so a tool is named identically wherever it appears. */
 const TOOL_LABEL_KEYS = new Map(DATA_SOURCE_NODES.map((node) => [node.tool, node.labelKey]));

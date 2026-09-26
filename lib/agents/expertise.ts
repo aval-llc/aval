@@ -1,10 +1,10 @@
 /**
- * The expertise catalogue, and the eight specialists as data.
+ * The expertise catalogue an employee may be briefed with.
  *
- * The eight were a union type in source. They are now rows: expertise profiles
- * and starter templates, indistinguishable from anything a customer writes.
- * That is the whole migration — not "the eight plus custom ones", but a
- * catalogue whose first entries happen to be the ones Aval ships.
+ * These profiles are what a customer's employee holds and is briefed from.
+ * The built-in organization — Aval One, the 22 Leads and 266 Specialists — is a
+ * separate thing (lib/agents/organization): platform actors work is delegated
+ * to, not rows a workspace owns.
  *
  * Nothing in the runtime may special-case a slug in this file. If it does, the
  * roster has grown back.
@@ -13,7 +13,7 @@
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { aiEmployees, employeeExpertise, expertiseProfiles, expertiseSelections } from "@/db/postgres/schema";
-import { createEmployee } from "./employees.ts";
+import { createEmployee, InvalidEmployeeInputError } from "./employees.ts";
 import {
   applyUserSelection,
   routeExpertise,
@@ -167,11 +167,16 @@ export const SHIPPED_EXPERTISE: readonly ExpertiseProfileSeed[] = [
 ];
 
 /**
- * Starter templates.
+ * Employee templates.
  *
  * Offered at creation time and copied into an ordinary employee. A customer who
  * picks one gets a head start, not a different kind of employee — which is the
  * difference between a template and a roster.
+ *
+ * Optional, always. A new workspace starts with Aval One and no employees: the
+ * historical eight agents became built-in Leads (lib/agents/organization), not
+ * customer employee records, and the Lead and Specialist library is available
+ * to any work that needs it whether or not the workspace has created anyone.
  */
 export interface EmployeeTemplate {
   slug: string;
@@ -191,42 +196,27 @@ export interface EmployeeTemplate {
 }
 
 export const STARTER_TEMPLATES: readonly EmployeeTemplate[] = [
-  { slug: "financial-analyst", name: "Financial Analyst", role: "Financial Analyst",
-    objective: "Keep portfolio economics current and explain what changed and why.",
-    expertise: ["financial-analysis", "portfolio-outlook"],
-    capabilities: ["get_portfolio_metrics", "get_accounting_breakdown", "get_operating_statement", "get_delinquent_accounts", "get_metric_series", "get_utility_investigations"] },
-  { slug: "brokerage-leasing", name: "Leasing Manager", role: "Brokerage & Leasing",
-    objective: "Move the leasing funnel and keep vacancy falling.",
-    expertise: ["brokerage-leasing", "market-research"],
-    capabilities: ["get_leasing_funnel", "get_property_breakdown", "get_metric_series", "get_leasing_velocity"] },
-  { slug: "real-estate", name: "Real Estate Analyst", role: "Real Estate",
-    objective: "Keep the portfolio's composition accurate and current.",
-    expertise: ["real-estate", "portfolio-outlook"],
-    capabilities: ["get_portfolio_metrics", "get_property_breakdown"] },
-  { slug: "market-research", name: "Market Researcher", role: "Market Research",
-    objective: "Position rents against the market with evidence.",
-    expertise: ["market-research"],
-    capabilities: ["get_property_breakdown", "get_metric_series"] },
-  { slug: "maintenance", name: "Maintenance Coordinator", role: "Maintenance",
-    objective: "Take repairs from report to verified completion.",
-    expertise: ["maintenance", "vendor-coordination", "escalation"],
-    capabilities: ["get_maintenance_performance", "get_portfolio_metrics", "read_maintenance_context", "get_utility_investigations"] },
-  { slug: "risk-analyst", name: "Risk Analyst", role: "Risk Analyst",
-    objective: "Surface exposure before it becomes an incident.",
-    expertise: ["risk-analysis"],
-    capabilities: ["get_portfolio_metrics", "get_delinquent_accounts", "get_metric_series"] },
-  { slug: "portfolio-outlook", name: "Portfolio Strategist", role: "Portfolio Outlook",
-    objective: "Explain where the portfolio is heading and on what evidence.",
-    expertise: ["portfolio-outlook", "financial-analysis"],
-    capabilities: ["get_portfolio_metrics", "get_metric_series"] },
-  { slug: "lease-review", name: "Lease Reviewer", role: "Lease Review",
-    objective: "Keep lease terms, renewals and obligations understood and on time.",
-    expertise: ["lease-review"],
-    capabilities: ["get_property_breakdown", "read_document", "list_documents"] },
-  { slug: "resident-operations", name: "Resident Operations Manager", role: "Resident Operations Manager",
+  { slug: "resident-operations", name: "Resident Operations", role: "Resident Operations",
+
     objective: "Own resident issues end to end until they are verified resolved.",
     expertise: ["resident-experience", "maintenance", "vendor-coordination", "escalation"],
     capabilities: ["read_maintenance_context", "read_conversation", "list_conversations", "get_maintenance_performance"] },
+  { slug: "maintenance-operations", name: "Maintenance Operations", role: "Maintenance Operations",
+    objective: "Take repairs from report to verified completion.",
+    expertise: ["maintenance", "vendor-coordination", "escalation"],
+    capabilities: ["get_maintenance_performance", "get_portfolio_metrics", "read_maintenance_context", "get_utility_investigations"] },
+  { slug: "leasing-operations", name: "Leasing Operations", role: "Leasing Operations",
+    objective: "Move the leasing funnel and keep vacancy falling.",
+    expertise: ["brokerage-leasing", "market-research"],
+    capabilities: ["get_leasing_funnel", "get_leasing_velocity", "get_property_breakdown", "get_marketing_channels"] },
+  { slug: "portfolio-analyst", name: "Portfolio Analyst", role: "Portfolio Analyst",
+    objective: "Explain where the portfolio stands, where it is heading, and on what evidence.",
+    expertise: ["portfolio-outlook", "financial-analysis", "risk-analysis"],
+    capabilities: ["get_portfolio_metrics", "get_metric_series", "get_operating_statement", "get_accounting_breakdown", "get_utility_investigations"] },
+  { slug: "owner-reporting", name: "Owner Reporting", role: "Owner Reporting",
+    objective: "Give each owner an accurate, reconciled picture of their property every period.",
+    expertise: ["financial-analysis", "portfolio-outlook"],
+    capabilities: ["get_operating_statement", "get_accounting_breakdown", "get_portfolio_metrics", "get_delinquent_accounts"] },
 ];
 
 export interface ExpertiseRecord extends ExpertiseCandidateInput {
@@ -396,53 +386,40 @@ export async function loadExpertiseInstructions(
   return slugs.map((slug) => bySlug.get(slug)).filter((value): value is string => Boolean(value));
 }
 
-/* ── the workspace's starting team ────────────────────────────────────────── */
+/* ── creating an employee from a template ─────────────────────────────────── */
 
 /**
- * Gives a workspace the employees Aval ships with.
+ * Creates one employee from a template, with the template's capabilities and
+ * expertise — not just its name.
  *
- * The eight specialists did not become templates that leave a new workspace
- * empty — they are seeded as ordinary employees, and a customer can rename,
- * re-scope, pause or archive any of them exactly as they would one they
- * created. What changed is that the roster is now rows the customer owns rather
- * than a union type they cannot touch.
- *
- * Idempotent, and never re-creates what somebody archived: a workspace that
- * deliberately got rid of the Market Researcher does not find it back tomorrow.
+ * Only ever called because a person chose the template. Nothing creates
+ * employees on a workspace's behalf: an employee is headcount the customer
+ * decided to have, and the expertise library exists without it.
  */
-export async function seedWorkspaceEmployees(
+export async function createEmployeeFromTemplate(
   dbSession: DbSession,
   organizationId: string,
   userId: string,
-): Promise<number> {
-  const existing = await dbSession.db
-    .select({ name: aiEmployees.name })
-    .from(aiEmployees)
-    .where(eq(aiEmployees.organizationId, organizationId));
-  // Any employee at all means this workspace has been set up. Seeding again
-  // would fight whatever the customer has since decided.
-  if (existing.length > 0) return 0;
-
+  slug: string,
+  overrides: { name?: string; status?: "draft" | "active" } = {},
+) {
+  const template = STARTER_TEMPLATES.find((row) => row.slug === slug);
+  if (!template) throw new InvalidEmployeeInputError(`No employee template "${slug}".`);
+  const employee = await createEmployee(dbSession, organizationId, userId, {
+    name: overrides.name?.trim() || template.name,
+    role: template.role,
+    objective: template.objective,
+    status: overrides.status ?? "active",
+    autonomyMode: "supervised",
+    scopes: template.capabilities.map((value) => ({ kind: "capability" as const, value })),
+  });
   const catalogue = await listExpertiseCatalogue(dbSession, organizationId);
   const bySlug = new Map(catalogue.map((record) => [record.slug, record]));
-
-  let created = 0;
-  for (const template of STARTER_TEMPLATES) {
-    const employee = await createEmployee(dbSession, organizationId, userId, {
-      name: template.name,
-      role: template.role,
-      objective: template.objective,
-      status: "active",
-      autonomyMode: "supervised",
-      scopes: template.capabilities.map((value) => ({ kind: "capability" as const, value })),
-    });
-    for (const slug of template.expertise) {
-      const profile = bySlug.get(slug);
-      if (profile) await grantExpertise(dbSession, organizationId, employee.id, profile.id, userId);
-    }
-    created += 1;
+  for (const expertiseSlug of template.expertise) {
+    const profile = bySlug.get(expertiseSlug);
+    if (profile) await grantExpertise(dbSession, organizationId, employee.id, profile.id, userId);
   }
-  return created;
+  return employee;
 }
 
 export interface EmployeeAssignment {

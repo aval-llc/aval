@@ -1,4 +1,5 @@
 import { withApiSession } from "@/lib/api/with-session";
+import { wakeOnDocument } from "@/lib/agents/waits";
 import type { DbSession } from "@/db/postgres/session";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
@@ -42,6 +43,8 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
     contentText,
   });
 
+  // Work waiting on a document re-checks whether this is the one.
+  await wakeOnDocument(dbSession, identity.organizationId);
   return Response.json({ document: saved, maxChars: MAX_DOCUMENT_CHARS }, { status: 201 });
 }
 

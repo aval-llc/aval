@@ -1,6 +1,6 @@
 import type { DbSession } from "@/db/postgres/session";
 import { agentChecks, agentModelContexts } from "@/db/postgres/schema";
-import { semanticPacket } from './semantic-evidence';
+import { plannedEvidenceTasks, semanticPacket } from './semantic-evidence';
 import { SEMANTIC_REVIEW_SYSTEM, SEMANTIC_REVIEW_TOOL, parseSemanticVerdict, type ReviewPacket } from './semantic-review';
 import { assembleContext, byteCount, MAX_CONTEXT_BYTES } from './context';
 import { planReadiness, goalPlan, validateGoalPlanProposal } from './goal-plan';
@@ -75,6 +75,16 @@ import { attemptSignature, attemptSpend, attemptTraces, recordWorkAttempt } from
 import { autonomyInstructions, autonomyMode } from "./autonomy";
 import { readOnboarding } from "@/lib/onboarding/storage";
 import { shouldRetryTask } from "./retry-policy.ts";
+import { agentTasks } from "@/db/postgres/schema";
+import { and, eq } from "drizzle-orm";
+import { TERMINAL_STATES } from "./task-state.ts";
+import { DELEGATION_POLICY } from "./delegation-policy.ts";
+import { PEER_HELP_TOOL, mayRequestPeerHelp, peerReadiness } from "./peer-help.ts";
+import { wakePeerWaiters } from "./work-identity.ts";
+import { PERSON_RESUMABLE, WAIT_TOOL, wakeContext } from "./waits.ts";
+import { assignableActorsPrompt } from "./organization/prompt.ts";
+import { builtInActor } from "./organization/index.ts";
+import { getOperatingProfile } from "@/lib/organizations/operating-profile-store";
 
 /**
  * Framing that turns the question-answering prompt into a goal-pursuing one.
@@ -142,8 +152,22 @@ export async function advanceTask(dbSession: DbSession,
     return { taskId, status: task.status, stepsRun: 0 };
   }
 
+  // What this run is resuming from, before the claim moves it to RUNNING.
+  const resumedFrom = task.status;
   const readiness = await planReadiness(dbSession, task);
   if(readiness.wait)return {taskId,status:task.status,stepsRun:0};
+  // Parked on a peer: runnable only once every peer it asked has settled.
+  // Until then it sleeps on its recheck timer rather than being re-selected on
+  // every tick; a settling peer wakes it early (wakePeerWaiters).
+  if (task.status === "WAITING_FOR_AGENT") {
+    const peers = await peerReadiness(dbSession, task);
+    if (peers.wait) {
+      await dbSession.db.update(agentTasks).set({ nextAttemptAt: new Date(Date.now() + DELEGATION_POLICY.peerRecheckMs) })
+        .where(and(eq(agentTasks.id, task.id), eq(agentTasks.organizationId, organizationId), eq(agentTasks.status, "WAITING_FOR_AGENT")));
+      return { taskId, status: task.status, stepsRun: 0 };
+    }
+    if (peers.context) readiness.context = [readiness.context, peers.context].filter(Boolean).join("\n");
+  }
 
   // A parked task only resumes once its approval has actually been decided.
   let decidedApproval: ApprovalRecord | null = null;
@@ -212,6 +236,11 @@ export async function advanceTask(dbSession: DbSession,
     employeeId: owner?.id,
     employeeCapabilities: scopes?.capability ?? null,
     employeePermissions,
+    // A Specialist changes only what its own capabilities name. Its envelope
+    // is derived from those tools, but a permission can cover more than one
+    // tool (pms.maintenance.write covers create, update and close), so the
+    // capability list — not the permission — is what bounds its acts.
+    expertiseCapabilities: builtInActor(task.agentId)?.kind === "specialist" ? builtInActor(task.agentId)!.toolNames : null,
   });
   let tools: ToolSchema[] = assembled.tools;
   const evidenceCapabilities = tools.flatMap(tool => {
@@ -221,7 +250,7 @@ export async function advanceTask(dbSession: DbSession,
   });
 
   const contract=JSON.parse(task.checkJson??'{}');
-  const support=['render_answer','read_memory','write_memory','read_task_history'];
+  const support=['render_answer','read_memory','write_memory','read_task_history',...(mayRequestPeerHelp(task)?[PEER_HELP_TOOL]:[]),...(contract.kind==='plan'?[]:[WAIT_TOOL])];
   const selected=contract.kind==='plan'?['plan_goal','get_goal_plan']
     :contract.kind==='evidence'?[...(contract.tools??[]),...(contract.tools?.includes('read_document')?['list_documents']:[])]
     :contract.kind==='delivery'?['create_maintenance_work_order','read_conversation','list_conversations','get_communication_channels','get_marketing_channels','request_execution_plan','send_external_message','place_call','publish_listing']
@@ -255,8 +284,12 @@ export async function advanceTask(dbSession: DbSession,
 Task completion condition: ${task.checkJson}. The harness verifies it independently. A final answer without the required evidence or stored outcome fails. For a root plan, call plan_goal before concluding; inspect failed checks and replan remaining work at most once. Scratchpad notes are available through read_memory/write_memory, never treated as facts or authority.`;
   if (contract.kind === 'plan') system += `
 Evidence tools available to children retaining this agent: ${JSON.stringify(evidenceCapabilities)}.
-Use these exact tool names in check.tools; do not invent search tools. For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
+Use these exact tool names in check.tools; do not invent search tools.${assignableActorsPrompt(task.agentId, { profile: await getOperatingProfile(dbSession, organizationId), objective: task.goal })} For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
   if(readiness.context)system += '\nCurrent dependency/plan results: '+readiness.context.slice(0,16000);
+  // Resuming from a wait: say what was awaited and what woke it, so the run
+  // checks the thing happened instead of assuming it.
+  const woke = PERSON_RESUMABLE.includes(resumedFrom as TaskState) ? wakeContext(task) : undefined;
+  if (woke) system += '\n' + woke;
   const messages: Message[] = safeParseTranscript(task.transcriptJson, task.goal);
   // Evidence must survive invocation boundaries just like the conversation.
   // Rebuild it from persisted tool results before adding anything observed by
@@ -264,13 +297,18 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
   const seenNumbers = evidenceNumbersFromTranscript(messages);
   // A parent summary may cite checked child evidence. Scratchpad prose and
   // failed/unrelated tasks cannot supply new financial figures.
-  const dependencyPlan = await goalPlan(dbSession, organizationId, task.parentTaskId ?? task.id);
+  // A planner — the root, or a Lead planning for its team — draws on its own
+  // plan's children; anything else on the dependencies its parent gave it.
+  const planner = contract.kind === 'plan';
+  const dependencyPlan = await goalPlan(dbSession, organizationId, planner ? task.id : task.parentTaskId ?? task.id);
   const ownNode = dependencyPlan?.nodes.find(node => node.id === task.id);
   const dependencyKeys: string[] = ownNode ? JSON.parse(ownNode.dependencies) : [];
   for (const node of dependencyPlan?.nodes ?? []) {
-    if (node.status !== 'COMPLETED' || (task.parentTaskId && !dependencyKeys.includes(node.key))) continue;
+    if (node.status !== 'COMPLETED' || (!planner && task.parentTaskId && !dependencyKeys.includes(node.key))) continue;
     const child = await getTask(dbSession, organizationId, node.id);
-    if (child) evidenceNumbersFromTranscript(safeParseTranscript(child.transcriptJson, child.goal)).forEach(number => seenNumbers.add(number));
+    if (!child) continue;
+    for (const source of [child, ...await plannedEvidenceTasks(dbSession, child)])
+      evidenceNumbersFromTranscript(safeParseTranscript(source.transcriptJson, source.goal)).forEach(number => seenNumbers.add(number));
   }
   const audit: AuditEvent[] = [];
   let stepsRun = 0;
@@ -296,6 +334,9 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       const current=await getTask(dbSession, organizationId,taskId);
       return {taskId,status:current?.status??'FAILED',stepsRun,error:'The terminal result was not saved because the task lease changed.'};
     }
+    // Anyone in this Work waiting on a peer re-checks now rather than on its
+    // timer. Only a hint: each re-reads what it actually awaits.
+    if (TERMINAL_STATES.has(status)) await wakePeerWaiters(dbSession, organizationId, task!.workId ?? task!.id);
     return { taskId, status, stepsRun, approvalId: extra.approvalId, error: extra.error };
   };
 
@@ -413,8 +454,12 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
         // answer itself is not: it failed its own completion condition, and
         // publishing it as the result of the work would assert exactly what the
         // check refused to accept.
+        // A planner that could not plan usually could not because the work
+        // needs a capability nobody here has; that refusal names it, and the
+        // person handed the work needs it more than the generic check failure.
+        const refusedPlan = lastRefusal(messages, 'plan_goal');
         return handOff(repair.policy.onExhausted,
-          'Completion checks failed after bounded repair: ' + verification.problems.join(' '),
+          'Completion checks failed after bounded repair: ' + verification.problems.join(' ') + (refusedPlan ? ` Planning was refused: ${refusedPlan}` : ''),
           'The objective and its evidence are preserved; decide whether the approach or the completion condition should change.');
       }
       return checkpoint();
@@ -597,7 +642,7 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
     if (decidedApproval) {
       await settleDecidedApproval(dbSession, {
         organizationId, taskId, task, subject, messages, seenNumbers, audit, approval: decidedApproval,
-        employeePermissions,
+        employeePermissions, offeredToolNames: new Set(tools.map((tool) => tool.name)),
       });
       // The approved side effect and its observation must become durable
       // before another model call starts. If the worker dies after execution,
@@ -746,7 +791,11 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       const results: ContentBlock[] = [];
 
       for (const use of toolUses) {
-        if (use.name === 'plan_goal') {
+        // The assembled toolset is binding, not a suggestion. A call to a tool
+        // this run was not offered — however it got the name — is refused
+        // before policy runs, the same way a policy denial is.
+        const offered = tools.some(tool => tool.name === use.name);
+        if (offered && use.name === 'plan_goal') {
           const verification = await review('plan', use.input, stepIndex);
           await dbSession.db.insert(agentChecks).values({ id: crypto.randomUUID(), organizationId, taskId, stepIndex, exitCode: verification.exitCode, outputJson: JSON.stringify(verification), createdAt: new Date() });
           await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'verification_check', toolName: 'plan_goal', policyEffect: verification.exitCode ? 'deny' : 'allow', resultDigest: await digestPayload(verification), error: verification.exitCode ? verification.problems.join(' ') : undefined });
@@ -773,13 +822,16 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
           // before reserving budgets for child tasks; a lost lease stops here.
           const lost = await checkpoint(); if (lost) return lost;
         }
-        const outcome = await executeTool(dbSession, {
+        const outcome = offered ? await executeTool(dbSession, {
           toolName: use.name,
           args: use.input,
           subject,
           context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth, remainingSteps },
           task: { id: taskId, stepIndex },
-        });
+        }) : {
+          result: { status: 'denied' as const, code: 'permission_denied' as const, reason: `${use.name} is not one of the tools offered to this work. Use only the tools you were given.` },
+          audit: [{ kind: 'policy_decision' as const, label: `${use.name}:not_offered`, payloadDigest: await digestPayload(use.name), count: 0 }],
+        };
         audit.push(...outcome.audit);
         const result = outcome.result;
 
@@ -906,6 +958,15 @@ Use these exact tool names in check.tools; do not invent search tools. For examp
       const lost = await checkpoint();
       if (lost) return lost;
       if(toolUses.some(u=>u.name==='plan_goal')&&results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name==='plan_goal'&&u.id===r.tool_use_id)))return finish('WAITING_FOR_TOOL');
+      // A wait was recorded: park in the state it names, with its wake time (or
+      // none, for a wait only an event or a person can end).
+      const waitResult = results.find(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name===WAIT_TOOL&&u.id===r.tool_use_id));
+      if (waitResult && waitResult.type==='tool_result') {
+        const parked = JSON.parse(typeof waitResult.content === 'string' ? waitResult.content : '{}') as { waiting?: TaskState; until?: string | null };
+        if (parked.waiting) return finish(parked.waiting, { nextAttemptAt: parked.until ? new Date(parked.until) : undefined });
+      }
+      // A peer was asked: wait for it, with a recheck in case its wake-up is lost.
+      if(results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name===PEER_HELP_TOOL&&u.id===r.tool_use_id)))return finish('WAITING_FOR_AGENT',{nextAttemptAt:new Date(Date.now()+DELEGATION_POLICY.peerRecheckMs)});
     }
   } catch (err) {
     const message = err instanceof ModelProviderError ? err.message : "The agent runtime failed.";
@@ -961,6 +1022,23 @@ async function resumeFromApproval(dbSession: DbSession,
  * key and is suppressed as a duplicate rather than executed twice.
  */
 /** The completion contract's kind, for routing. Unparseable is simply unknown. */
+/** The text of the latest refused call to one tool in this transcript, if its latest call was refused. */
+function lastRefusal(messages: Message[], toolName: string): string | null {
+  const uses = messages.flatMap((message) => message.role === 'assistant' && Array.isArray(message.content) ? message.content.filter((block): block is ToolUseBlock => block.type === 'tool_use' && block.name === toolName) : []);
+  const last = uses.at(-1);
+  if (!last) return null;
+  for (const message of messages) {
+    if (message.role !== 'user' || !Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (block.type === 'tool_result' && block.tool_use_id === last.id && block.is_error) {
+        const text = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+        return text.slice(0, 600);
+      }
+    }
+  }
+  return null;
+}
+
 function taskCheckKind(checkJson: string | null): string | null {
   try {
     const parsed = JSON.parse(checkJson ?? "{}") as { kind?: unknown };
@@ -979,6 +1057,12 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
   approval: ApprovalRecord;
   /** The owning employee's authority, so a settled approval is judged by the same envelope. */
   employeePermissions: readonly Permission[] | null;
+  /**
+   * What this run is offered now. The same gate as the main loop: a call that
+   * shared the approved call's message, or the approved call itself once its
+   * capability or connection is gone, is refused rather than executed.
+   */
+  offeredToolNames: ReadonlySet<string>;
 }): Promise<void> {
   const { organizationId, taskId, task, subject, messages, seenNumbers, audit, approval, employeePermissions } = input;
   const last = messages[messages.length - 1];
@@ -1007,7 +1091,12 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
     // Approved, or an ordinary call that shared the message. Either way the
     // policy engine re-runs: an approval from an hour ago is not evidence the
     // permission still stands now.
-    const outcome = isGatedCall
+    const outcome = !input.offeredToolNames.has(use.name)
+      ? {
+          result: { status: 'denied' as const, code: 'permission_denied' as const, reason: `${use.name} is not one of the tools offered to this work now. It was not executed.` },
+          audit: [{ kind: 'policy_decision' as const, label: `${use.name}:not_offered`, payloadDigest: await digestPayload(use.name), count: 0 }],
+        }
+      : isGatedCall
       ? await executeApprovedTool(dbSession, {
           toolName: use.name, args: use.input, subject,
           context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth },

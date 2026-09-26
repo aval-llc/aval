@@ -17,7 +17,7 @@ test('utility migration preserves populated legacy meters and bills without gues
     const target=new URL(url);target.pathname=`/${name}`;
     db=new Client({connectionString:target.href});await db.connect();
     const directory=new URL('../../supabase/migrations/',import.meta.url);
-    const migration='20260925000100_utility_pilot.sql';
+    const migration='20260926000100_utility_pilot.sql';
     for(const file of (await readdir(directory)).filter(f=>f.endsWith('.sql') && f<migration).sort()) {
       await db.query('BEGIN');
       await db.query(await readFile(new URL(file,directory),'utf8'));

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { wakeOnInboundMessage } from "@/lib/agents/waits";
 import { and, eq, sql } from "drizzle-orm";
 import { getRequestExecutionContext } from "vinext/shims/request-context";
 import { conversations, integrationEvents, messages } from "@/db/postgres/schema";
@@ -171,6 +172,8 @@ async function ingestInboundMessage(
   }).onConflictDoNothing().returning({ id: messages.id });
   if (inserted.length === 0) return;
 
+  // Work waiting on whoever writes on this thread re-checks now.
+  await wakeOnInboundMessage(dbSession, organizationId, conversation.id);
   await queueInboundTask(dbSession, organizationId, conversation.id, parsed.externalMessageId, parsed.body);
   const draftWork = dbSession.afterCommit(() => withWorkerOrganizationSession(organizationId, async (workerSession) => {
     try {

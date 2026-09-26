@@ -132,6 +132,48 @@ export async function recordFinancialToolResult(dbSession: DbSession,
   return { ok: true };
 }
 
+/**
+ * Records the outcome of a ledger write (`post_payment`, `create_payment_plan`)
+ * against the operation that guarded it.
+ *
+ * A PMS write reports in its own shape, so it is read here rather than trusted
+ * as a financial provider result:
+ *
+ *   - written, with the provider's id: submitted, awaiting an independent
+ *     read-back — the same projection a payment provider's report gets;
+ *   - queued for the customer's own session: still reserved. Nothing has been
+ *     written, so the reservation keeps counting against the daily limit until
+ *     the runner reports;
+ *   - denied or failed before any write: nothing moved, so the operation is
+ *     closed as failed and stops counting against the limit.
+ *
+ * Anything else is `unknown` and goes to manual review, because a write whose
+ * outcome cannot be read may still have happened.
+ */
+export async function recordLedgerWriteResult(dbSession: DbSession,
+  operationId: string,
+  organizationId: string,
+  result: unknown,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const json = (result && typeof result === "object" ? result : {}) as Record<string, unknown>;
+  const digest = await digestPayload(result ?? null);
+  const now = new Date();
+  if (json.status === "done" && json.written === true && typeof json.external_id === "string") {
+    return recordFinancialToolResult(dbSession, operationId, organizationId, { status: "submitted", external_transaction_id: json.external_id });
+  }
+  if (json.status === "queued" && typeof json.queue_id === "string") {
+    await appendFinancialEvent(dbSession, operationId, organizationId, "queued_for_runner", digest);
+    return { ok: true };
+  }
+  if ((json.status === "denied" || json.status === "failed" || typeof json.error === "string") && json.written !== true) {
+    await dbSession.db.update(agentFinancialOperations).set({ status: "failed", reconciliationStatus: "not_executed", resultDigest: digest, updatedAt: now })
+      .where(and(eq(agentFinancialOperations.id, operationId), eq(agentFinancialOperations.organizationId, organizationId)));
+    await appendFinancialEvent(dbSession, operationId, organizationId, "not_executed", digest);
+    return { ok: true };
+  }
+  return recordFinancialToolResult(dbSession, operationId, organizationId, result);
+}
+
 export interface ReconciliationAdapter {
   lookup(operation: FinancialOperationRecord): Promise<ExternalFinancialState | "not_found">;
 }

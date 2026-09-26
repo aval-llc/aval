@@ -1,4 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
+import { wakeOnInboundMessage } from "@/lib/agents/waits";
 import type { DbSession } from "@/db/postgres/session";
 import { conversations, messages, integrationConnections } from "@/db/postgres/schema";
 import { providerJson, ProviderHttpError, record, requiredString, safeSegment } from "@/lib/integrations/http";
@@ -74,6 +75,8 @@ export async function syncGmail(session: DbSession, org: string, connection: { i
       const inserted = await session.db.insert(messages).values({ id: crypto.randomUUID(), conversationId: thread.id, externalMessageId: messageId, direction: "inbound", body: body.slice(0,10000), payloadJson: JSON.stringify(metadata), createdAt: at }).onConflictDoNothing().returning({ id: messages.id });
       if (!inserted.length) continue;
       imported++;
+      // Work waiting on whoever writes on this thread re-checks now.
+      await wakeOnInboundMessage(session, org, thread.id);
       if (at > thread.lastMessageAt) await session.db.update(conversations).set({ lastMessageAt: at, updatedAt: now }).where(eq(conversations.id, thread.id));
       await queueInboundTask(session, org, thread.id, messageId, body);
     }

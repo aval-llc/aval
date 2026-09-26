@@ -17,13 +17,14 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { agentTasks, agentApprovals, actionEvidence, operationalFacts } from "@/db/postgres/schema";
-import { TERMINAL_STATES, type TaskState } from "./task-state.ts";
+import { TASK_STATES, TERMINAL_STATES, type TaskState } from "./task-state.ts";
 
 /** States where the work is alive: someone or something still owes it a move. */
-const OPEN_STATES: readonly TaskState[] = [
-  "QUEUED", "RUNNING", "WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL",
-  "PENDING_VERIFICATION", "WAITING_FOR_HUMAN",
-];
+// Every non-terminal state. Work waiting on a provider, a resident, a vendor,
+// an owner, an applicant, a document, a peer or a clock is still open work; it
+// used to be missing from this list, so it vanished from the open-work view
+// while it waited.
+const OPEN_STATES: readonly TaskState[] = TASK_STATES.filter((state) => !TERMINAL_STATES.has(state));
 
 export interface WorkView {
   id: string;
