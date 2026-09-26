@@ -76,3 +76,11 @@ All calculation and isolation cases are binary, all-pass gates. The test report 
 Before enabling the connector in Aval's production UI, obtain a ByDesign test tenant and approved read-only access. Capture its enabled service metadata, field meanings, company/account identifiers and sample bill records. Confirm invoice versus line-item identity, meter availability, quantities/units, inclusive/exclusive dates, timezone semantics and currencies. Reconcile a small read with the SAP screen/export, validate permissions and continuation URLs on that tenant, then run the same public-route/agent workflow with an explicitly configured real model and cost budget.
 
 No standalone S/4HANA or SAP GROW trial substitutes for Business ByDesign validation. Live compatibility and Gentor pilot readiness remain **unverified**.
+
+## Aval connection screen
+
+On `khas`, Connections now includes **SAP Business ByDesign → Connect**. The workspace owner enters the SAP address, dedicated read-only username/password, enabled OData collection path, company field/ID, and unique record fields supplied by the SAP administrator. Field names are configuration, not assumed SAP standards.
+
+**Save and test SAP access** encrypts the credentials, then issues one scoped GET with `$top=1`. Successful verification records read access only, including whether a sample row was found. Empty data does not prove the company has usable records. It does not import rows, queue sync, validate utility field mappings, or establish Gentor compatibility. Mapping and reviewed ingestion remain the next setup step. The UI explains this in English and Mexican Spanish.
+
+The transport rejects arbitrary hosts, redirects, unsupported paths, malformed responses and mismatched companies. Connection ownership and encrypted persistence are tested through the public routes against local PostgreSQL. Live SAP validation still requires an authorized tenant.

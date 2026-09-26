@@ -1,7 +1,7 @@
 "use client";
 
 import { Database } from "iconoir-react";
-import { siAsana, siBox, siGooglechat, siGoogledrive, siGooglesheets, siMeta, siAlibabacloud, siAnthropic, siApple, siDeepseek, siGmail, siGooglegemini, siMoonshotai, siNotion, siOpenrouter, siQuickbooks, siTelegram, siWhatsapp, siXero } from "simple-icons";
+import { siSap, siAsana, siBox, siGooglechat, siGoogledrive, siGooglesheets, siMeta, siAlibabacloud, siAnthropic, siApple, siDeepseek, siGmail, siGooglegemini, siMoonshotai, siNotion, siOpenrouter, siQuickbooks, siTelegram, siWhatsapp, siXero } from "simple-icons";
 
 function SimpleMark({ icon }: { icon: { path: string; hex: string; title: string } }) { return <svg viewBox="0 0 24 24" aria-label={icon.title} role="img"><path fill={`#${icon.hex}`} d={icon.path}/></svg>; }
 function SlackMark() { return <svg viewBox="0 0 24 24" aria-label="Slack" role="img"><path fill="#36C5F0" d="M5.2 0a2.4 2.4 0 0 0 0 4.8h2.4V2.4A2.4 2.4 0 0 0 5.2 0m0 6.4H2.4a2.4 2.4 0 0 0 0 4.8h2.8z"/><path fill="#2EB67D" d="M24 5.2a2.4 2.4 0 0 0-4.8 0v2.4h2.4A2.4 2.4 0 0 0 24 5.2m-6.4 0V2.4a2.4 2.4 0 0 0-4.8 0v2.8z"/><path fill="#ECB22E" d="M18.8 24a2.4 2.4 0 0 0 0-4.8h-2.4v2.4a2.4 2.4 0 0 0 2.4 2.4m0-6.4h2.8a2.4 2.4 0 0 0 0-4.8h-2.8z"/><path fill="#E01E5A" d="M0 18.8a2.4 2.4 0 0 0 4.8 0v-2.4H2.4A2.4 2.4 0 0 0 0 18.8m6.4 0v2.8a2.4 2.4 0 0 0 4.8 0v-2.8z"/></svg>; }
@@ -63,7 +63,7 @@ export const PROVIDER_ASSETS: Readonly<Record<string, string>> = {
 /** The same provider-mark rendering used across Connections, Inbox, and Tasks — reused by the automation timeline so real channel icons appear per step instead of generic action icons. */
 export function BrandMark({ provider, small = false }: { provider: string; small?: boolean }) {
   provider = ({ imessage: "apple_messages" } as Record<string,string>)[provider] ?? provider;
-  const simple = ({ asana: siAsana, box: siBox, google_chat: siGooglechat, google_drive: siGoogledrive, google_sheets: siGooglesheets, meta: siMeta } as Record<string, {path:string;hex:string;title:string}>)[provider];
+  const simple = ({ sap_bydesign: siSap, asana: siAsana, box: siBox, google_chat: siGooglechat, google_drive: siGoogledrive, google_sheets: siGooglesheets, meta: siMeta } as Record<string, {path:string;hex:string;title:string}>)[provider];
   if (simple) return <span className={`brand-mark ${small ? "small" : ""} brand-${provider}`}><SimpleMark icon={simple}/></span>;
   const initials = ({ peach: "P", rm_cloud: "RM", sme_professional: "SME", tenantcloud: "TC", zoopla: "Z", onedrive: "OD" } as Record<string,string>)[provider];
   const asset = PROVIDER_ASSETS[provider];

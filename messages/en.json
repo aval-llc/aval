@@ -399,6 +399,26 @@
     "suspended": "Financial execution is suspended."
   },
   "ConnectionDialog": {
+    "sap": {
+      "description": "Connect a read-only SAP Business ByDesign service for your company.",
+      "adapter": "One scoped read checks access to the configured service.",
+      "storage": "Credentials are encrypted and stored for this workspace.",
+      "admin": "Ask your SAP administrator for an enabled OData collection and a read-only integration account.",
+      "fields": "Your administrator supplies the company field, company ID and unique record field names.",
+      "proof": "A successful check verifies read access only. An empty result does not confirm company data is available.",
+      "note": "SAP access must be enabled by your administrator first. After verification, utility fields and meters still need mapping and a reviewed import. Automatic syncing is not enabled.",
+      "verified": "SAP read access verified. Data mapping and a reviewed import are still required; no sync was started.",
+      "test": "Save and test SAP access",
+      "labels": {
+        "tenantUrl": "SAP address (https://your-company.sapbydesign.com)",
+        "username": "Integration username",
+        "password": "Integration password",
+        "collectionPath": "Enabled OData collection path",
+        "companyField": "Company field name",
+        "companyId": "Company ID",
+        "recordKeyFields": "Unique record fields (comma-separated)"
+      }
+    },
     "access": "Access",
     "advanced": "Advanced",
     "authorize": "Authorize",
@@ -1677,6 +1697,7 @@
     "board": "Board"
   },
   "Catalog": {
+    "sapDescription": "Connect a read-only SAP Business ByDesign service for your company.",
     "workspace": "Workspace",
     "title": "Integrations",
     "description": "Connect the tools your team uses. Choose exactly what Aval can access.",

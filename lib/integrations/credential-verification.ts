@@ -3,6 +3,7 @@ import { buildiumBase } from "./buildium";
 import { verifyAdditionalCredentials } from "./verification";
 import { providerJson, record, requiredString, safeSegment } from "./http";
 import { isModelProviderId, verifyModelProviderKey } from "./model-providers";
+import { byDesignConnectionConfig, probeByDesignCollection } from "./sap-bydesign/odata.ts";
 
 const bindings = () => env as unknown as Record<string, string | undefined>;
 
@@ -11,6 +12,13 @@ function basic(username: string, password: string) {
 }
 
 export async function verifyCredentials(provider: string, credentials: Record<string, string>, request: Request, connectionId: string, configureWebhook = true) {
+  if (provider === "sap_bydesign") {
+    const config = byDesignConnectionConfig(credentials);
+    const probe = await probeByDesignCollection(config, { username: credentials.username, password: credentials.password });
+    const host = new URL(config.tenantUrl).hostname;
+    return { accountId: `${host}/${config.companyFilter.value}`, accountName: `SAP ByDesign · ${config.companyFilter.value}`,
+      metadata: { validation: "read_access_only", mappingRequired: true, syncEnabled: false, ...probe } };
+  }
   if (isModelProviderId(provider)) return verifyModelProviderKey(provider, credentials.apiKey);
   const additional = await verifyAdditionalCredentials(provider, credentials, bindings());
   if (additional) return additional;

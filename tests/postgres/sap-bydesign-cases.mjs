@@ -12,6 +12,9 @@ import { POST as importRoute } from '../../app/api/infrastructure/import/route.t
 import { POST as followUpRoute } from '../../app/api/infrastructure/follow-up/route.ts';
 import { POST as taskRoute } from '../../app/api/agents/tasks/route.ts';
 import { runScheduledSweep } from '../../lib/workers/scheduled-sweep.ts';
+import { POST as connectRoute } from '../../app/api/integrations/connect/route.ts';
+import { POST as verifyRoute } from '../../app/api/integrations/verify/route.ts';
+import { GET as catalogRoute } from '../../app/api/integrations/route.ts';
 
 const reply = (name, input) => ({ content: [{ type: 'tool_use', name, input, id: randomUUID() }], stop_reason: 'tool_use',
   usage: { input_tokens: 100, output_tokens: 50 }, routing: { providerId: 'test', model: 'scripted-bydesign' } });
@@ -26,6 +29,47 @@ export async function runByDesignCases(t, { session, config, administrator, user
   });
   let profile, rows, org;
   try {
+    await t.test('SAP Connect button API saves encrypted credentials, verifies one scoped read and never starts sync', async () => {
+      env.INTEGRATION_TOKEN_ENCRYPTION_KEY = 'bydesign-test-only-encryption-key-32-characters';
+      const fields = { ...syntheticCredentials, tenantUrl: syntheticReadConfig.tenantUrl,
+        collectionPath: syntheticReadConfig.collectionPath, companyField: syntheticReadConfig.companyFilter.field,
+        companyId: syntheticReadConfig.companyFilter.value, recordKeyFields: syntheticReadConfig.orderBy.join(',') };
+      const catalogRequest = new Request('https://aval.test/api/integrations', { headers: request('/unused', {}).headers });
+      const catalog = await (await catalogRoute(catalogRequest)).json();
+      const provider = catalog.providers.find(p => p.id === 'sap_bydesign');
+      assert.equal(provider.configured, true);
+      assert.equal(provider.readiness.verification, true);
+      assert.equal(provider.readiness.sync, false);
+      assert.equal((await connectRoute(request('/api/integrations/connect', { provider: 'sap_bydesign', credentials: { ...fields, tenantUrl: 'https://localhost' } }))).status, 400);
+      const connected = await connectRoute(request('/api/integrations/connect', { provider: 'sap_bydesign', credentials: fields }));
+      assert.equal(connected.status, 200);
+      const { connection } = await connected.json();
+      const stored = async () => (await administrator.query('SELECT * FROM integration_connections WHERE id=$1', [connection.id])).rows[0];
+      assert.equal((await stored()).status, 'verification_required');
+      assert.ok(!(await stored()).access_token_ciphertext.includes(fields.password));
+      const server = await startByDesignSimulator();
+      const originalFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = async (url, init) => {
+          if (new URL(url).hostname === '127.0.0.1') return originalFetch(url, init);
+          assert.equal((await stored()).status, 'verification_required', 'credentials committed before external call');
+          return server.fetch(url, init);
+        };
+        assert.equal((await verifyRoute(request('/api/integrations/verify', { connectionId: connection.id }, userB))).status, 404);
+        assert.equal(server.requests.length, 0);
+        assert.equal((await verifyRoute(request('/api/integrations/verify', { connectionId: connection.id }))).status, 200);
+        assert.equal(server.requests.length, 1);
+        const after = await stored();
+        assert.equal(after.status, 'connected'); assert.equal(after.last_sync_at, null);
+        const metadata = typeof after.metadata_json === 'string' ? JSON.parse(after.metadata_json) : after.metadata_json;
+        assert.equal(metadata.validation, 'read_access_only'); assert.equal(metadata.syncEnabled, false); assert.equal(metadata.mappingRequired, true);
+        const bad = await connectRoute(request('/api/integrations/connect', { provider: 'sap_bydesign', credentials: { ...fields, password: 'wrong-test-password' } }));
+        assert.equal(bad.status, 200);
+        const rejected = await verifyRoute(request('/api/integrations/verify', { connectionId: connection.id }));
+        assert.equal(rejected.status, 422); assert.doesNotMatch(await rejected.text(), /wrong-test-password/);
+        assert.equal((await stored()).status, 'verification_failed');
+      } finally { globalThis.fetch = originalFetch; await server.close(); }
+    });
     await t.test('ByDesign simulated source -> public preview/apply -> persisted scoped utility evidence', async () => {
       const site = await run((s, o) => createSite(s, o, { name: 'ByDesign synthetic pilot' }));
       org = site.organizationId;

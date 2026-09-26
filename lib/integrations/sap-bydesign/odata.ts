@@ -80,6 +80,29 @@ async function jsonPage(response: Response) {
 /** Fetch all bounded pages before returning any data. Call before opening a DB transaction.
  * A failed/partial read never returns a success-shaped partial dataset. */
 export async function readByDesignCollection(config: ByDesignReadConfig, credentials: ByDesignCredentials, fetcher: ByDesignFetch = fetch) {
+  return readCollection(config, credentials, fetcher, false);
+}
+
+/** A single scoped row proves read access only, never import completeness. */
+export async function probeByDesignCollection(config: ByDesignReadConfig, credentials: ByDesignCredentials, fetcher: ByDesignFetch = fetch) {
+  const result = await readCollection({ ...config, pageSize: 1 }, credentials, fetcher, true);
+  return { sampleCount: result.rows.length, checkedAt: result.fetchedAt };
+}
+
+/** Validate administrator-supplied field names before saving any credentials. */
+export function byDesignConnectionConfig(credentials: Record<string, string>): ByDesignReadConfig {
+  const config: ByDesignReadConfig = {
+    tenantUrl: credentials.tenantUrl?.trim() ?? "",
+    collectionPath: credentials.collectionPath?.trim() ?? "",
+    select: [credentials.companyField?.trim() ?? "", ...(credentials.recordKeyFields ?? "").split(",").map(f => f.trim())],
+    orderBy: (credentials.recordKeyFields ?? "").split(",").map(f => f.trim()),
+    companyFilter: { field: credentials.companyField?.trim() ?? "", value: credentials.companyId?.trim() ?? "" },
+  };
+  collectionUrl(config);
+  return config;
+}
+
+async function readCollection(config: ByDesignReadConfig, credentials: ByDesignCredentials, fetcher: ByDesignFetch, probe: boolean) {
   const base = collectionUrl(config);
   const pageSize = boundedInteger(config.pageSize ?? 100, 100);
   const maxRows = boundedInteger(config.maxRows ?? 500, 500);
@@ -133,6 +156,7 @@ export async function readByDesignCollection(config: ByDesignReadConfig, credent
       rows.push(row);
       if (rows.length > maxRows) fail("ROW_LIMIT_EXCEEDED");
     }
+    if (probe) break; // Verification deliberately does not follow pagination or return records.
     if (data.__next !== undefined) {
       if (typeof data.__next !== "string" || !data.__next || !page.length) fail("INVALID_CONTINUATION");
       try { next = new URL(data.__next, next); } catch { fail("UNSAFE_CONTINUATION"); }

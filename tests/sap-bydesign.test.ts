@@ -1,12 +1,44 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ByDesignError, readByDesignCollection } from "../lib/integrations/sap-bydesign/odata.ts";
+import { ByDesignError, readByDesignCollection, probeByDesignCollection, byDesignConnectionConfig } from "../lib/integrations/sap-bydesign/odata.ts";
 import { decimalMinorUnits, mapByDesignUtilityRows } from "../lib/integrations/sap-bydesign/utility-mapping.ts";
 import { prepareByDesignUtilityImport } from "../lib/integrations/sap-bydesign/prepare-import.ts";
 import { syntheticCredentials as credentials, syntheticProfile as profile, syntheticReadConfig as config, syntheticRows } from "./fixtures/sap-bydesign/synthetic.ts";
 import { startByDesignSimulator } from "./fixtures/sap-bydesign/simulator.mjs";
 
 const code = (expected: string) => (error: unknown) => error instanceof ByDesignError && error.code === expected;
+
+test("ByDesign connection check makes one scoped request and never returns customer records", async () => {
+  const server = await startByDesignSimulator();
+  try {
+    const result = await probeByDesignCollection(config, credentials, server.fetch);
+    assert.equal(result.sampleCount, 1);
+    assert.equal(server.requests.length, 1, "verification does not crawl every page");
+    assert.deepEqual(Object.keys(result).sort(), ["checkedAt", "sampleCount"]);
+  } finally { await server.close(); }
+});
+
+test("ByDesign connection fields reject arbitrary hosts, paths and injected field names before HTTP", () => {
+  const fields = { tenantUrl: config.tenantUrl, collectionPath: config.collectionPath,
+    companyField: config.companyFilter.field, companyId: config.companyFilter.value, recordKeyFields: config.orderBy.join(",") };
+  assert.deepEqual(byDesignConnectionConfig(fields).companyFilter, config.companyFilter);
+  for (const invalid of [{ tenantUrl: "https://localhost" }, { tenantUrl: "https://sapbydesign.com.evil.test" },
+    { collectionPath: "/sap/byd/odata/cust/v1/test/$batch" }, { companyField: "CompanyID or true" }, { recordKeyFields: "" }]) {
+    assert.throws(() => byDesignConnectionConfig({ ...fields, ...invalid }), ByDesignError);
+  }
+});
+
+test("ByDesign probe handles empty data honestly and refuses unauthorized or out-of-company responses", async () => {
+  for (const options of [{ rows: [] }, { status: 401 }, { rows: [{ ...syntheticRows[0], CompanyID: "OTHER" }] }]) {
+    const server = await startByDesignSimulator(options);
+    try {
+      if (options.status) await assert.rejects(probeByDesignCollection(config, credentials, server.fetch), code("UNAUTHORIZED"));
+      else if (options.rows?.length) await assert.rejects(probeByDesignCollection(config, credentials, server.fetch), code("COMPANY_SCOPE_MISMATCH"));
+      else assert.equal((await probeByDesignCollection(config, credentials, server.fetch)).sampleCount, 0);
+      assert.equal(server.requests.length, 1);
+    } finally { await server.close(); }
+  }
+});
 
 test("ByDesign simulated HTTP: reads all pages with GET and maps exact source identities and decimals", async () => {
   const server = await startByDesignSimulator();

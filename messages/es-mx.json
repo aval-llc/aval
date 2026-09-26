@@ -399,6 +399,26 @@
     "suspended": "La ejecución financiera está suspendida."
   },
   "ConnectionDialog": {
+    "sap": {
+      "description": "Conecta un servicio de SAP Business ByDesign de solo lectura para tu empresa.",
+      "adapter": "Una consulta limitada comprueba el acceso al servicio configurado.",
+      "storage": "Las credenciales se cifran y guardan para este espacio de trabajo.",
+      "admin": "Solicita a tu administrador de SAP una colección OData habilitada y una cuenta de integración de solo lectura.",
+      "fields": "Tu administrador proporciona el campo de empresa, su ID y los campos que identifican cada registro.",
+      "proof": "La comprobación confirma solo el acceso de lectura. Un resultado vacío no confirma que haya datos de la empresa.",
+      "note": "Tu administrador debe habilitar el acceso a SAP primero. Después de verificarlo, falta asociar campos y medidores y revisar la importación. La sincronización automática no está habilitada.",
+      "verified": "Acceso de lectura a SAP verificado. Falta asociar los datos y revisar la importación; no se inició ninguna sincronización.",
+      "test": "Guardar y probar acceso a SAP",
+      "labels": {
+        "tenantUrl": "Dirección de SAP (https://tu-empresa.sapbydesign.com)",
+        "username": "Usuario de integración",
+        "password": "Contraseña de integración",
+        "collectionPath": "Ruta de la colección OData habilitada",
+        "companyField": "Nombre del campo de empresa",
+        "companyId": "ID de empresa",
+        "recordKeyFields": "Campos únicos del registro (separados por comas)"
+      }
+    },
     "access": "Acceso",
     "advanced": "Avanzado",
     "authorize": "Autorizar",
@@ -1677,6 +1697,7 @@
     "board": "Tablero"
   },
   "Catalog": {
+    "sapDescription": "Conecta un servicio de SAP Business ByDesign de solo lectura para tu empresa.",
     "workspace": "Espacio de trabajo",
     "title": "Integraciones",
     "description": "Conecta las herramientas de tu equipo. Elige exactamente a qué puede acceder Aval.",
