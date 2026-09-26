@@ -22,7 +22,7 @@
  *   total size of one Work        here, counted by `agent_tasks.work_id`
  *   cycles                        delegation.ts, by walking the actors above
  *   duplicate sub-problems        work-identity.ts, reused rather than re-run
- *   token, step and time budget   carved from the parent's remaining allowance
+ *   token and step budget         per actor's work, from one pool per Work (budget-model.ts)
  *   cancellation                  tasks.ts, cascaded down every generation
  *   authority                     task-boundary.ts, re-read on every tool call
  *   resource scope                inherited execution scope and employee scopes
@@ -46,26 +46,9 @@ export const DELEGATION_POLICY = {
   maxPeerRequestsPerTask: 2,
   /** How long a task waiting on a peer sleeps before it checks again, if nothing woke it. */
   peerRecheckMs: 60_000,
-  /**
-   * The token ceiling of a root that coordinates work.
-   *
-   * Every hand-off gives the child half of what its parent has left, so a
-   * Specialist two levels down holds a quarter of the root. Sized so that
-   * Specialist holds what a single task always did (60k), and a bounded peer
-   * beneath it half of that. A ceiling, not a spend: the workspace's own usage
-   * caps are re-checked on every step (lib/ask-aval/usage.ts).
-   */
-  rootMaxTokens: 240_000,
-  /**
-   * The step ceiling of a root that coordinates work, on the same rule as
-   * tokens. A plan hands each child half of what is left after its own
-   * planning turns, so a Specialist under a Lead holds about a quarter of the
-   * root. At the old 24 that was 3 steps: enough to read and answer, never
-   * enough to retry, repair a check, or be recognised as stuck before the
-   * step limit failed it. 60 leaves that Specialist the 12 a single task has
-   * always had (DEFAULT_MAX_STEPS). Tokens still bound the spend.
-   */
-  rootMaxSteps: 60,
+  // Step and token budgets are not here: each task is funded for its own work
+  // and every task in a Work draws on one pool (budget-model.ts). The halving
+  // rule and the root ceilings this held are what that replaced.
 } as const;
 
 /** Kept under its historical name: callers compare depths against it. */

@@ -1,6 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
 import type { DbSession } from "@/db/postgres/session";
-import { agentTasks } from "@/db/postgres/schema";
 /**
  * Opening delegated work (§19), and whether it may be opened at all.
  *
@@ -16,18 +14,11 @@ import { createTask, getTask, type TaskRecord } from "./tasks.ts";
 import { employeeScopes } from "./employees.ts";
 import { actorEligible, actorMayDelegateTo, builtInActor, isOrchestrator, resolveActorId } from "./organization/index.ts";
 import { getOperatingProfile } from "@/lib/organizations/operating-profile-store";
-import { findDuplicateWork, unfinishedChildren, workIdOf, workSize } from "./work-identity.ts";
+import { findDuplicateWork, unfinishedChildren, workCanFundGrants, workIdOf, workSize } from "./work-identity.ts";
+import { grantFor } from "./budget-model.ts";
 import type { TaskCheck } from "./checks.ts";
 
 export * from "./delegation-rules.ts";
-
-/** How much of the parent's remaining allowance a child gets. Half, so a parent that delegates still has room to use the answer. */
-function childBudget(parent: TaskRecord) {
-  return {
-    maxSteps: Math.max(2, Math.floor((parent.maxSteps - parent.stepCount) / 2)),
-    maxTokens: Math.max(1, Math.floor((parent.maxTokens - parent.tokensUsed) / 2)),
-  };
-}
 
 export type DelegationResult = { ok: true; task: TaskRecord; reused: boolean } | DelegationRefusal;
 
@@ -79,13 +70,13 @@ export async function delegate(
   const employeeActing = Boolean(parent.employeeId && isOrchestrator(parent.agentId));
   if (!bounds.ok && !(bounds.code === 'not_allowed' && employeeActing)) return bounds;
 
-  const budget = childBudget(parent);
-  const reserved = await dbSession.db.update(agentTasks).set({
-    maxSteps:sql`${agentTasks.maxSteps} - ${budget.maxSteps}`,
-    maxTokens:sql`${agentTasks.maxTokens} - ${budget.maxTokens}`,
-  }).where(and(eq(agentTasks.id,parent.id),eq(agentTasks.organizationId,parent.organizationId),eq(agentTasks.maxSteps,parent.maxSteps),eq(agentTasks.maxTokens,parent.maxTokens),eq(agentTasks.stepCount,parent.stepCount),eq(agentTasks.cancelRequested,false))).returning({id:agentTasks.id});
-  if (!reserved.length) return {ok:false,code:'no_budget',reason:'Another worker changed the parent budget. Replan from current state.'};
-  // A crash after reservation can leave unused capacity, but cannot mint more budget.
+  // The child is funded for its own work from the Work's pool — never from
+  // the parent, so delegating cannot starve the delegator, and never halved by
+  // depth, so the worker at the bottom is not the one left without room.
+  const budget = grantFor(agentId, { peer: Boolean(options.scope?.peerOf) });
+  if (!(await workCanFundGrants(dbSession, parent.organizationId, workIdOf(parent), [budget]))) {
+    return { ok: false, code: 'no_budget', reason: 'This Work has no budget left to fund that work in full. Conclude with what you have, or say what is still open.' };
+  }
   const task = await createTask(dbSession, {
     id: options.id,
     executionScope: { ...JSON.parse(parent.executionScopeJson), ...(options.scope ?? {}), plan: undefined, awaiting: undefined },
@@ -96,8 +87,8 @@ export async function delegate(
     goal,
     check,
     deadlineAt: parent.deadlineAt ?? new Date(parent.createdAt.getTime()+30*60_000),
-    maxSteps: budget.maxSteps,
-    maxTokens: budget.maxTokens,
+    maxSteps: budget.steps,
+    maxTokens: budget.tokens,
     parentTaskId: parent.id,
     delegationDepth: parent.delegationDepth + 1,
   });

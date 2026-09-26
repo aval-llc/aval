@@ -17,6 +17,7 @@ import type { DbSession } from "@/db/postgres/session";
 import { agentTasks } from "@/db/postgres/schema";
 import type { TaskRecord } from "./tasks.ts";
 import { resolveActorId } from "./organization/index.ts";
+import { committed, workCanFund, type Grant } from "./budget-model.ts";
 
 /** Outcomes that do not answer the question, so a later ask may try again. */
 const NOT_AN_ANSWER = ["FAILED", "CANCELLED", "SUPERSEDED"];
@@ -67,6 +68,22 @@ export async function workSize(dbSession: DbSession, organizationId: string, wor
   const [row] = await dbSession.db.select({ count: sql<number>`count(*)::int` }).from(agentTasks)
     .where(and(eq(agentTasks.organizationId, organizationId), eq(agentTasks.workId, workId)));
   return row?.count ?? 0;
+}
+
+/**
+ * Whether this Work's pool can fully fund these grants, decided under a lock
+ * on the Work so two delegations racing in one Work cannot both spend the same
+ * remainder. The lock is transaction-scoped: it is held until the caller's
+ * transaction, which also creates the funded tasks, commits or rolls back.
+ */
+export async function workCanFundGrants(dbSession: DbSession, organizationId: string, workId: string, grants: readonly Grant[], settling: readonly string[] = []): Promise<boolean> {
+  await dbSession.db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"work-budget:" + organizationId + ":" + workId}, 0))`);
+  // Tasks the caller is about to settle (a replan superseding its old nodes)
+  // count only what they spent, as they will once it commits.
+  const leaving = new Set(settling);
+  const tasks = await dbSession.db.select({ id: agentTasks.id, status: agentTasks.status, maxSteps: agentTasks.maxSteps, stepCount: agentTasks.stepCount, maxTokens: agentTasks.maxTokens, tokensUsed: agentTasks.tokensUsed })
+    .from(agentTasks).where(and(eq(agentTasks.organizationId, organizationId), eq(agentTasks.workId, workId)));
+  return workCanFund(committed(tasks.map((task) => leaving.has(task.id) ? { ...task, status: "SUPERSEDED" } : task)), grants);
 }
 
 /** Children of one task that have not finished. */

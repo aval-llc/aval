@@ -15,8 +15,10 @@
  *    Specialist to its declared collaborators and related Leads. The historical
  *    persona pairs below are all still edges of that graph.
  * 2. **Controlled depth and size** (delegation-policy.ts), not one integer.
- * 3. **A shared budget.** The child's steps come out of the parent's
- *    remaining allowance, so a chain cannot cost more than one task.
+ * 3. **A bounded budget.** Each child is funded for its own work, and every
+ *    task in a Work draws on one pool (budget-model.ts), so a chain cannot
+ *    cost more than its Work — and the worker at the bottom is not the one
+ *    left without room.
  * 4. **The child never exercises authority the chain above it lacks.** A
  *    descendant may use a permission only if it holds it and every ancestor
  *    either holds it or may route it (task-boundary.ts). Delegation narrows;

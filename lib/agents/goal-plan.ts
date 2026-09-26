@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { DbSession } from "@/db/postgres/session";
 import { agentChecks, agentPlanNodes, agentTasks } from "@/db/postgres/schema";
 import { createTask, getTask, type TaskRecord } from './tasks';
@@ -7,7 +7,8 @@ import { digestPayload } from '@/lib/audit/chain';
 import { getTool } from './registry';
 import { actorHolds, actorOrchestrates, builtInActor, isOrchestrator, resolveActorId } from './organization/index.ts';
 import { DELEGATION_POLICY } from './delegation-policy.ts';
-import { findDuplicateWork, workIdOf, workSize } from './work-identity.ts';
+import { findDuplicateWork, workCanFundGrants, workIdOf, workSize } from './work-identity.ts';
+import { grantFor, type Grant } from './budget-model.ts';
 import { requestCancel } from './tasks';
 import { resolveAttemptPolicy } from "./attempt-policy.ts";
 import { loadAttemptPolicies } from "./attempt-policy-store.ts";
@@ -27,8 +28,11 @@ type Plan = {
     requestKey: string;
     state: 'building' | 'ready';
     nodes: Node[];
-    steps: number;
-    tokens: number;
+    /** Each node's own budget, by key (budget-model.ts). */
+    budgets?: Record<string, Grant>;
+    /** The per-node split of the model before it; a plan stored mid-build under it still resumes. */
+    steps?: number;
+    tokens?: number;
 };
 /** The permissions a completion condition needs its task to hold. */
 export function permissionsForCheck(check: TaskCheck) {
@@ -143,11 +147,17 @@ export async function writeGoalPlan(dbSession: DbSession, org: string, rootId: s
             const refusal = await delegationRefusal(dbSession, org, root, { agentId: node.agentId, employeeId: root.employeeId });
             if (refusal) throw Error(refusal);
         }
-        const steps = Math.floor((root.maxSteps - root.stepCount - 2) / (2 * nodes.length)), tokens = Math.floor((root.maxTokens - root.tokensUsed) / (2 * nodes.length));
-        if (steps < 2 || tokens < 2048)
-            throw Error('Insufficient shared budget for this plan. Reduce its size.');
-        plan = { revision, requestKey, state: 'building', nodes, steps, tokens };
-        const claimed = await dbSession.db.update(agentTasks).set({ executionScopeJson: JSON.stringify({ ...scope, plan }), maxSteps: sql `${agentTasks.maxSteps}-${steps * nodes.length}`, maxTokens: sql `${agentTasks.maxTokens}-${tokens * nodes.length}` }).where(and(eq(agentTasks.id, rootId), eq(agentTasks.executionScopeJson, root.executionScopeJson), eq(agentTasks.maxSteps, root.maxSteps), eq(agentTasks.maxTokens, root.maxTokens), eq(agentTasks.cancelRequested, false))).returning({ id: agentTasks.id });
+        // Each node is funded for its own actor's work (budget-model.ts), from
+        // the Work's pool and not from this root: planning cannot starve the
+        // planner, and a fourth node gets what the first got. Nodes of the
+        // revision being replaced settle below, so only what they actually
+        // spent stays committed.
+        const budgets = Object.fromEntries(nodes.map((node) => [node.key, grantFor(node.agentId)]));
+        const superseded = prior ? prior.nodes.filter(n => !['COMPLETED', 'FAILED', 'CANCELLED', 'SUPERSEDED'].includes(n.status)).map(n => n.id) : [];
+        if (!(await workCanFundGrants(dbSession, org, workIdOf(root), Object.values(budgets), superseded)))
+            throw Error('This Work has no budget left to fund this plan in full. Reduce it to the work that matters most, or conclude with what you have.');
+        plan = { revision, requestKey, state: 'building', nodes, budgets };
+        const claimed = await dbSession.db.update(agentTasks).set({ executionScopeJson: JSON.stringify({ ...scope, plan }) }).where(and(eq(agentTasks.id, rootId), eq(agentTasks.executionScopeJson, root.executionScopeJson), eq(agentTasks.cancelRequested, false))).returning({ id: agentTasks.id });
         if (!claimed.length)
             throw Error('The goal changed while allocating its plan. Retry from current state.');
         // An unfinished node of the old revision is superseded, not cancelled:
@@ -177,7 +187,7 @@ export async function writeGoalPlan(dbSession: DbSession, org: string, rootId: s
         const duplicate = own ? null : await findDuplicateWork(dbSession, org, workIdOf(root), { agentId: node.agentId, goal: node.goal, check: node.check });
         const taskId = duplicate?.id ?? id;
         if (!duplicate)
-            await createTask(dbSession, { id, organizationId: org, userId: root.userId, agentId: node.agentId, employeeId: root.employeeId, goal: node.goal, check: node.check, deadlineAt: root.deadlineAt ?? undefined, maxSteps: plan.steps, maxTokens: plan.tokens, parentTaskId: rootId, delegationDepth: root.delegationDepth + 1 });
+            await createTask(dbSession, { id, organizationId: org, userId: root.userId, agentId: node.agentId, employeeId: root.employeeId, goal: node.goal, check: node.check, deadlineAt: root.deadlineAt ?? undefined, maxSteps: (plan.budgets?.[node.key] ?? { steps: plan.steps ?? 2 }).steps, maxTokens: (plan.budgets?.[node.key] ?? { tokens: plan.tokens ?? 2048 }).tokens, parentTaskId: rootId, delegationDepth: root.delegationDepth + 1 });
         await dbSession.db.insert(agentPlanNodes).values({ id: crypto.randomUUID(), organizationId: org, rootTaskId: rootId, revision: plan.revision, nodeKey: node.key, taskId, dependenciesJson: JSON.stringify(node.dependsOn), createdAt: new Date() }).onConflictDoNothing();
     }
     const finalScope = { ...scope, plan: { ...plan, state: 'ready' } };
