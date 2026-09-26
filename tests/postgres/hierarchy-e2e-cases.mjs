@@ -188,6 +188,32 @@ export async function runHierarchyE2ECases(t, { config, administrator }) {
       assert.equal((await run.rows())[0].status, "COMPLETED");
     });
 
+    await t.test("a call that shared an approved action's message is held to the offered tools when the approval resumes", async () => {
+      // The run parks on record_preference with a second call in the same
+      // message: a read this task holds the permission for (maintenance.read)
+      // but is not offered under its preference contract. Resuming after the
+      // approval must not execute it — the offered set binds on every path.
+      const both = () => ({ ...reply("record_preference", { topic: "reporting_style", statement: "keep_summaries_brief" }), content: [
+        { type: "tool_use", name: "record_preference", input: { topic: "reporting_style", statement: "keep_summaries_brief" }, id: randomUUID() },
+        { type: "tool_use", name: "get_maintenance_performance", input: {}, id: randomUUID() },
+      ] });
+      const run = await scenario({
+        lead: ({ uses }) => uses.some((u) => u.name === "plan_goal") ? answer("Preference recorded")
+          : reply("plan_goal", { tasks: [{ key: "note", goal: "Record the owner's preference for brief repair updates", agentId: "maintenance", dependsOn: [], check: { kind: "preference", topic: "reporting_style", statement: "keep_summaries_brief" } }] }),
+        specialist: ({ uses }) => uses.some((u) => u.name === "record_preference") ? answer("Preference recorded") : both(),
+      });
+      await run.sweep(20, async () => (await run.rows()).some((row) => row.status === "WAITING_FOR_APPROVAL"));
+      const parked = (await run.rows()).find((row) => row.status === "WAITING_FOR_APPROVAL");
+      assert.ok(parked, `the preference write parks for a person: ${await run.dump()}`);
+      const [approval] = (await administrator.query("select id from agent_approvals where task_id=$1 and status='pending'", [parked.id])).rows;
+      const decided = await decide(new Request("https://app.aval.llc/api/agents/approvals", { method: "POST", headers: run.headers(), body: JSON.stringify({ approvalId: approval.id, decision: "approved" }) }));
+      assert.equal(decided.status, 200, await decided.clone().text());
+      await run.sweep(30, run.settled);
+      const executed = (await administrator.query("select kind from agent_task_steps where task_id=$1 and tool_name='get_maintenance_performance' and kind='tool_call'", [parked.id])).rows;
+      assert.deepEqual(executed, [], "the unoffered sibling never executed");
+      assert.equal((await administrator.query("select status from agent_tasks where id=$1", [parked.id])).rows[0].status, "COMPLETED", "the approved action still completed");
+    });
+
     await t.test("cancelling the Work stops every task in it", async () => {
       const run = await scenario({ specialist: () => reply("wait_for", { party: "vendor", reason: "Waiting for the plumber to reply", recheck_hours: 24 }) });
       await run.sweep(12, async () => (await run.byAgent(SPECIALIST))?.status === "WAITING_FOR_VENDOR");

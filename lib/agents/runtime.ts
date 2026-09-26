@@ -638,7 +638,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
     if (decidedApproval) {
       await settleDecidedApproval(dbSession, {
         organizationId, taskId, task, subject, messages, seenNumbers, audit, approval: decidedApproval,
-        employeePermissions,
+        employeePermissions, offeredToolNames: new Set(tools.map((tool) => tool.name)),
       });
       // The approved side effect and its observation must become durable
       // before another model call starts. If the worker dies after execution,
@@ -1036,6 +1036,12 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
   approval: ApprovalRecord;
   /** The owning employee's authority, so a settled approval is judged by the same envelope. */
   employeePermissions: readonly Permission[] | null;
+  /**
+   * What this run is offered now. The same gate as the main loop: a call that
+   * shared the approved call's message, or the approved call itself once its
+   * capability or connection is gone, is refused rather than executed.
+   */
+  offeredToolNames: ReadonlySet<string>;
 }): Promise<void> {
   const { organizationId, taskId, task, subject, messages, seenNumbers, audit, approval, employeePermissions } = input;
   const last = messages[messages.length - 1];
@@ -1064,7 +1070,12 @@ async function settleDecidedApproval(dbSession: DbSession, input: {
     // Approved, or an ordinary call that shared the message. Either way the
     // policy engine re-runs: an approval from an hour ago is not evidence the
     // permission still stands now.
-    const outcome = isGatedCall
+    const outcome = !input.offeredToolNames.has(use.name)
+      ? {
+          result: { status: 'denied' as const, code: 'permission_denied' as const, reason: `${use.name} is not one of the tools offered to this work now. It was not executed.` },
+          audit: [{ kind: 'policy_decision' as const, label: `${use.name}:not_offered`, payloadDigest: await digestPayload(use.name), count: 0 }],
+        }
+      : isGatedCall
       ? await executeApprovedTool(dbSession, {
           toolName: use.name, args: use.input, subject,
           context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth },
