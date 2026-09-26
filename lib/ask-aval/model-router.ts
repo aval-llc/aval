@@ -28,12 +28,12 @@ interface CallParams {
   tool_choice?: { type: "auto" | "any" | "tool"; name?: string };
   max_tokens?: number;
   timeout_ms?: number;
-  /** Set from the workspace's saved setting; only the flagship GPT-5.6 models accept it. */
+  /** Set from the workspace's saved setting for supported OpenAI models. */
   reasoningEffort?: string;
 }
 
 type Override =
-  | { kind: "api_key"; providerId: string; apiKey: string; model?: string }
+  | { kind: "api_key"; providerId: string; apiKey: string; model?: string; reasoningEffort?: string }
   | { kind: "subscription"; providerId: SubscriptionProviderId; accessToken: string; accountId?: string; model?: string; reasoningEffort?: string };
 
 /** A workspace must explicitly connect and select its own model provider. */
@@ -105,9 +105,9 @@ async function resolveOverride(dbSession: DbSession, env: AskAvalEnv, orgId: str
   }
 
   try {
-    const credentials = JSON.parse(await decryptSecret(connection.accessTokenCiphertext, encryptionKey)) as { apiKey?: string; model?: string };
+    const credentials = JSON.parse(await decryptSecret(connection.accessTokenCiphertext, encryptionKey)) as { apiKey?: string; model?: string; reasoningEffort?: string };
     if (!credentials.apiKey) return null;
-    return { kind: "api_key", providerId: org.activeModelProvider, apiKey: credentials.apiKey, model: credentials.model || undefined };
+    return { kind: "api_key", providerId: org.activeModelProvider, apiKey: credentials.apiKey, model: credentials.model || undefined, reasoningEffort: credentials.reasoningEffort || undefined };
   } catch (err) {
     console.error("model_router_decrypt_failed", org.activeModelProvider, err);
     throw new ModelConfigurationError("The selected model provider credentials are invalid. Reconnect it in Settings → Intelligence.");
@@ -144,7 +144,10 @@ export async function callModel(dbSession: DbSession, env: AskAvalEnv, orgId: st
   }
   const baseUrl = catalogEntry.baseUrl;
   return withRouting(
-    await dbSession.outsideTransaction(() => callOpenAiCompatible({ baseUrl, apiKey: override.apiKey, model, providerLabel: catalogEntry.title }, params)),
+    await dbSession.outsideTransaction(() => callOpenAiCompatible(
+      { baseUrl, apiKey: override.apiKey, model, providerLabel: catalogEntry.title },
+      { ...params, reasoningEffort: override.reasoningEffort ?? params.reasoningEffort },
+    )),
     override.providerId,
     model,
   );

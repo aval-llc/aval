@@ -24,6 +24,42 @@ async function allMigrations() {
   return parts.join("\n");
 }
 
+// Later migrations use unquoted identifiers, IF NOT EXISTS, and bounded
+// FOREACH blocks. Recognize those checked-in forms without mistaking a table
+// name elsewhere in the file for proof that its RLS was enabled.
+function migrationCoverage(sql) {
+  const source = sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, "");
+  const created = new Set([...source.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?"?([a-z_][a-z_0-9]*)"?\s*\(/gi)].map((match) => match[1]));
+  const forced = new Set([...source.matchAll(/ALTER\s+TABLE\s+public\."?([a-z_][a-z_0-9]*)"?\s+FORCE\s+ROW\s+LEVEL\s+SECURITY\s*;/gi)].map((match) => match[1]));
+  for (const loop of source.matchAll(/FOREACH\s+(\w+)\s+IN\s+ARRAY\s+ARRAY\[([^\]]+)\]\s+LOOP([\s\S]*?)END\s+LOOP/gi)) {
+    const [, variable, entries, body] = loop;
+    const statement = new RegExp("EXECUTE\\s+format\\(\\s*'ALTER TABLE public\\.%I FORCE ROW LEVEL SECURITY'\\s*,\\s*" + variable + "\\s*\\)\\s*;", "i");
+    if (!statement.test(body)) continue;
+    for (const entry of entries.matchAll(/'([a-z_][a-z_0-9]*)'/g)) forced.add(entry[1]);
+  }
+  return { created, forced };
+}
+
+test("migration coverage recognizes direct and bounded-loop SQL without accepting unrelated mentions", () => {
+  const coverage = migrationCoverage(`
+    CREATE TABLE public."quoted" (id text);
+    CREATE TABLE IF NOT EXISTS public.unquoted (id text);
+    ALTER TABLE public."quoted" FORCE ROW LEVEL SECURITY;
+    FOREACH t IN ARRAY ARRAY['unquoted'] LOOP
+      EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', t);
+    END LOOP;
+    FOREACH t IN ARRAY ARRAY['not_forced'] LOOP
+      EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    END LOOP;
+    -- ALTER TABLE public.commented FORCE ROW LEVEL SECURITY;
+  `);
+  assert.deepEqual([...coverage.created].sort(), ['quoted', 'unquoted']);
+  assert.deepEqual([...coverage.forced].sort(), ['quoted', 'unquoted']);
+  assert.equal(migrationCoverage(`FOREACH x IN ARRAY ARRAY['wrong_variable'] LOOP
+    EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', t);
+  END LOOP;`).forced.size, 0);
+});
+
 test("clean PostgreSQL baseline covers the current inventory with deliberate native types", async () => {
   const [inventoryRaw, baseline, migrations] = await Promise.all([
     read("docs/migration/inventory.json"),
@@ -35,7 +71,7 @@ test("clean PostgreSQL baseline covers the current inventory with deliberate nat
   // Migrations also create tables the ORM never models (a quarantine store, an
   // inbox cursor); those are outside the inventory and not this assertion's
   // business. What matters is that nothing the ORM models goes uninstalled.
-  const created = new Set([...migrations.matchAll(/CREATE TABLE (?:public\.)?"([^"]+)"/g)].map((match) => match[1]));
+  const { created } = migrationCoverage(migrations);
   const actual = expected.filter((name) => created.has(name));
 
   assert.deepEqual(actual, expected);
@@ -62,8 +98,9 @@ test("RLS covers every organization table and keeps organization roles organizat
     .filter((table) => table.columns.some((column) => column.name === "organization_id"))
     .map((table) => table.name);
 
+  const { forced } = migrationCoverage(migrations);
   for (const table of tenantTables) {
-    assert.ok(migrations.includes(`ALTER TABLE public."${table}" FORCE ROW LEVEL SECURITY;`), `missing FORCE RLS for ${table}`);
+    assert.ok(forced.has(table), `missing FORCE RLS for ${table}`);
   }
   assert.match(rls, /grant_row\.role = ANY\(allowed_roles\)\s+AND grant_row\.organization_scope/);
   assert.match(rls, /CREATE POLICY "properties_insert"[\s\S]*?WITH CHECK \(aval_private\.has_org_role\(organization_id, ARRAY\['org_admin'\]\)\);/);

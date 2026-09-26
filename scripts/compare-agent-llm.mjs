@@ -81,5 +81,5 @@ try {
  }
  report.status=report.trials.every(t=>t.status==='passed')?'passed':'failed';
 }catch(error){report.status='blocked_provider';report.error=error.message;}
-finally{client?.close();globalThis.fetch=originalFetch;save();}
+finally{await client?.close();globalThis.fetch=originalFetch;save();}
 if(report.status!=='passed')process.exitCode=2;

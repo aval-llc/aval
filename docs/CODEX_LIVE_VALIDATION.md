@@ -1,5 +1,12 @@
 # Codex live validation — September 8, 2026
 
+> Historical result. The live 16-case semantic evaluation passed again on
+> September 24 with the connected ChatGPT subscription. The durable runtime
+> has since moved to PostgreSQL and explicit `DbSession` arguments, while the
+> validator described below still boots the retired SQLite harness. Do not use
+> `validate:runtime:codex` as a current end-to-end gate until it is ported to a
+> disposable PostgreSQL database. See `docs/PILOT_CHATGPT_SUBSCRIPTION.md`.
+
 The local Codex App Server, authenticated with the existing ChatGPT login, completed
 live inference using `gpt-6-astra` at low reasoning effort. No Anthropic key was used.
 

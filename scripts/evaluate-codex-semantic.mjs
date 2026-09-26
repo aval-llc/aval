@@ -27,6 +27,6 @@ try {
     falseRejections: report.results.filter(r => r.expectedPass && !r.actualPass).length,
   };
 } catch (error) { report.status = 'blocked_provider'; report.error = error.message; }
-finally { client?.close(); save(); }
+finally { await client?.close(); save(); }
 console.log(JSON.stringify({ status: report.status, model: report.model, cases: report.results.length, error: report.error }));
 if (report.status !== 'passed') process.exitCode = 2;

@@ -1,11 +1,11 @@
 {
   "version": 1,
   "sourceHashEncoding": "UTF-8, LF normalized",
-  "schemaSha256": "e53bb95d8cd88d56211c997e8ed9af6da2820d5914d063a7d70087b003623dd4",
-  "journalSha256": "781480e7b5a3a6283efd46884109b2ad4332a6d4794ed614f7d3483d026662af",
+  "schemaSha256": "4686060c389624e42961daa66f68091eb727ecfb527ed281001bdf30756b39ac",
+  "journalSha256": "9a704a58f90dd3bd2e928f74695b10ca3336c9bbf572e6c6bbeee4a46438631f",
   "counts": {
-    "tables": 74,
-    "migrations": 38,
+    "tables": 84,
+    "migrations": 47,
     "triggers": 6,
     "getDbFiles": 0
   },
@@ -199,6 +199,51 @@
       "index": 37,
       "file": "0037_bouncy_matthew_murdock.sql",
       "sha256": "8e329819d6acb385b96436684da74452df017767733039217cb2b6b5117c57d4"
+    },
+    {
+      "index": 38,
+      "file": "0038_left_ink.sql",
+      "sha256": "fad97286dcbcf02ace64e55a78a7779ea6411c320d43e7aed2fe9661430d2014"
+    },
+    {
+      "index": 39,
+      "file": "0039_medical_caretaker.sql",
+      "sha256": "32bbdcfab24ca86f3fe9a4e3f6db96fbf3890a66ac1507094541050f6390afa1"
+    },
+    {
+      "index": 40,
+      "file": "0040_soft_kingpin.sql",
+      "sha256": "bd197c85ff660eb4a2c15732f4bae7b8996d1df97b27dc1f54b523725b3b0165"
+    },
+    {
+      "index": 41,
+      "file": "0041_hesitant_star_brand.sql",
+      "sha256": "fad9deccc3c15eb68660b8330c54691e9aabb22e6881bf4d3259f7c1469c40af"
+    },
+    {
+      "index": 42,
+      "file": "0042_equal_mongoose.sql",
+      "sha256": "358e107a582d9a0f835ee742e8e135d5daad18b242a4e7309f026ca83a1ec5e5"
+    },
+    {
+      "index": 43,
+      "file": "0043_loose_jasper_sitwell.sql",
+      "sha256": "6c29e7cef64404c3782ff6e69a35c0b26d4b745d36d5075efac4e02d5c79a748"
+    },
+    {
+      "index": 44,
+      "file": "0044_melodic_gabe_jones.sql",
+      "sha256": "e37dc56ad0e2bb725ac1a682653675059fb5cadf09d6b75b16ead46f05828120"
+    },
+    {
+      "index": 45,
+      "file": "0045_cool_red_ghost.sql",
+      "sha256": "7317106e4121c0c9fb7a6ab3f3acb783370b4b1f3d2a534ffc80f0ab4de9bde2"
+    },
+    {
+      "index": 46,
+      "file": "0046_happy_prowler.sql",
+      "sha256": "bfca8c3263757cff28f5cfaee42893834b1740596761e357ff4f1625f09d0fd3"
     }
   ],
   "tables": [
@@ -766,6 +811,361 @@
         },
         {
           "name": "sqlite_autoindex_access_grants_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "action_evidence",
+      "exportName": "actionEvidence",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "task_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "action_execution_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "tool_name",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "claim",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "expected_state_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "evidence_type",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "source_provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "external_record_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "observed_state_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "observed_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "verification_result",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "payload_ref",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "action_evidence_execution_idx",
+          "unique": false,
+          "columns": [
+            "action_execution_id"
+          ]
+        },
+        {
+          "name": "action_evidence_observation_uq",
+          "unique": true,
+          "columns": [
+            "action_execution_id",
+            "evidence_type",
+            "external_record_id",
+            "verification_result"
+          ]
+        },
+        {
+          "name": "action_evidence_task_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "task_id"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "task_id"
+          ],
+          "table": "agent_tasks",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "task_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "action_execution_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "tool_name",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "claim",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "expected_state_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'{}'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "evidence_type",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_provider",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "external_record_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "observed_state_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'{}'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "observed_at",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "verification_result",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "payload_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "agent_tasks",
+          "from": "task_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "action_evidence_observation_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "action_execution_id",
+            "evidence_type",
+            "external_record_id",
+            "verification_result"
+          ]
+        },
+        {
+          "name": "action_evidence_execution_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "action_execution_id"
+          ]
+        },
+        {
+          "name": "action_evidence_task_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "task_id"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_action_evidence_1",
           "unique": true,
           "origin": "pk",
           "columns": [
@@ -3811,6 +4211,24 @@
           "conversion": "explicit mapping required"
         },
         {
+          "name": "source_provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "external_record_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
           "name": "error",
           "sqlType": "text",
           "columnType": "SQLiteText",
@@ -3998,6 +4416,20 @@
           "notNull": false,
           "default": null,
           "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_provider",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "external_record_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
         }
       ],
       "replayedForeignKeys": [
@@ -4086,6 +4518,15 @@
           "columnType": "SQLiteText",
           "dataType": "string",
           "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "employee_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
           "primaryKey": false,
           "conversion": "explicit mapping required"
         },
@@ -4530,6 +4971,13 @@
           "notNull": false,
           "default": null,
           "primaryKeyPosition": 0
+        },
+        {
+          "name": "employee_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
         }
       ],
       "replayedForeignKeys": [
@@ -4795,6 +5243,581 @@
         },
         {
           "name": "sqlite_autoindex_agent_worker_runs_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ai_employee_scopes",
+      "exportName": "aiEmployeeScopes",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "employee_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "scope_kind",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "value",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "granted_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ai_employee_scopes_grant_uq",
+          "unique": true,
+          "columns": [
+            "employee_id",
+            "scope_kind",
+            "value"
+          ]
+        },
+        {
+          "name": "ai_employee_scopes_lookup_idx",
+          "unique": false,
+          "columns": [
+            "employee_id",
+            "scope_kind"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "employee_id"
+          ],
+          "table": "ai_employees",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "employee_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "scope_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "granted_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "ai_employees",
+          "from": "employee_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "ai_employee_scopes_grant_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "employee_id",
+            "scope_kind",
+            "value"
+          ]
+        },
+        {
+          "name": "ai_employee_scopes_lookup_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "employee_id",
+            "scope_kind"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_ai_employee_scopes_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ai_employees",
+      "exportName": "aiEmployees",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "name",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "role",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "description",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "objective",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "instructions",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "status",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "autonomy_mode",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "approval_policy",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "spend_limit_cents",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "risk_ceiling",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "memory_scope",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "may_communicate_externally",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "may_delegate",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "created_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ai_employees_org_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "status"
+          ]
+        },
+        {
+          "name": "ai_employees_org_name_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "name"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "objective",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "instructions",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'draft'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "autonomy_mode",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'supervised'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "approval_policy",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'standard'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "spend_limit_cents",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "risk_ceiling",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'low'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "memory_scope",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'work'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "may_communicate_externally",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "false",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "may_delegate",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "false",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "ai_employees_org_name_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "name"
+          ]
+        },
+        {
+          "name": "ai_employees_org_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "status"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_ai_employees_1",
           "unique": true,
           "origin": "pk",
           "columns": [
@@ -5442,6 +6465,381 @@
         },
         {
           "name": "sqlite_autoindex_approval_authorities_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "attempt_policies",
+      "exportName": "attemptPolicies",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "kind",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "tool_name",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "work_type",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "risk_class",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "max_attempts",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "max_elapsed_ms",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "initial_delay_ms",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "backoff_strategy",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "backoff_factor",
+          "sqlType": "real",
+          "columnType": "SQLiteReal",
+          "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "max_delay_ms",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "on_exhausted",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "on_contradicted",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "enabled",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "attempt_policies_lookup_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "kind",
+            "enabled"
+          ]
+        },
+        {
+          "name": "attempt_policies_selector_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "kind",
+            "provider",
+            "tool_name",
+            "work_type",
+            "risk_class"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "tool_name",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "work_type",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "risk_class",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "max_attempts",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "max_elapsed_ms",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "initial_delay_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "backoff_strategy",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'fixed'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "backoff_factor",
+          "type": "REAL",
+          "notNull": true,
+          "default": "2",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "max_delay_ms",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "on_exhausted",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'human_handoff'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "on_contradicted",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'human_handoff'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "true",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "attempt_policies_selector_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "kind",
+            "provider",
+            "tool_name",
+            "work_type",
+            "risk_class"
+          ]
+        },
+        {
+          "name": "attempt_policies_lookup_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "kind",
+            "enabled"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_attempt_policies_1",
           "unique": true,
           "origin": "pk",
           "columns": [
@@ -7238,6 +8636,835 @@
         },
         {
           "name": "sqlite_autoindex_draft_documents_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "employee_expertise",
+      "exportName": "employeeExpertise",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "employee_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "expertise_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "pinned",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "granted_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "employee_expertise_lookup_idx",
+          "unique": false,
+          "columns": [
+            "employee_id"
+          ]
+        },
+        {
+          "name": "employee_expertise_uq",
+          "unique": true,
+          "columns": [
+            "employee_id",
+            "expertise_id"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "employee_id"
+          ],
+          "table": "ai_employees",
+          "foreignColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "expertise_id"
+          ],
+          "table": "expertise_profiles",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "employee_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "expertise_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "pinned",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "false",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "granted_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "expertise_profiles",
+          "from": "expertise_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "seq": 0,
+          "table": "ai_employees",
+          "from": "employee_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 2,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "employee_expertise_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "employee_id",
+            "expertise_id"
+          ]
+        },
+        {
+          "name": "employee_expertise_lookup_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "employee_id"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_employee_expertise_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "expertise_profiles",
+      "exportName": "expertiseProfiles",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "slug",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "name",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "description",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "capability_tags_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "domains_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "routing_signals_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "required_capabilities_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "instructions",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "risk_ceiling",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "version",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "enabled",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "expertise_profiles_lookup_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "enabled"
+          ]
+        },
+        {
+          "name": "expertise_profiles_slug_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "slug"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "slug",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "capability_tags_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "domains_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "routing_signals_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "required_capabilities_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "instructions",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "''",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "risk_ceiling",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'low'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "1",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "enabled",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "true",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "expertise_profiles_slug_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "slug"
+          ]
+        },
+        {
+          "name": "expertise_profiles_lookup_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "enabled"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_expertise_profiles_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "expertise_selections",
+      "exportName": "expertiseSelections",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "task_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "employee_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "candidates_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "selected_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "signals_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "decided_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "model_provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "model_name",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "confidence",
+          "sqlType": "real",
+          "columnType": "SQLiteReal",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "overridden_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "expertise_selections_task_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "task_id"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "task_id"
+          ],
+          "table": "agent_tasks",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "task_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "employee_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "candidates_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "selected_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "signals_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'{}'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "decided_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "model_provider",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "model_name",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "overridden_by",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "agent_tasks",
+          "from": "task_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "expertise_selections_task_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "task_id"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_expertise_selections_1",
           "unique": true,
           "origin": "pk",
           "columns": [
@@ -11333,6 +13560,448 @@
       ]
     },
     {
+      "name": "operational_facts",
+      "exportName": "operationalFacts",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "entity_type",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "entity_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "fact_type",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "value",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "value_ref",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "source_type",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "source_provider",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "source_record_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "observed_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "synced_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "expires_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "freshness_policy",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "authoritativeness",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "confidence",
+          "sqlType": "real",
+          "columnType": "SQLiteReal",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "derived_from_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "conflict_state",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "superseded_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "operational_facts_conflict_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "conflict_state"
+          ]
+        },
+        {
+          "name": "operational_facts_entity_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "entity_type",
+            "entity_id",
+            "fact_type"
+          ]
+        },
+        {
+          "name": "operational_facts_source_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "entity_type",
+            "entity_id",
+            "fact_type",
+            "source_type",
+            "source_provider"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "entity_type",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "entity_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "fact_type",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "value_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_type",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_provider",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "source_record_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "observed_at",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "synced_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "expires_at",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "freshness_policy",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "authoritativeness",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "derived_from_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "conflict_state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'none'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "superseded_by",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "operational_facts_source_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "entity_type",
+            "entity_id",
+            "fact_type",
+            "source_type",
+            "source_provider"
+          ]
+        },
+        {
+          "name": "operational_facts_conflict_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "conflict_state"
+          ]
+        },
+        {
+          "name": "operational_facts_entity_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "entity_type",
+            "entity_id",
+            "fact_type"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_operational_facts_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
       "name": "operations_conflicts",
       "exportName": "operationsConflicts",
       "columns": [
@@ -12243,6 +14912,15 @@
           "conversion": "explicit mapping required"
         },
         {
+          "name": "ai_employee_limit",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
           "name": "created_at",
           "sqlType": "integer",
           "columnType": "SQLiteTimestamp",
@@ -12324,6 +15002,13 @@
         {
           "name": "seat_slug",
           "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ai_employee_limit",
+          "type": "INTEGER",
           "notNull": false,
           "default": null,
           "primaryKeyPosition": 0
@@ -13013,7 +15698,7 @@
           "sqlType": "text",
           "columnType": "SQLiteText",
           "dataType": "string",
-          "notNull": true,
+          "notNull": false,
           "primaryKey": false,
           "conversion": "explicit mapping required"
         },
@@ -13040,6 +15725,15 @@
           "sqlType": "integer",
           "columnType": "SQLiteInteger",
           "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "access_mode",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
           "notNull": true,
           "primaryKey": false,
           "conversion": "explicit mapping required"
@@ -13072,6 +15766,60 @@
           "conversion": "explicit mapping required"
         },
         {
+          "name": "required_role",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "risk_class",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "verification_strategy",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "reconciliation_strategy",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "fallback",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "certification",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
           "name": "learned_by_user_id",
           "sqlType": "text",
           "columnType": "SQLiteText",
@@ -13079,6 +15827,24 @@
           "notNull": false,
           "primaryKey": false,
           "conversion": "explicit mapping required"
+        },
+        {
+          "name": "promoted_by_user_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "promoted_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
         },
         {
           "name": "last_replay_at",
@@ -13104,6 +15870,15 @@
           "columnType": "SQLiteInteger",
           "dataType": "number",
           "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "known_issues",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
           "primaryKey": false,
           "conversion": "explicit mapping required"
         },
@@ -13170,7 +15945,7 @@
         {
           "name": "organization_id",
           "type": "TEXT",
-          "notNull": true,
+          "notNull": false,
           "default": null,
           "primaryKeyPosition": 0
         },
@@ -13196,6 +15971,13 @@
           "primaryKeyPosition": 0
         },
         {
+          "name": "access_mode",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'customer_desktop_session'",
+          "primaryKeyPosition": 0
+        },
+        {
           "name": "steps_json",
           "type": "TEXT",
           "notNull": true,
@@ -13213,12 +15995,68 @@
           "name": "status",
           "type": "TEXT",
           "notNull": true,
-          "default": "'candidate'",
+          "default": "'draft'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "required_role",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "risk_class",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'medium'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "verification_strategy",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'read_after_write'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "reconciliation_strategy",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'field_match'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "fallback",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'human_handoff'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "certification",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'unimplemented'",
           "primaryKeyPosition": 0
         },
         {
           "name": "learned_by_user_id",
           "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "promoted_by_user_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "promoted_at",
+          "type": "INTEGER",
           "notNull": false,
           "default": null,
           "primaryKeyPosition": 0
@@ -13242,6 +16080,13 @@
           "type": "INTEGER",
           "notNull": true,
           "default": "0",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "known_issues",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
           "primaryKeyPosition": 0
         },
         {
@@ -13355,6 +16200,15 @@
         },
         {
           "name": "authenticated_domain",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "authenticated_address",
           "sqlType": "text",
           "columnType": "SQLiteText",
           "dataType": "string",
@@ -13543,6 +16397,13 @@
           "notNull": true,
           "default": null,
           "primaryKeyPosition": 0
+        },
+        {
+          "name": "authenticated_address",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
         }
       ],
       "replayedForeignKeys": [],
@@ -13579,6 +16440,153 @@
           "origin": "pk",
           "columns": [
             "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pms_seat_sender_addresses",
+      "exportName": "pmsSeatSenderAddresses",
+      "columns": [
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "address",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "provider_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "added_by",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "added_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "pms_seat_sender_addresses_org_idx",
+          "unique": false,
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "pms_seat_sender_addresses_uq",
+          "unique": true,
+          "columns": [
+            "organization_id",
+            "address"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "address",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "provider_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "added_by",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "added_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "pms_seat_sender_addresses_org_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id"
+          ]
+        },
+        {
+          "name": "pms_seat_sender_addresses_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "address"
           ]
         }
       ]
@@ -18360,6 +21368,589 @@
       ]
     },
     {
+      "name": "work_attempts",
+      "exportName": "workAttempts",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": true,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "task_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "employee_id",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "attempt_number",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "kind",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "started_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "ended_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        },
+        {
+          "name": "objective_snapshot",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "strategy",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "actions_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "tools_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "delegations_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "observations",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "result",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "outcome",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "failure_reason",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "blocker_reason",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "transient",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "progressed",
+          "sqlType": "integer",
+          "columnType": "SQLiteBoolean",
+          "dataType": "boolean",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "boolean (strict 0/1)"
+        },
+        {
+          "name": "signature",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "learned",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "should_change",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "next_strategy",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "cost_cents",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "tokens_used",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "latency_ms",
+          "sqlType": "integer",
+          "columnType": "SQLiteInteger",
+          "dataType": "number",
+          "notNull": false,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "external_effects_json",
+          "sqlType": "text",
+          "columnType": "SQLiteText",
+          "dataType": "string",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "explicit mapping required"
+        },
+        {
+          "name": "created_at",
+          "sqlType": "integer",
+          "columnType": "SQLiteTimestamp",
+          "dataType": "date",
+          "notNull": true,
+          "primaryKey": false,
+          "conversion": "timestamptz (epoch milliseconds)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "work_attempts_number_uq",
+          "unique": true,
+          "columns": [
+            "task_id",
+            "kind",
+            "attempt_number"
+          ]
+        },
+        {
+          "name": "work_attempts_signature_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "task_id",
+            "signature"
+          ]
+        },
+        {
+          "name": "work_attempts_task_idx",
+          "unique": false,
+          "columns": [
+            "organization_id",
+            "task_id",
+            "kind"
+          ]
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id"
+          ],
+          "table": "organizations",
+          "foreignColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "task_id"
+          ],
+          "table": "agent_tasks",
+          "foreignColumns": [
+            "id"
+          ]
+        }
+      ],
+      "replayedColumns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 1
+        },
+        {
+          "name": "organization_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "task_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "employee_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "attempt_number",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "started_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "ended_at",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "objective_snapshot",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "strategy",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "actions_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "tools_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "delegations_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "observations",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "result",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "failure_reason",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "blocker_reason",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "transient",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "false",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "progressed",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "false",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "signature",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "learned",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "should_change",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "next_strategy",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "cost_cents",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "tokens_used",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "latency_ms",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "external_effects_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "primaryKeyPosition": 0
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "primaryKeyPosition": 0
+        }
+      ],
+      "replayedForeignKeys": [
+        {
+          "id": 0,
+          "seq": 0,
+          "table": "agent_tasks",
+          "from": "task_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        },
+        {
+          "id": 1,
+          "seq": 0,
+          "table": "organizations",
+          "from": "organization_id",
+          "to": "id",
+          "on_update": "NO ACTION",
+          "on_delete": "NO ACTION",
+          "match": "NONE"
+        }
+      ],
+      "replayedIndexes": [
+        {
+          "name": "work_attempts_number_uq",
+          "unique": true,
+          "origin": "c",
+          "columns": [
+            "task_id",
+            "kind",
+            "attempt_number"
+          ]
+        },
+        {
+          "name": "work_attempts_signature_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "task_id",
+            "signature"
+          ]
+        },
+        {
+          "name": "work_attempts_task_idx",
+          "unique": false,
+          "origin": "c",
+          "columns": [
+            "organization_id",
+            "task_id",
+            "kind"
+          ]
+        },
+        {
+          "name": "sqlite_autoindex_work_attempts_1",
+          "unique": true,
+          "origin": "pk",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
       "name": "work_orders",
       "exportName": "workOrders",
       "columns": [
@@ -19102,5 +22693,5 @@
     }
   ],
   "consumers": [],
-  "inventorySha256": "6f618ac0fb7a8f26782565f002b76857f9427598f9dcda3aef430fb2fce75185"
+  "inventorySha256": "3eea58d25ab5c9a12ad969ec2a1f3fac2ee32bfc18a90c572b4c2b07fe7ac859"
 }
