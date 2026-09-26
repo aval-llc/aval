@@ -23,7 +23,7 @@ export const CANONICAL_CAPABILITIES = [
   // portfolio, property and unit
   "portfolio.read", "portfolio.metrics.read", "portfolio.series.read",
   "property.read", "property.setup.prepare", "unit.read", "unit.setup.prepare",
-  "occupancy.read", "owner.read", "client.read",
+  "occupancy.read", "owner.read",
 
   // leasing and marketing
   "lead.read", "lead.create", "lead.update", "prospect.message.prepare",
@@ -63,7 +63,7 @@ export const CANONICAL_CAPABILITIES = [
   // accounting and finance
   "accounting.read", "gl.read", "journal_entry.prepare", "bank.read", "reconciliation.prepare",
   "budget.read", "financial.statement.read", "invoice.read", "invoice.prepare",
-  "bill.read", "bill.prepare", "payment.prepare",
+  "bill.prepare", "payment.prepare",
   "owner.statement.prepare", "owner.distribution.prepare", "owner.contribution.prepare",
 
   // risk, insurance, compliance
@@ -71,17 +71,17 @@ export const CANONICAL_CAPABILITIES = [
   "fair_housing.review", "incident.read", "incident.prepare", "claim.prepare",
 
   // affordable housing
-  "affordable.read", "recertification.prepare", "voucher.read", "nspire.read",
+  "affordable.read", "recertification.prepare",
 
   // utilities and sustainability
   "utility.read", "utility.bill.read", "utility.prepare", "sustainability.read",
 
   // HOA / associations
-  "association.read", "assessment.read", "violation.prepare", "architectural_request.prepare",
+  "association.read", "violation.prepare", "architectural_request.prepare",
   "board.prepare",
 
   // commercial
-  "commercial.read", "cam.read", "cam.prepare",
+  "commercial.read", "cam.prepare",
 
   // data, reporting, provenance
   "analytics.read", "report.prepare", "provenance.read", "data.conflicts.read",
@@ -91,10 +91,25 @@ export const CANONICAL_CAPABILITIES = [
   "market.public.read", "market.comparables.read", "pricing.recommend",
 
   // internal operations
-  "staff.read", "sop.read", "task.route",
+  "staff.read", "staff.schedule.read", "sop.read", "task.read", "task.route",
 ] as const;
 
 export type CanonicalCapability = (typeof CANONICAL_CAPABILITIES)[number];
+
+/**
+ * Names retired because they were a second word for one record, and the
+ * capability that replaced each (docs/aval/SPECIALIST_REQUIREMENT_AUDIT.md,
+ * class F). Nothing stores these names; the map exists so the audit and any
+ * reader of an old catalogue can trace where each went.
+ */
+export const CONSOLIDATED_CAPABILITIES: Readonly<Record<string, CanonicalCapability>> = {
+  "client.read": "owner.read",           // a management client is the ownership entity
+  "bill.read": "invoice.read",           // a vendor bill and a vendor invoice are one payable
+  "voucher.read": "affordable.read",     // a voucher/HAP contract is part of the household's subsidy
+  "nspire.read": "inspection.read",      // NSPIRE is an inspection standard, not a record
+  "assessment.read": "association.read", // assessments are the member's association account
+  "cam.read": "commercial.read",         // a CAM pool is commercial recovery terms over GL lines
+};
 
 const CAPABILITY_SET: ReadonlySet<string> = new Set(CANONICAL_CAPABILITIES);
 
@@ -155,6 +170,13 @@ export const CAPABILITY_TOOLS: Partial<Record<CanonicalCapability, readonly stri
   "lease.status.update": ["update_lease_status"],
   "lease.execute": ["execute_lease"],
   "document.read": ["list_documents", "read_document"],
+  // Extraction is reading the stored text and returning fields with verbatim
+  // quotes — the discipline lib/documents/extraction.ts applies on the request
+  // path. A second model call inside a tool would add cost, not evidence.
+  "document.extract": ["read_document"],
+  // SOPs and the workspace's own knowledge are documents it has stored.
+  "sop.read": ["list_documents", "read_document"],
+  "knowledge.read": ["list_documents", "read_document"],
 
   "accounting.read": ["get_accounting_breakdown", "get_operating_statement"],
   "financial.statement.read": ["get_operating_statement"],

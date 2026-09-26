@@ -91,7 +91,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["failed item", "deficiency", "finding", "correction needed", "failed inspection"],
     inputs: ["inspection findings", "severity rules and correction deadlines, including program rules such as NSPIRE", "property and unit"],
     outputs: ["deficiency records with severity and correction deadline", "routing to maintenance, turns or a named owner"],
-    capabilities: ["inspection.read", "compliance.read", "nspire.read", "task.route"],
+    capabilities: ["inspection.read", "compliance.read", "task.route"],
     execution: "expertise",
     completion: { doneWhen: "Each failed item is a deficiency record with severity, deadline and an owner who has received it.", notDoneWhen: "Findings were grouped by severity but no owner was assigned or notified." },
     forbidden: ["class a life-safety finding as cosmetic", "set a correction deadline later than the program or jurisdiction allows"],

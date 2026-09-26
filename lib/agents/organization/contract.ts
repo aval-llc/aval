@@ -106,7 +106,8 @@ export function specialistContract(specialist: SpecialistDefinition): Specialist
   const anyCore = specialist.capabilities.some(inCore);
   // A specialist whose capabilities are all outside its domain's core is
   // cross-cutting by design: everything it declares is what it needs.
-  const required = specialist.capabilities.filter((capability) => !anyCore || inCore(capability) || isAct(capability));
+  const context = new Set<string>(specialist.contextOnly ?? []);
+  const required = specialist.capabilities.filter((capability) => !context.has(capability) && (!anyCore || inCore(capability) || isAct(capability)));
   const optional = specialist.capabilities.filter((capability) => !required.includes(capability));
   const untooled = required.filter((capability) => !CAPABILITY_TOOLS[capability]?.length);
   const missing = untooled.filter((capability) => !PROPOSES.has(verb(capability)));

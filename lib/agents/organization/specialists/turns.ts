@@ -155,7 +155,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["turn over budget", "turn actuals", "cost variance", "what did the turn cost", "price book update"],
     inputs: ["approved turn budget", "matched invoices and bills", "in-house labour records", "variance threshold"],
     outputs: ["actual against budget by line", "explained variances above threshold", "price book update proposals"],
-    capabilities: ["turn.read", "invoice.read", "bill.read", "budget.read", "report.prepare"],
+    capabilities: ["turn.read", "invoice.read", "budget.read", "report.prepare"],
     execution: "deterministic",
     completion: { doneWhen: "Each completed turn has actual against budget by line with every variance above threshold explained.", notDoneWhen: "Variance was computed before all the turn's invoices were matched." },
     forbidden: ["count an unmatched or unapproved invoice as an actual turn cost", "move cost between turns or to capital to shrink a variance"],

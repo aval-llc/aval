@@ -77,6 +77,14 @@ export interface SpecialistDefinition {
   inputs: readonly string[];
   outputs: readonly string[];
   capabilities: readonly CanonicalCapability[];
+  /**
+   * Capabilities from `capabilities` that are context for this Specialist, not
+   * its job, where the derivation rule would otherwise make them required (a
+   * read of its own domain's core). Each one is stated in the requirement
+   * audit (docs/aval/SPECIALIST_REQUIREMENT_AUDIT.md) with the boundary text
+   * that makes it context.
+   */
+  contextOnly?: readonly CanonicalCapability[];
   execution: ExecutionModel;
   /**
    * The machine-checkable outcome this specialist's work is done at — and, as

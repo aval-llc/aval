@@ -11,7 +11,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["new owner", "onboard owner", "new client", "management agreement", "owner setup", "take over management"],
     inputs: ["signed management agreement", "owner and entity details", "owner bank and tax information", "property list"],
     outputs: ["owner record with fee, reserve and approval terms from the agreement", "onboarding checklist with missing items", "portal access request"],
-    capabilities: ["owner.read", "client.read", "document.read", "document.extract", "property.setup.prepare", "task.route"],
+    capabilities: ["owner.read", "document.read", "document.extract", "property.setup.prepare", "task.route"],
     execution: "child_run",
     completion: {
       doneWhen: "Every checklist item is complete or listed as missing with an owner, and the fee, reserve and approval terms in the record match the signed agreement.",
@@ -68,7 +68,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["owner distribution", "owner draw", "disbursement", "pay the owner", "distribution amount"],
     inputs: ["issued owner statement", "reserve requirement from the agreement", "pending bills and holds", "verified owner bank account"],
     outputs: ["distribution calculation with each deduction named", "prepared distribution request", "approval request"],
-    capabilities: ["owner.read", "ledger.read", "bill.read", "owner.distribution.prepare"],
+    capabilities: ["owner.read", "ledger.read", "invoice.read", "owner.distribution.prepare"],
     execution: "deterministic",
     completion: {
       doneWhen: "The approved request has been handed to the payment service, and execution is reported only once the service returns a transaction reference.",
@@ -87,7 +87,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["owner contribution", "fund the account", "shortfall", "negative owner balance", "owner funds needed", "cash call"],
     inputs: ["owner balance and reserve requirement", "the bills or approved work driving the need", "management agreement terms"],
     outputs: ["prepared contribution request with amount, reason and due date", "supporting bills or estimates", "follow-up schedule"],
-    capabilities: ["owner.read", "ledger.read", "bill.read", "document.read", "owner.contribution.prepare"],
+    capabilities: ["owner.read", "ledger.read", "invoice.read", "document.read", "owner.contribution.prepare"],
     execution: "expertise",
     completion: {
       doneWhen: "An approved request has been sent to the owner and the contribution is confirmed as received on the owner ledger.",
@@ -106,7 +106,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["reserve", "reserve balance", "below reserve", "operating reserve", "low balance"],
     inputs: ["owner balances", "agreed reserve per owner or property", "scheduled payables"],
     outputs: ["reserve status per owner", "dated alert with projected shortfall routed to the account manager"],
-    capabilities: ["owner.read", "ledger.read", "bill.read", "bank.read", "task.route"],
+    capabilities: ["owner.read", "ledger.read", "invoice.read", "bank.read", "task.route"],
     execution: "deterministic",
     completion: {
       doneWhen: "Every owner's reserve status is computed for the day and each projected shortfall has an alert assigned to the account manager.",
@@ -201,7 +201,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["client profitability", "unprofitable owner", "account fit", "revenue per door", "prospective client", "drop client"],
     inputs: ["fee revenue per account", "staff time and task volume per account", "exceptions and disputes", "company target client profile"],
     outputs: ["profitability and fit assessment with figures for a named window", "options such as repricing or offboarding for a manager"],
-    capabilities: ["owner.read", "client.read", "gl.read", "staff.read", "analytics.read", "report.prepare"],
+    capabilities: ["owner.read", "gl.read", "staff.read", "analytics.read", "report.prepare"],
     execution: "expertise",
     completion: {
       doneWhen: "The assessment shows revenue and cost per account for a named window with sources and is delivered to the company's decision maker.",

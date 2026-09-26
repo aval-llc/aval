@@ -220,7 +220,8 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["cash flow", "cash position", "runway", "cash shortfall", "operating cash", "cash projection"],
     inputs: ["bank balances", "scheduled payables", "AR forecast", "planned capital spend and distributions"],
     outputs: ["cash flow for the period reconciled opening to closing", "projected cash position by week with inputs named", "shortfall flags"],
-    capabilities: ["bank.read", "financial.statement.read", "bill.read", "budget.read", "report.prepare"],
+    capabilities: ["bank.read", "financial.statement.read", "invoice.read", "budget.read", "report.prepare"],
+    contextOnly: ["bank.read", "budget.read"],
     execution: "expertise",
     completion: {
       doneWhen: "The period's cash movement reconciles opening to closing bank balance, and the projection names each input and its source.",
@@ -277,7 +278,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["1099", "vendor tax", "year-end tax", "reportable payments", "tin", "tax reporting"],
     inputs: ["vendor payment history for the tax year", "vendor tax classification and identification on file", "reportable category rules for the tax year"],
     outputs: ["reportable totals per vendor and category", "vendors with missing or inconsistent tax data"],
-    capabilities: ["vendor.read", "payment.read", "bill.read", "gl.read", "report.prepare"],
+    capabilities: ["vendor.read", "payment.read", "invoice.read", "gl.read", "report.prepare"],
     execution: "deterministic",
     completion: {
       doneWhen: "Every vendor paid in the year is either totalled with complete tax data or listed with the missing field.",
@@ -296,7 +297,7 @@ export const SPECIALISTS: readonly SpecialistDefinition[] = [
     triggers: ["anomaly", "duplicate payment", "unusual expense", "fraud check", "outlier", "changed bank details"],
     inputs: ["GL, payable and receivable history", "vendor master changes", "anomaly rules and thresholds"],
     outputs: ["ranked flags naming the rule matched and the transactions cited", "routing of each flag to a reviewer"],
-    capabilities: ["gl.read", "bill.read", "payment.read", "vendor.read", "analytics.read", "task.route"],
+    capabilities: ["gl.read", "invoice.read", "payment.read", "vendor.read", "analytics.read", "task.route"],
     execution: "deterministic",
     completion: {
       doneWhen: "Each flag names the rule or threshold matched and the transactions behind it, and is assigned to a named reviewer.",
