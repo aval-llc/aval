@@ -524,6 +524,8 @@ export const utilityMeters = pgTable(
     id: text("id").primaryKey(),
     organizationId: text("organization_id").notNull().references(() => organizations.id),
     utilityType: text("utility_type").notNull(), // "electricity" | "water" | "gas"
+    siteId: text("site_id"),
+    parentMeterId: text("parent_meter_id"),
     propertyLabel: text("property_label").notNull(),
     unitLabel: text("unit_label"),
     meterNumber: text("meter_number"),
@@ -552,6 +554,15 @@ export const utilityBills = pgTable(
     costCents: bigint("cost_cents", { mode: "number" }).notNull(),
     currency: text("currency").notNull().default("USD"),
     source: text("source").notNull(), // "manual" | "ai_extracted"
+    unitOfMeasure: text("unit_of_measure").notNull(),
+    readingKind: text("reading_kind").notNull().default("unknown"),
+    sourceSystem: text("source_system"),
+    externalId: text("external_id"),
+    tariffCode: text("tariff_code"),
+    subtotalCents: bigint("subtotal_cents", { mode: "number" }),
+    taxCents: bigint("tax_cents", { mode: "number" }),
+    supersedesBillId: text("supersedes_bill_id"),
+    supersededAt: timestamp("superseded_at", { withTimezone: true, mode: "date" }),
     extractionConfidence: text("extraction_confidence"), // set only when source is "ai_extracted"
     extractionNote: text("extraction_note"), // model's own caveat about the extraction, shown to the user, never trusted silently
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
@@ -2440,3 +2451,13 @@ export const expertiseSelections = pgTable(
     check("expertise_selections_confidence", sql`confidence IS NULL OR (confidence >= 0 AND confidence <= 1)`),
   ],
 );
+
+// Post-cutover utility model. Do not add these tables to the retired D1 schema.
+export const utilitySites = pgTable("utility_sites", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  propertyId: text("property_id"),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+}, t => [uniqueIndex("utility_sites_org_id_uq").on(t.organizationId,t.id),
+  foreignKey({ columns: [t.organizationId,t.propertyId], foreignColumns: [properties.organizationId,properties.id], name: "utility_sites_property_fk" })]);

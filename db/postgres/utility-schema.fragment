@@ -1,0 +1,10 @@
+
+// Post-cutover utility model. Do not add these tables to the retired D1 schema.
+export const utilitySites = pgTable("utility_sites", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id),
+  propertyId: text("property_id"),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+}, t => [uniqueIndex("utility_sites_org_id_uq").on(t.organizationId,t.id),
+  foreignKey({ columns: [t.organizationId,t.propertyId], foreignColumns: [properties.organizationId,properties.id], name: "utility_sites_property_fk" })]);

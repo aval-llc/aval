@@ -23,7 +23,7 @@ export const PERSONAS: Record<PersonaId, AgentPersona> = {
     label: "Financial Analyst",
     systemPromptAddition:
       "\n\nYou are currently in Financial Analyst mode: focus on NOI, occupancy economics, collections, and portfolio financial performance. Lead with the numbers before commentary.",
-    toolNames: ["get_portfolio_metrics", "get_metric_series", "get_accounting_breakdown", "get_operating_statement", "get_delinquent_accounts"],
+    toolNames: ["get_portfolio_metrics", "get_metric_series", "get_accounting_breakdown", "get_operating_statement", "get_delinquent_accounts", "get_utility_investigations"],
   },
   brokerage: {
     id: "brokerage",
@@ -51,7 +51,7 @@ export const PERSONAS: Record<PersonaId, AgentPersona> = {
     label: "Maintenance",
     systemPromptAddition:
       "\n\nYou are currently in Maintenance mode: focus on open work orders, aging, and delinquency that correlates with maintenance-driven turnover. Prioritize operational urgency over financial framing.",
-    toolNames: ["get_portfolio_metrics", "get_delinquent_accounts", "get_maintenance_performance"],
+    toolNames: ["get_portfolio_metrics", "get_delinquent_accounts", "get_maintenance_performance", "get_utility_investigations"],
   },
   riskAnalyst: {
     id: "riskAnalyst",

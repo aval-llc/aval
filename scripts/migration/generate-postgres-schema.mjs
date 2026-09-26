@@ -84,6 +84,20 @@ source = source
 // repository contract (JSON strings) during the parity migration.
 source = source.replace(/(\b\w+Json:\s*)text\(("[^"]+")\)/g, "$1jsonText($2)");
 
+// Post-cutover utilities: keep generation reproducible without extending D1.
+source = source.replace('    propertyLabel: text("property_label").notNull(),', '    siteId: text("site_id"),\n    parentMeterId: text("parent_meter_id"),\n    propertyLabel: text("property_label").notNull(),');
+source = source.replace('    extractionConfidence: text("extraction_confidence"),', `    unitOfMeasure: text("unit_of_measure").notNull(),
+    readingKind: text("reading_kind").notNull().default("unknown"),
+    sourceSystem: text("source_system"),
+    externalId: text("external_id"),
+    tariffCode: text("tariff_code"),
+    subtotalCents: bigint("subtotal_cents", { mode: "number" }),
+    taxCents: bigint("tax_cents", { mode: "number" }),
+    supersedesBillId: text("supersedes_bill_id"),
+    supersededAt: timestamp("superseded_at", { withTimezone: true, mode: "date" }),
+    extractionConfidence: text("extraction_confidence"),`);
+source += await readFile(path.join(root, "db/postgres/utility-schema.fragment"), "utf8");
+
 if (!source.includes('from "drizzle-orm/pg-core"') || source.includes("sqliteTable(") || source.includes("timestamp_ms") || /\w+Json:\s*text\(/.test(source)) {
   throw new Error("PostgreSQL schema conversion left an unsupported SQLite construct");
 }
