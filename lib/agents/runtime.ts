@@ -787,7 +787,11 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       const results: ContentBlock[] = [];
 
       for (const use of toolUses) {
-        if (use.name === 'plan_goal') {
+        // The assembled toolset is binding, not a suggestion. A call to a tool
+        // this run was not offered — however it got the name — is refused
+        // before policy runs, the same way a policy denial is.
+        const offered = tools.some(tool => tool.name === use.name);
+        if (offered && use.name === 'plan_goal') {
           const verification = await review('plan', use.input, stepIndex);
           await dbSession.db.insert(agentChecks).values({ id: crypto.randomUUID(), organizationId, taskId, stepIndex, exitCode: verification.exitCode, outputJson: JSON.stringify(verification), createdAt: new Date() });
           await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'verification_check', toolName: 'plan_goal', policyEffect: verification.exitCode ? 'deny' : 'allow', resultDigest: await digestPayload(verification), error: verification.exitCode ? verification.problems.join(' ') : undefined });
@@ -814,13 +818,16 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
           // before reserving budgets for child tasks; a lost lease stops here.
           const lost = await checkpoint(); if (lost) return lost;
         }
-        const outcome = await executeTool(dbSession, {
+        const outcome = offered ? await executeTool(dbSession, {
           toolName: use.name,
           args: use.input,
           subject,
           context: { personaId: task.agentId, employeePermissions, delegationDepth: task.delegationDepth, remainingSteps },
           task: { id: taskId, stepIndex },
-        });
+        }) : {
+          result: { status: 'denied' as const, code: 'permission_denied' as const, reason: `${use.name} is not one of the tools offered to this work. Use only the tools you were given.` },
+          audit: [{ kind: 'policy_decision' as const, label: `${use.name}:not_offered`, payloadDigest: await digestPayload(use.name), count: 0 }],
+        };
         audit.push(...outcome.audit);
         const result = outcome.result;
 

@@ -56,6 +56,16 @@ export const DELEGATION_POLICY = {
    * caps are re-checked on every step (lib/ask-aval/usage.ts).
    */
   rootMaxTokens: 240_000,
+  /**
+   * The step ceiling of a root that coordinates work, on the same rule as
+   * tokens. A plan hands each child half of what is left after its own
+   * planning turns, so a Specialist under a Lead holds about a quarter of the
+   * root. At the old 24 that was 3 steps: enough to read and answer, never
+   * enough to retry, repair a check, or be recognised as stuck before the
+   * step limit failed it. 60 leaves that Specialist the 12 a single task has
+   * always had (DEFAULT_MAX_STEPS). Tokens still bound the spend.
+   */
+  rootMaxSteps: 60,
 } as const;
 
 /** Kept under its historical name: callers compare depths against it. */

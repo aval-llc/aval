@@ -16,7 +16,7 @@ import { withWorkerOrganizationSession } from "@/lib/api/with-session";
 import { getRequestExecutionContext } from "vinext/shims/request-context";
 import { appendAuditEvents } from "@/lib/audit/log";
 import { digestPayload } from "@/lib/audit/chain";
-import { createTask, DEFAULT_MAX_STEPS } from "./tasks.ts";
+import { createTask } from "./tasks.ts";
 import { getEmployee } from "./employees.ts";
 import { roleForPersona } from "./permissions.ts";
 import { DELEGATION_POLICY } from "./delegation-policy.ts";
@@ -49,7 +49,7 @@ export async function openWork(
   // An unknown agent id resolves to the read-only `custom` envelope rather
   // than to the broad `general` one, so a typo narrows authority.
   const agentId = employee ? "general" : request.agentId || "general";
-  const maxSteps = Number.isInteger(request.maxSteps) ? Math.min(Math.max(request.maxSteps as number, 2), DEFAULT_MAX_STEPS * 2) : DEFAULT_MAX_STEPS * 2;
+  const maxSteps = Number.isInteger(request.maxSteps) ? Math.min(Math.max(request.maxSteps as number, 2), DELEGATION_POLICY.rootMaxSteps) : DELEGATION_POLICY.rootMaxSteps;
 
   const chatId = request.chatMessageId && /^[a-zA-Z0-9-]{1,70}$/.test(request.chatMessageId) ? request.chatMessageId : null;
   if (chatId) {
