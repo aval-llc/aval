@@ -119,6 +119,14 @@ const DESCRIPTORS: ToolDescriptor[] = [
   {...READ_DEFAULTS,name:'request_peer_help',summary:'Open one bounded question to a declared peer inside the same Work.',requiredPermission:'tasks.manage',mutates:true,maxRetries:0,routine:true},
   {...READ_DEFAULTS,name:'write_memory',summary:'Append a task scratchpad observation.',requiredPermission:'tasks.manage',mutates:true,maxRetries:0,routine:true},
   {...READ_DEFAULTS,name:"read_conversation",summary:"Read the originating conversation.",requiredPermission:"portfolio.read"},
+  /* ── reads: workspace records (lib/ask-aval/record-tools.ts) ─────────── */
+  { ...READ_DEFAULTS, name: "get_vendors", summary: "Vendors with trade and insurance expiry.", requiredPermission: "maintenance.read" },
+  { ...READ_DEFAULTS, name: "get_expiring_leases", summary: "Active leases ending within a window, with rent and deposit.", requiredPermission: "leases.read" },
+  { ...READ_DEFAULTS, name: "get_leads", summary: "Leasing leads with stage and stage dates.", requiredPermission: "leasing.read" },
+  { ...READ_DEFAULTS, name: "get_available_units", summary: "Vacant, ready units with market rent and days vacant.", requiredPermission: "portfolio.read" },
+  { ...READ_DEFAULTS, name: "get_utility_bills", summary: "Utility meters and recorded bills.", requiredPermission: "portfolio.read" },
+  { ...READ_DEFAULTS, name: "get_connection_health", summary: "Connected systems' status and last sync.", requiredPermission: "provenance.read" },
+  { ...READ_DEFAULTS, name: "get_workspace_staff", summary: "Workspace members' display names and roles.", requiredPermission: "portfolio.read" },
   /* ── reads: portfolio and accounting ─────────────────────────────────── */
   { ...READ_DEFAULTS, name: "get_portfolio_metrics", summary: "Portfolio-level NOI, rent, occupancy and work-order counts.", requiredPermission: "portfolio.read" },
   { ...READ_DEFAULTS, name: "get_metric_series", summary: "A time series for one metric with genuine multi-point data.", requiredPermission: "market.read" },

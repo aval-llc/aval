@@ -83,6 +83,7 @@ import { PEER_HELP_TOOL, mayRequestPeerHelp, peerReadiness } from "./peer-help.t
 import { wakePeerWaiters } from "./work-identity.ts";
 import { PERSON_RESUMABLE, WAIT_TOOL, wakeContext } from "./waits.ts";
 import { assignableActorsPrompt } from "./organization/prompt.ts";
+import { builtInActor } from "./organization/index.ts";
 import { getOperatingProfile } from "@/lib/organizations/operating-profile-store";
 
 /**
@@ -235,6 +236,11 @@ export async function advanceTask(dbSession: DbSession,
     employeeId: owner?.id,
     employeeCapabilities: scopes?.capability ?? null,
     employeePermissions,
+    // A Specialist changes only what its own capabilities name. Its envelope
+    // is derived from those tools, but a permission can cover more than one
+    // tool (pms.maintenance.write covers create, update and close), so the
+    // capability list — not the permission — is what bounds its acts.
+    expertiseCapabilities: builtInActor(task.agentId)?.kind === "specialist" ? builtInActor(task.agentId)!.toolNames : null,
   });
   let tools: ToolSchema[] = assembled.tools;
   const evidenceCapabilities = tools.flatMap(tool => {

@@ -121,17 +121,28 @@ export const CAPABILITY_TOOLS: Partial<Record<CanonicalCapability, readonly stri
   "portfolio.metrics.read": ["get_portfolio_metrics"],
   "portfolio.series.read": ["get_metric_series"],
   "property.read": ["get_property_breakdown"],
-  "unit.read": ["get_property_breakdown"],
+  "unit.read": ["get_property_breakdown", "get_available_units"],
   "occupancy.read": ["get_portfolio_metrics", "get_property_breakdown"],
 
-  "lead.read": ["get_leasing_funnel"],
+  "lead.read": ["get_leads", "get_leasing_funnel"],
+  "listing.read": ["get_available_units"],
+  "vendor.read": ["get_vendors"],
+  "vendor.insurance.read": ["get_vendors"],
+  "renewal.read": ["get_expiring_leases"],
+  "deposit.read": ["get_expiring_leases"],
+  "utility.read": ["get_utility_bills"],
+  "utility.bill.read": ["get_utility_bills"],
+  "integration.health.read": ["get_connection_health"],
+  "staff.read": ["get_workspace_staff"],
   "leasing.funnel.read": ["get_leasing_funnel"],
   "leasing.velocity.read": ["get_leasing_velocity"],
   "marketing.channels.read": ["get_marketing_channels"],
   "listing.publish": ["publish_listing"],
   "showing.schedule": ["book_viewing"],
   "application.send": ["send_application"],
-  "prospect.message.prepare": ["reply_to_inquiry"],
+  // `prospect.message.prepare` deliberately maps to nothing: preparing a reply
+  // produces a draft for a person. `reply_to_inquiry` sends one, so it stays
+  // with the Leasing Lead behind the mandatory Fair Housing human checkpoint.
 
   "resident.read": ["read_maintenance_context"],
   "communication.read": ["read_conversation", "list_conversations"],
@@ -188,7 +199,7 @@ export const PMS_ACTION_ALIASES: Readonly<Record<string, CanonicalCapability>> =
   "arrears.payment_plan.create": "payment_plan.create",
   "arrears.payment.post": "payment.post",
   "leasing.applications.read": "application.read",
-  "leasing.inquiry.reply": "prospect.message.prepare",
+  "leasing.inquiry.reply": "prospect.message.prepare", // the stored action sends; the canonical capability only prepares — see CAPABILITY_TOOLS
   "leasing.viewing.book": "showing.schedule",
   "leasing.application.send": "application.send",
   "leasing.lease.update_status": "lease.status.update",

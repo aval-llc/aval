@@ -1,4 +1,6 @@
 import type { DbSession } from "@/db/postgres/session";
+import { and, eq } from 'drizzle-orm';
+import { organizationMembers } from '@/db/postgres/schema';
 import { getTask, type TaskRecord } from './tasks';
 import { getTool } from './registry';
 import type { Permission } from './permissions';
@@ -56,6 +58,13 @@ async function authorityOf(dbSession: DbSession, org: string, task: TaskRecord, 
 export async function taskBoundary(dbSession: DbSession, org:string,user:string,taskId:string,toolName:string,args:Record<string,unknown>):Promise<string|null>{
  const tool=getTool(toolName);if(!tool)return null;
  let task=await getTask(dbSession, org,taskId);const seen=new Set<string>();
+ // The person this work runs for must still be in the workspace. Revoking
+ // someone's membership stops their Work from changing anything, whatever it
+ // was allowed to do when it started.
+ if(tool.mutates&&task){
+  const [member]=await dbSession.db.select({id:organizationMembers.id}).from(organizationMembers).where(and(eq(organizationMembers.organizationId,org),eq(organizationMembers.userId,task.userId))).limit(1);
+  if(!member)return 'The person this work runs for is no longer a member of this workspace.';
+ }
  const employees=new Map<string, readonly Permission[] | null>();
  if(!task||task.userId!==user)return 'The task does not belong to this workspace and user.';
  while(task){
