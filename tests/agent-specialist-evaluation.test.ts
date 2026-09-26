@@ -124,3 +124,17 @@ test("verifiers read screening results; only Credit Screening Coordination order
   const ordering = SPECIALISTS.filter((specialist) => specialist.capabilities.includes("screening.request")).map((specialist) => specialist.id);
   assert.deepEqual(ordering, ["screening.credit-screening-coordination"]);
 });
+
+test("every missing capability has a contract, and a contract exists only for a capability still missing", async () => {
+  const { CAPABILITY_CONTRACTS } = await import("../lib/agents/organization/capability-contracts.ts");
+  const missing = new Set(SPECIALISTS.flatMap((specialist) => specialistContract(specialist).missing));
+  const contracted = new Set(CAPABILITY_CONTRACTS.map((contract) => contract.capability));
+  assert.deepEqual([...missing].filter((capability) => !contracted.has(capability)), [], "a gap with no contract");
+  assert.deepEqual([...contracted].filter((capability) => !missing.has(capability)), [], "a contract for a gap that is closed or never existed");
+  assert.equal(contracted.size, CAPABILITY_CONTRACTS.length, "one contract per capability");
+  for (const contract of CAPABILITY_CONTRACTS) {
+    assert.equal(contract.risk, approvalClassOf(contract.capability) ?? "read", `${contract.capability}: the contract's risk class is the derived one`);
+    assert.ok(contract.sources.length > 0, `${contract.capability}: names at least one way to deliver it`);
+    assert.ok(contract.returns && contract.verification && contract.evidence && contract.blockedOn, contract.capability);
+  }
+});
