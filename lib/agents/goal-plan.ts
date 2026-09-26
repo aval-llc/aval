@@ -5,7 +5,9 @@ import { createTask, getTask, type TaskRecord } from './tasks';
 import { parseTaskCheck, type TaskCheck } from './checks';
 import { digestPayload } from '@/lib/audit/chain';
 import { getTool } from './registry';
-import { actorHolds, actorOrchestrates, builtInActor, isOrchestrator, resolveActorId } from './organization/index.ts';
+import { actorHolds, actorOrchestrates, builtInActor, isOrchestrator, resolveActorId, specialistById } from './organization/index.ts';
+import { specialistContract } from './organization/contract.ts';
+import { capabilityContract } from './organization/capability-contracts.ts';
 import { DELEGATION_POLICY } from './delegation-policy.ts';
 import { findDuplicateWork, workCanFundGrants, workIdOf, workSize } from './work-identity.ts';
 import { grantFor, type Grant } from './budget-model.ts';
@@ -68,6 +70,19 @@ export function validatePlanNodes(value: unknown, parent: TaskRecord, completed:
             // so where an employee is the planner only the child is checked
             // here.
             const employeeActing = Boolean(parent.employeeId && isOrchestrator(parent.agentId));
+            // A Specialist can satisfy only a check it is offered the tools for.
+            // Where it cannot, say which capability is missing and why, so the
+            // coordinator reports the gap instead of assigning work that cannot
+            // finish (capability-contracts.ts).
+            const specialist = builtInActor(agentId)?.kind === 'specialist' ? specialistById(agentId) : null;
+            const offered = builtInActor(agentId)?.toolNames ?? [];
+            const unoffered = specialist && check.kind === 'evidence' ? check.tools.filter(tool => !offered.includes(tool)) : [];
+            if (specialist && unoffered.length) {
+                const gaps = specialistContract(specialist).missing.map(capability => `${capability} (${capabilityContract(capability)?.blockedOn ?? 'no executor yet'})`);
+                throw Error(`${specialist.name} is not offered ${unoffered.join(', ')}. ` + (gaps.length
+                    ? `It cannot do this work yet: missing ${gaps.join('; ')}. Tell the person what is missing rather than assigning it.`
+                    : `Give it a check over what it is offered: ${offered.filter(tool => getTool(tool)?.requiredPermission !== 'tasks.manage').join(', ') || 'nothing'}.`));
+            }
             if (permission.some(p => (!employeeActing && !actorHolds(parent.agentId, p) && !actorOrchestrates(parent.agentId, p)) || !actorHolds(agentId, p)))
                 throw Error('A planned task requires permissions outside its parent or specialist.');
         }

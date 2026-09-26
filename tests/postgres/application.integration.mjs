@@ -32,6 +32,7 @@ import { runRecordToolsCases } from "./record-tools-cases.mjs";
 import { runHierarchyE2ECases } from "./hierarchy-e2e-cases.mjs";
 import { runBudgetCases } from "./budget-cases.mjs";
 import { runInvariantMatrixCases } from "./invariant-matrix-cases.mjs";
+import { runOrganizationE2ECases } from "./organization-e2e-cases.mjs";
 import { runExpertiseCases } from "./expertise-cases.mjs";
 import { runNoPmsCases } from "./no-pms-cases.mjs";
 import { runEmployeeApiCases } from "./employee-api-cases.mjs";
@@ -255,6 +256,7 @@ test("clean Supabase migrations support auth bootstrap, RLS isolation and rollba
     await runBudgetCases(t, { session, userA });
     await runInvariantMatrixCases(t, { session, userA, userB, config, administrator });
     await runHierarchyE2ECases(t, { config, administrator });
+    await runOrganizationE2ECases(t, { config, administrator });
     await runExpertiseCases(t, { session, userA, userB });
     await runSeatSenderCases(t, { session, userA, userB });
     await runBrowserWriteCases(t, { session, userA, userB, administrator });

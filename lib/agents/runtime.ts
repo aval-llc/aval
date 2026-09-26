@@ -454,8 +454,12 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
         // answer itself is not: it failed its own completion condition, and
         // publishing it as the result of the work would assert exactly what the
         // check refused to accept.
+        // A planner that could not plan usually could not because the work
+        // needs a capability nobody here has; that refusal names it, and the
+        // person handed the work needs it more than the generic check failure.
+        const refusedPlan = lastRefusal(messages, 'plan_goal');
         return handOff(repair.policy.onExhausted,
-          'Completion checks failed after bounded repair: ' + verification.problems.join(' '),
+          'Completion checks failed after bounded repair: ' + verification.problems.join(' ') + (refusedPlan ? ` Planning was refused: ${refusedPlan}` : ''),
           'The objective and its evidence are preserved; decide whether the approach or the completion condition should change.');
       }
       return checkpoint();
@@ -1018,6 +1022,23 @@ async function resumeFromApproval(dbSession: DbSession,
  * key and is suppressed as a duplicate rather than executed twice.
  */
 /** The completion contract's kind, for routing. Unparseable is simply unknown. */
+/** The text of the latest refused call to one tool in this transcript, if its latest call was refused. */
+function lastRefusal(messages: Message[], toolName: string): string | null {
+  const uses = messages.flatMap((message) => message.role === 'assistant' && Array.isArray(message.content) ? message.content.filter((block): block is ToolUseBlock => block.type === 'tool_use' && block.name === toolName) : []);
+  const last = uses.at(-1);
+  if (!last) return null;
+  for (const message of messages) {
+    if (message.role !== 'user' || !Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (block.type === 'tool_result' && block.tool_use_id === last.id && block.is_error) {
+        const text = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+        return text.slice(0, 600);
+      }
+    }
+  }
+  return null;
+}
+
 function taskCheckKind(checkJson: string | null): string | null {
   try {
     const parsed = JSON.parse(checkJson ?? "{}") as { kind?: unknown };
