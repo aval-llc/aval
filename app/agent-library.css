@@ -117,7 +117,8 @@
 .specialist-facts { display: grid; grid-template-columns: minmax(120px, 170px) 1fr; gap: 14px 22px; margin: 22px 0 0; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.7; }
 .specialist-facts dt { color: var(--muted); font-size: 11px; }
 .specialist-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.specialist-facts ul { margin: 0; padding-left: 16px; }
+.specialist-facts ul { margin: 0; padding-left: 16px; list-style: disc; }
+.specialist-facts li + li { margin-top: 2px; }
 .specialist-not { display: block; margin-top: 4px; color: var(--muted); }
 .specialist-card:focus-visible, .expertise-domain-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 @media (max-width: 650px) { .specialist-facts { grid-template-columns: 1fr; gap: 4px; } .specialist-facts dd { margin-bottom: 10px; } .expertise-lead { grid-template-columns: 1fr; } .library-filters { flex-wrap: wrap; } }

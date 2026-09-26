@@ -65,7 +65,7 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
     // From a template: the template's capabilities and expertise come with it,
     // not just its name and role. Chosen by a person, one employee at a time.
     const employee = typeof body.templateSlug === "string" && body.templateSlug
-      ? await createEmployeeFromTemplate(dbSession, identity.organizationId, identity.userId, body.templateSlug, { name: typeof body.name === "string" ? body.name : undefined })
+      ? await createEmployeeFromTemplate(dbSession, identity.organizationId, identity.userId, body.templateSlug, { name: typeof body.name === "string" ? body.name : undefined, status: "draft" })
       : await createEmployee(dbSession, identity.organizationId, identity.userId, {
       name: String(body.name ?? ""),
       role: String(body.role ?? ""),

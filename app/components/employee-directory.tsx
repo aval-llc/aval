@@ -275,11 +275,11 @@ export function EmployeeDirectory({ work: draftWork }: { work?: EmployeeWorkProp
       </div>
       <label className="employee-search"><Search width={16} height={16}/><input placeholder={t("Employees.searchPlaceholder")} value={search} aria-label={t("Employees.searchPlaceholder")} onChange={event => { setOffset(0); setSearch(event.target.value); }}/></label>
     </div>
-    {error && <p className="employee-error" role="alert">{error}</p>}
+    {error && !creating && <p className="employee-error" role="alert">{error}</p>}
     {workError && <p className="employee-error" role="status">{t("AgentLibrary.workUnavailable")}</p>}
     {filter === "expertise" ? <ExpertiseLibrary organization={organization} loading={expertiseState === "loading"} failed={expertiseState === "failed"} search={search} work={work} onOpenLead={openBuiltIn}/> : <>
     <div className="agent-folder-grid">
-      {showsLeads && organization && <LeadCards organization={organization} work={work} search={search} onOpen={openBuiltIn}/>}
+      {showsLeads && organization && <LeadCards organization={organization} work={work} search={search} onOpen={openBuiltIn} part={filter === "all" ? "avalOne" : "both"}/>}
       {agents.map((agent) => {
         const tasks = agentWork(agent);
         const pending = reviews.filter(review => belongsToAgent(review, agent.id, !!agent.employee)).length;
@@ -297,6 +297,7 @@ export function EmployeeDirectory({ work: draftWork }: { work?: EmployeeWorkProp
           </span>
         </button>;
       })}
+      {filter === "all" && organization && <LeadCards organization={organization} work={work} search={search} onOpen={openBuiltIn} part="leads"/>}
     </div>
     {!agents.length && !showsLeads && <p className="library-empty">{!directory ? t("AgentTrace.loadingTasks") : filter === "employees" && !search ? t("AgentLibrary.noEmployeesYet") : t("AgentLibrary.noResults")}</p>}
     {pages > 1 && filter !== "leads" && <div className="employee-pager"><button className="soft-button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>{t("Employees.previous")}</button><span>{t("Employees.pageOf", { page, pages })}</span><button className="soft-button" disabled={page >= pages} onClick={() => setOffset(offset + PAGE_SIZE)}>{t("Employees.next")}</button></div>}

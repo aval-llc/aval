@@ -58,11 +58,18 @@ export function presetFor(id: string) {
   return (PERSONA_PRESETS as Record<string, typeof PERSONA_PRESETS.general>)[id] ?? { ...PERSONA_PRESETS.general, icon: undefined };
 }
 
-/** `work_order.create` reads as "Work order · create". */
+const VERBS: Record<string, string> = {
+  read: "Read", create: "Create", update: "Update", close: "Close", send: "Send", call: "Call", schedule: "Schedule",
+  dispatch: "Dispatch", publish: "Publish", post: "Post", execute: "Execute", request: "Request", intake: "Take in",
+  prepare: "Prepare", review: "Review", recommend: "Recommend", draft: "Draft", extract: "Extract", route: "Route",
+};
+
+/** `maintenance.request.read` reads as "Read maintenance request". */
 export function capabilityLabel(capability: string) {
-  const [object, ...verb] = capability.split(".");
-  const noun = object.replace(/_/g, " ");
-  return `${noun.charAt(0).toUpperCase()}${noun.slice(1)} · ${verb.join(" ").replace(/_/g, " ")}`;
+  const parts = capability.split(".");
+  const verb = parts.at(-1) ?? "";
+  const object = parts.slice(0, -1).join(" ").replace(/_/g, " ").replace(/\b(cam|gl|coi|nspire|hoa|pms|api|ar)\b/g, (word) => word.toUpperCase());
+  return VERBS[verb] ? `${VERBS[verb]} ${object}` : `${object} ${verb.replace(/_/g, " ")}`;
 }
 
 const colorOf = (id: string) => Array.from(id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6;
@@ -87,17 +94,21 @@ export function OrganizationCard({ id, name, subtitle, detail, work, onOpen }: {
   </button>;
 }
 
-/** Aval One and the 22 Leads, Aval One first. */
-export function LeadCards({ organization, work, search, onOpen }: {
-  organization: Organization; work: Work[]; search: string; onOpen: (id: string) => void;
+/**
+ * Aval One and the 22 Leads, Aval One first. `part` lets the All agents tab
+ * put the workspace's own employees between Aval One and the Leads, so the
+ * customer's headcount is never buried under the platform's.
+ */
+export function LeadCards({ organization, work, search, onOpen, part = "both" }: {
+  organization: Organization; work: Work[]; search: string; onOpen: (id: string) => void; part?: "both" | "avalOne" | "leads";
 }) {
   const t = useTranslations();
   const query = search.trim().toLowerCase();
   const matches = (text: string) => !query || text.toLowerCase().includes(query);
   const { avalOne } = organization;
   return <>
-    {matches(`${avalOne.name} ${avalOne.subtitle}`) && <OrganizationCard id={avalOne.id} name={avalOne.name} subtitle={t("AgentLibrary.avalOneSubtitle")} detail={t("AgentLibrary.avalOneCoordinates")} work={work} onOpen={() => onOpen(avalOne.id)}/>}
-    {organization.leads.filter((lead) => matches(`${lead.name} ${lead.summary}`)).map((lead) => <OrganizationCard key={lead.id} id={lead.id} name={lead.name} subtitle={t("AgentLibrary.leadSubtitle")}
+    {part !== "leads" && matches(`${avalOne.name} ${avalOne.subtitle}`) && <OrganizationCard id={avalOne.id} name={avalOne.name} subtitle={t("AgentLibrary.avalOneSubtitle")} detail={t("AgentLibrary.avalOneCoordinates")} work={work} onOpen={() => onOpen(avalOne.id)}/>}
+    {part !== "avalOne" && organization.leads.filter((lead) => matches(`${lead.name} ${lead.summary}`)).map((lead) => <OrganizationCard key={lead.id} id={lead.id} name={lead.name} subtitle={t("AgentLibrary.leadSubtitle")}
       detail={lead.specialistCount ? t("AgentLibrary.coordinates", { count: lead.specialistCount }) : lead.summary} work={work} onOpen={() => onOpen(lead.id)}/>)}
   </>;
 }
@@ -141,7 +152,7 @@ export function ExpertiseLibrary({ organization, loading, failed, search, work, 
               {team.map((specialist) => <button type="button" className="specialist-card" key={specialist.id} onClick={() => setDetail(specialist)}>
                 <strong>{specialist.name}</strong>
                 <span>{specialist.boundary}</span>
-                <small>{specialist.capabilities.slice(0, 3).map(capabilityLabel).join(" · ")}</small>
+                <small>{specialist.capabilities.slice(0, 3).map(capabilityLabel).join(", ")}</small>
               </button>)}
             </div>
           </div>}
@@ -158,7 +169,7 @@ export function ExpertiseLibrary({ organization, loading, failed, search, work, 
           <dt>{t("AgentLibrary.whenUsed")}</dt><dd>{detail.triggers.join(", ")}</dd>
           <dt>{t("AgentLibrary.needs")}</dt><dd><ul>{detail.inputs.map((item) => <li key={item}>{item}</li>)}</ul></dd>
           <dt>{t("AgentLibrary.canDo")}</dt><dd><ul>{detail.outputs.map((item) => <li key={item}>{item}</li>)}</ul></dd>
-          <dt>{t("AgentLibrary.systems")}</dt><dd>{detail.capabilities.map(capabilityLabel).join(" · ")}</dd>
+          <dt>{t("AgentLibrary.systems")}</dt><dd><ul>{detail.capabilities.map((capability) => <li key={capability}>{capabilityLabel(capability)}</li>)}</ul></dd>
           <dt>{t("AgentLibrary.doneWhen")}</dt><dd>{detail.completion.doneWhen} <span className="specialist-not">{detail.completion.notDoneWhen}</span></dd>
           <dt>{t("AgentLibrary.requiresApproval")}</dt><dd>{detail.approvals.length ? <ul>{detail.approvals.map((item) => <li key={item}>{item}</li>)}</ul> : t("AgentLibrary.nothingNeedsApproval")}</dd>
           <dt>{t("AgentLibrary.cannotDo")}</dt><dd><ul>{detail.forbidden.map((item) => <li key={item}>{item}</li>)}</ul></dd>
