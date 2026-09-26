@@ -216,3 +216,24 @@ test("the router names candidates only inside the workspace's business, determin
   assert.equal(routeObjective("hello there", EMPTY_PROFILE).leads.length, 0, "small talk routes nowhere");
   assert.deepEqual(routeObjective(leak, profile(["property_management"], ["multifamily"])), manager, "the same objective and profile always route the same way");
 });
+
+test("Ask Aval opens durable Work only when a turn asks for specialist work", async () => {
+  const { orchestrationDecision } = await import("../lib/agents/organization/orchestration.ts");
+  const pm = normalizeProfile({ businessModels: ["property_management"], assetClasses: ["multifamily", "commercial"] });
+  const direct = ["What is our occupancy?", "How many open work orders are there?", "hello", "List the vacant units", "What does the lease say about pets?"];
+  const work = [
+    "A resident reports a water leak under the kitchen sink, open a work order and dispatch a plumber",
+    "Can you reconcile the CAM charges for the retail tenants this year",
+    "Market this vacant unit and schedule tours",
+    "Prepare the owner statement for September",
+  ];
+  for (const question of direct) assert.equal(orchestrationDecision(question, pm).delegate, false, `answered directly: ${question}`);
+  for (const question of work) {
+    const decision = orchestrationDecision(question, pm);
+    assert.equal(decision.delegate, true, `opens Work: ${question}`);
+    assert.ok(decision.routing.leads.length > 0, "and names the Lead candidates, so nobody has to choose one");
+  }
+  const broker = normalizeProfile({ businessModels: ["brokerage_leasing"], assetClasses: ["commercial"] });
+  assert.equal(orchestrationDecision("Open a work order for the broken heater", broker).routing.leads.some((lead) => lead.id === "maintenance"), false,
+    "the workspace's business still decides which Leads the Work may reach");
+});
