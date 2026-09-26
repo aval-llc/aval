@@ -404,6 +404,11 @@
   },
   "ConnectionDialog": {
     "sap": {
+      "failed": "No se pudo verificar el acceso a SAP. Revisa el usuario, el servicio habilitado y los datos de la empresa con tu administrador de SAP. La configuración se guardó; no se inició ninguna sincronización.",
+      "credentials": "Credenciales",
+      "permission": "Leer solo la empresa y la colección configuradas",
+      "next": "Siguiente: asociar datos",
+      "mapping": "Asocia los campos de recibos y los medidores, y revisa una vista previa de importación con el soporte de Aval.",
       "description": "Conecta un servicio de SAP Business ByDesign de solo lectura para tu empresa.",
       "adapter": "Una consulta limitada comprueba el acceso al servicio configurado.",
       "storage": "Las credenciales se cifran y guardan para este espacio de trabajo.",

@@ -106,21 +106,28 @@ export async function runByDesignCases(t, { session, config, administrator, user
         assert.equal((await run((s, o) => listBills(s, o))).length, 2);
       } finally { await server.close(); }
     });
-    await t.test('ByDesign scripted planner -> utility tool -> child review -> cron final answer', async () => {
+    await t.test('ByDesign imported bills -> Aval One -> Utilities Lead -> usage Specialist -> reviewed final answer', async () => {
       await administrator.query("UPDATE organizations SET active_model_provider='fixture' WHERE id=$1", [org]);
       const scheduled = [];
-      let sawEvidence = false, modelCalls = 0;
+      let sawEvidence = false, modelCalls = 0, reviewCalls = 0;
       globalThis.__REQUEST_CONTEXT__ = { waitUntil: promise => scheduled.push(promise) };
       globalThis.__MODEL__ = async (_env, _org, params) => {
+        if (_org !== org) return reply('render_answer', { headline: 'Other scenario', narrative: 'Outside this fixture.', confidence: 'low' });
         modelCalls++;
         const committed = await administrator.query('SELECT id FROM utility_bills WHERE organization_id=$1', [org]);
         assert.equal(committed.rowCount, 2, 'model sees committed source data');
         const uses = params.messages.flatMap(m => Array.isArray(m.content) ? m.content.filter(b => b.type === 'tool_use') : []);
         if (params.tools.some(tool => tool.name === 'plan_goal')) {
+          const root = String(params.messages[0].content).includes('ByDesign root:');
           if (!uses.some(u => u.name === 'plan_goal')) return reply('plan_goal', { tasks: [
-            { key: 'utilities', goal: 'Compara el consumo diario del medidor con los recibos registrados y cita la evidencia.', dependsOn: [], check: { kind: 'evidence', tools: ['get_utility_investigations'] } },
+            root
+              ? { key: 'utilities', goal: 'ByDesign lead: Coordina la revisión de consumo de agua con evidencia.', agentId: 'lead.utilities', dependsOn: [], check: { kind: 'plan' } }
+              : { key: 'usage', goal: 'ByDesign specialist: Compara el consumo diario del medidor con los recibos registrados y cita la evidencia.', agentId: 'utilities.energy-and-water-usage-analysis', dependsOn: [], check: { kind: 'evidence', tools: ['get_utility_investigations'] } },
           ] });
-        } else if (!uses.some(u => u.name === 'get_utility_investigations')) return reply('get_utility_investigations', { locale: 'es-mx' });
+        } else if (!uses.some(u => u.name === 'get_utility_investigations')) {
+          assert.ok(params.tools.some(tool => tool.name === 'get_utility_investigations'), 'utility capability offers the validated comparison tool');
+          return reply('get_utility_investigations', { locale: 'es-mx' });
+        }
         else {
           const results = params.messages.flatMap(m => Array.isArray(m.content) ? m.content.filter(b => b.type === 'tool_result') : []);
           const content = results.map(r => typeof r.content === 'string' ? r.content : JSON.stringify(r.content)).join('\n');
@@ -129,24 +136,33 @@ export async function runByDesignCases(t, { session, config, administrator, user
         return reply('render_answer', { headline: 'Revisión de consumo', narrative: 'El consumo diario aumentó 50%. Confirme las lecturas con el responsable del sitio; los recibos no prueban una fuga.', confidence: 'high' });
       };
       globalThis.__SEMANTIC_MODEL__ = async (_env, _org, params) => {
+        if (_org === org) reviewCalls++;
         const packet = JSON.parse(params.messages[0].content);
         const source = packet.sources.find(s => !s.failed && s.data && typeof s.data === 'object' && Object.keys(s.data).length);
         return reply('semantic_verdict', { passed: true, issues: [],
-          requirements: [{ requirement: packet.goal, satisfied: true, explanation: 'Scripted orchestration check, not live-model grading', nodeKeys: packet.phase === 'plan' ? ['utilities'] : [] }],
+          requirements: [{ requirement: packet.goal, satisfied: true, explanation: 'Scripted orchestration check, not live-model grading', nodeKeys: packet.phase === 'plan' ? (packet.proposal?.tasks ?? []).map(task => task.key) : [] }],
           claims: packet.phase === 'plan' ? [] : [{ claim: 'Consumo diario', kind: 'fact', supported: true,
             citations: [{ sourceId: source?.id ?? 'missing', pointer: '/' + Object.keys(source?.data ?? { missing: true })[0].replaceAll('~', '~0').replaceAll('/', '~1') }] }],
         });
       };
-      const response = await taskRoute(request('/api/agents/tasks', { goal: 'Revisa en español los recibos de agua del piloto ByDesign y explica qué falta verificar.', agentId: 'financial' }));
+      const response = await taskRoute(request('/api/agents/tasks', { goal: 'ByDesign root: Revisa en español los recibos de agua del piloto y explica qué falta verificar.', agentId: 'general' }));
       assert.equal(response.status, 202); const { id } = await response.json();
       await Promise.all(scheduled);
       const read = async () => (await administrator.query('SELECT * FROM agent_tasks WHERE id=$1', [id])).rows[0];
       for (let i = 0; i < 12; i++) { await runScheduledSweep(env); if (['COMPLETED', 'FAILED'].includes((await read()).status)) break; }
       const final = await read();
       assert.equal(final.status, 'COMPLETED', final.error);
-      assert.match(JSON.stringify(final.result_json), /50/); assert.equal(sawEvidence, true); assert.ok(modelCalls >= 4);
-      const children = (await administrator.query('SELECT status FROM agent_tasks WHERE parent_task_id=$1', [id])).rows;
-      assert.deepEqual(children.map(c => c.status), ['COMPLETED']);
+      assert.match(JSON.stringify(final.result_json), /50/); assert.equal(sawEvidence, true);
+      const work = (await administrator.query('SELECT agent_id, status, delegation_depth FROM agent_tasks WHERE work_id=$1 ORDER BY delegation_depth', [final.work_id])).rows;
+      assert.deepEqual(work.map(c => c.status), ['COMPLETED', 'COMPLETED', 'COMPLETED']);
+      assert.deepEqual(work.map(c => c.delegation_depth), [0, 1, 2]);
+      assert.equal(work[2].agent_id, 'utilities.energy-and-water-usage-analysis');
+      assert.equal(modelCalls, 6, 'two inference calls per level');
+      assert.equal(reviewCalls, 5, 'two plan reviews plus three result reviews');
+      await runScheduledSweep(env);
+      assert.equal(modelCalls, 6, 'completed work does not repeat inference');
+      assert.equal(reviewCalls, 5, 'completed work does not repeat review');
+      t.diagnostic(`SAP_AGENT_EFFICIENCY ${JSON.stringify({ modelCalls, reviewCalls, tasks: work.length, liveModel: false, liveSap: false })}`);
     });
     await t.test('ByDesign evidence becomes one reviewed internal task without external execution', async () => {
       const finding = (await run((s, o) => utilityInvestigations(s, o, 'es-mx'))).findings[0];

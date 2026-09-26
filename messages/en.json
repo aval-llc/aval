@@ -404,6 +404,11 @@
   },
   "ConnectionDialog": {
     "sap": {
+      "failed": "SAP access could not be verified. Check the integration login, enabled service and company details with your SAP administrator. Setup was saved; no sync was started.",
+      "credentials": "Credentials",
+      "permission": "Read the configured company and collection only",
+      "next": "Next: map data",
+      "mapping": "Map bill fields and meters, then preview a reviewed import with Aval support.",
       "description": "Connect a read-only SAP Business ByDesign service for your company.",
       "adapter": "One scoped read checks access to the configured service.",
       "storage": "Credentials are encrypted and stored for this workspace.",
