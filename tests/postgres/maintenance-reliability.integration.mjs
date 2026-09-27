@@ -90,10 +90,6 @@ test('maintenance reliability on PostgreSQL', {skip:!process.env.AVAL_TEST_DATAB
       const {job}=await call({action:'claim'});assert.ok(job);
       const response=proposal('read_maintenance_context',{conversation_id:'fixture',message_id:'fixture'});
       assert.equal((await call({action:'complete',jobId:job.id,claimToken:job.claimToken,response})).status,400);
-      assert.equal((await call({action:'report_failure',jobId:job.id,claimToken:job.claimToken,diagnostics:{protocol_version:2,usage_status:'unknown'}})).usageStatus,'unknown');
-      const interrupted=(await db.admin.query('SELECT tokens_reserved,enabled FROM desktop_model_runners WHERE organization_id=$1',[db.org])).rows[0];
-      assert.equal(Number(interrupted.tokens_reserved),128000);assert.equal(interrupted.enabled,false);
-      await call({action:'register',model:'gpt-6-luna',protocolVersion:2});
       response.diagnostics={protocol_version:2,usage_basis:'fresh_thread_cumulative_total',secret:'must-not-persist'};
       await db.admin.query('UPDATE agent_tasks SET cancel_requested=true WHERE id=$1',[task.id]);
       const payload={action:'complete',jobId:job.id,claimToken:job.claimToken,response};
@@ -101,6 +97,44 @@ test('maintenance reliability on PostgreSQL', {skip:!process.env.AVAL_TEST_DATAB
       const saved=(await db.admin.query('SELECT tokens_used FROM desktop_model_runners WHERE organization_id=$1',[db.org])).rows[0];assert.equal(Number(saved.tokens_used),40);
       const evidence=(await db.admin.query('SELECT diagnostics_json,attempt_history_json FROM desktop_model_jobs WHERE id=$1',[job.id])).rows[0];assert.equal(evidence.diagnostics_json.secret,undefined);assert.equal(evidence.attempt_history_json.length,2);
     } finally {await db.close();}
+  });
+  for(const mode of ['known','partial','mismatched']) await t.test(`interruption ${mode} usage reconciles conservatively once and hands off`,async()=>{
+    const known=mode==='known';
+    const db=await postgresEvaluation();
+    try {
+      await db.run(s=>applyImport(s,db.org,demoPortfolio(new Date()),{sourceProvider:'aval_demo',sourceConnectionId:null,externalId:null}));
+      const task=await db.run(s=>startDemoWorkflow(s,db.org,db.user,0)),runnerId=randomUUID();
+      const call=async body=>{const response=await desktop(db.request('/api/agents/desktop',{organizationId:db.org,runnerId,...body}));return{status:response.status,...await response.json()};};
+      await call({action:'register',model:'gpt-6-luna',protocolVersion:2});
+      await db.run(s=>advanceTask(s,{},db.org,task.id,randomUUID(),{invocationBudgetMs:45000}));
+      const {job}=await call({action:'claim'});assert.ok(job);
+      const payload={action:'report_failure',jobId:job.id,claimToken:job.claimToken,usage:{input_tokens:500,output_tokens:70},diagnostics:{protocol_version:2,terminal_observed:known,terminal_status:known?'interrupted':null,thread_id:'thread',turn_id:'turn',usage_status:known?'reported':'unknown',usage_basis:'fresh_thread_cumulative_total',usage_snapshots:[{total:{inputTokens:500,outputTokens:70}}]}};
+      if(mode==='mismatched') Object.assign(payload.diagnostics,{terminal_observed:true,terminal_status:'interrupted',usage_status:'reported',usage_snapshots:[{total:{inputTokens:499,outputTokens:70}}]});
+      // An expired lease may record a failure, never execute a stale proposal.
+      await db.admin.query("UPDATE desktop_model_jobs SET lease_until=now()-interval '1 second' WHERE id=$1",[job.id]);
+      assert.equal((await call(payload)).usageStatus,known?'reported':'unknown');
+      assert.equal((await call(payload)).replay,true);
+      const saved=(await db.admin.query('SELECT tokens_used,tokens_reserved,enabled FROM desktop_model_runners WHERE organization_id=$1',[db.org])).rows[0];
+      assert.equal(Number(saved.tokens_used),known?570:0);assert.equal(Number(saved.tokens_reserved),known?0:128000);assert.equal(saved.enabled,false);
+      const final=await db.run(s=>getTask(s,db.org,task.id));
+      assert.equal(final.tokensUsed,known?570:0);assert.equal(final.status,'WAITING_FOR_HUMAN');
+      const outcome=JSON.parse(final.maintenanceOutcomeJson);assert.equal(outcome.ownerUserId,db.user);assert.equal(outcome.reasonCode,known?'inference_interrupted':'inference_usage_unknown');
+      await call({action:'register',model:'gpt-6-luna',protocolVersion:2});assert.equal((await call({action:'claim'})).job,null);
+    }finally{await db.close();}
+  });
+  await t.test('claim admission hands off before consuming the allowance reserved for verification',async()=>{
+    const db=await postgresEvaluation();
+    try {
+      await db.run(s=>applyImport(s,db.org,demoPortfolio(new Date()),{sourceProvider:'aval_demo',sourceConnectionId:null,externalId:null}));
+      const task=await db.run(s=>startDemoWorkflow(s,db.org,db.user,0)),runnerId=randomUUID();
+      const call=async body=>{const response=await desktop(db.request('/api/agents/desktop',{organizationId:db.org,runnerId,...body}));return{status:response.status,...await response.json()};};
+      await call({action:'register',model:'gpt-6-luna',protocolVersion:2});
+      await db.run(s=>advanceTask(s,{},db.org,task.id,randomUUID(),{invocationBudgetMs:45000}));
+      await db.admin.query('UPDATE agent_tasks SET max_tokens=100000 WHERE id=$1',[task.id]);
+      assert.equal((await call({action:'claim'})).handoff,true);
+      const final=await db.run(s=>getTask(s,db.org,task.id));assert.equal(final.status,'WAITING_FOR_HUMAN');assert.equal(JSON.parse(final.maintenanceOutcomeJson).reasonCode,'inference_budget');
+      assert.equal(Number((await db.admin.query('SELECT tokens_reserved FROM desktop_model_runners WHERE organization_id=$1',[db.org])).rows[0].tokens_reserved),0);
+    }finally{await db.close();}
   });
   await t.test('approved work has a bound receipt, one order and an open repair',async()=>{
     const r=await runCase({tamper:true});assert.equal(r.final.status,'COMPLETED',r.final.error);assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.outcome.actionState,'executed');assert.equal(r.outcome.verificationState,'verified');assert.notEqual(r.receipt.execution.workOrderStatus,'completed');assert.equal(r.reviewerCalls,1);

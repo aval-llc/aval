@@ -12,6 +12,7 @@ import { startCodexInference } from './lib/codex-inference.mjs';
 import { agentBuildVersion } from './lib/agent-build-version.mjs';
 import { maintenanceScenarios, maintenanceGaps } from '../evals/maintenance/scenarios.mjs';
 import { scoreMaintenanceCase, maintenanceScorerVersion, maintenanceFailureCategory } from '../evals/maintenance/scoring.mjs';
+import { maintenanceReleaseGate } from '../evals/maintenance/release-gate.mjs';
 import { applyImport } from '../lib/operations/import-apply.ts';
 import { demoPortfolio } from '../lib/operations/demo-portfolio.ts';
 import { startDemoWorkflow } from '../lib/operations/demo-workflows.ts';
@@ -151,7 +152,13 @@ async function liveCase(scenario, repetition) {
         save();
       } catch (error) {
         c.error = error.message; c.diagnostics = error.diagnostics; c.duration_ms = Date.now() - callStart;
-        try { await call({action:'report_failure',jobId:job.id,claimToken:job.claimToken,diagnostics:error.diagnostics ?? {usage_status:'unknown'}}); }
+        if(error.usage && error.diagnostics?.usage_status === 'reported') c.usage = error.usage;
+        try {
+          await call({action:'report_failure',jobId:job.id,claimToken:job.claimToken,usage:error.usage,diagnostics:error.diagnostics ?? {usage_status:'unknown'}});
+          const stored=(await db.admin.query('SELECT diagnostics_json FROM desktop_model_jobs WHERE id=$1',[job.id])).rows[0];
+          c.server_diagnostics=stored.diagnostics_json;
+          if(c.server_diagnostics?.usage_status === 'unknown') { c.unreconciled_usage=c.usage; delete c.usage; }
+        }
         catch (failure) { c.failure_report_error = failure.message; }
         save(); throw error;
       }
@@ -220,6 +227,8 @@ finally {
   report.input_tokens = report.calls.reduce((n, c) => n + (c.usage?.input_tokens ?? 0), 0);
   report.output_tokens = report.calls.reduce((n, c) => n + (c.usage?.output_tokens ?? 0), 0);
   report.budget.accounted_tokens = accounted(report.calls); report.budget.remaining_tokens = remaining();
+  report.release_gate = maintenanceReleaseGate(report);
+  report.coverage_complete = report.release_gate.coverage.every(c => c.complete);
   save();
 }
 console.log(JSON.stringify({ status: report.status, cases: report.cases.map(c => ({ id: c.id, status: c.status, error: c.error })), model_calls: report.model_calls, input_tokens: report.input_tokens, output_tokens: report.output_tokens, output }));

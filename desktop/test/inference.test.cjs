@@ -32,3 +32,33 @@ test('fresh-thread cumulative usage includes internal requests but never sums re
 test('desktop inference rejects missing usage, unoffered tools and execution',async()=>{
   for(const options of [{usage:false},{tool:'send_money'},{forbidden:true}])await assert.rejects(infer(rpcFixture(options),'/tmp','gpt-6-luna',params));
 });
+test('timeout waits for terminal usage and never returns the interrupted proposal',async()=>{
+  const rpc=new EventEmitter();
+  rpc.request=async(method)=>{
+    if(method==='thread/start')return {thread:{id:'thread'}};
+    if(method==='turn/start')return {turn:{id:'turn'}};
+    if(method==='turn/interrupt')queueMicrotask(()=>{
+      rpc.emit('notification',{method:'thread/tokenUsage/updated',params:{threadId:'thread',turnId:'turn',tokenUsage:{total:{inputTokens:500,outputTokens:70}}}});
+      rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread',turn:{id:'turn',status:'interrupted'}}});
+    });
+  };
+  await assert.rejects(infer(rpc,'/tmp','gpt-6-luna',params,{timeoutMs:5,interruptGraceMs:50}),error=>{
+    assert.deepEqual(error.usage,{input_tokens:500,output_tokens:70});
+    assert.equal(error.diagnostics.terminal_status,'interrupted');assert.equal(error.diagnostics.usage_status,'reported');return true;
+  });
+  assert.equal(rpc.listenerCount('notification'),0);
+});
+test('timeout without acknowledgement preserves unknown usage despite a partial snapshot',async()=>{
+  const rpc=new EventEmitter();
+  rpc.request=async(method)=>{
+    if(method==='thread/start')return {thread:{id:'thread'}};
+    if(method==='turn/start') {
+      queueMicrotask(()=>rpc.emit('notification',{method:'thread/tokenUsage/updated',params:{threadId:'thread',turnId:'turn',tokenUsage:{total:{inputTokens:100,outputTokens:10}}}}));
+      return {turn:{id:'turn'}};
+    }
+  };
+  await assert.rejects(infer(rpc,'/tmp','gpt-6-luna',params,{timeoutMs:5,interruptGraceMs:5}),error=>{
+    assert.equal(error.usage,undefined);assert.equal(error.diagnostics.usage_status,'unknown');assert.equal(error.diagnostics.terminal_observed,false);return true;
+  });
+  assert.equal(rpc.listenerCount('notification'),0);
+});

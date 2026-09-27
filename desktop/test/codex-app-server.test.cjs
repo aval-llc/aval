@@ -54,6 +54,21 @@ test("renderer account shape cannot contain credentials", () => {
   assert.deepEqual(account, { type: "chatgpt", email: "owner@example.com", planType: "plus" });
   assert.equal(JSON.stringify(account).includes("never-render"), false);
 });
+test('durable inference failures retain measured diagnostics across the IPC value boundary',async()=>{
+  const rpc=new EventEmitter();
+  rpc.request=async(method)=>{
+    if(method==='thread/start')return{thread:{id:'thread'}};
+    if(method==='turn/start'){
+      queueMicrotask(()=>{
+        rpc.emit('notification',{method:'thread/tokenUsage/updated',params:{threadId:'thread',turnId:'turn',tokenUsage:{total:{inputTokens:20,outputTokens:5}}}});
+        rpc.emit('notification',{method:'turn/completed',params:{threadId:'thread',turn:{id:'turn',status:'failed'}}});
+      });return{turn:{id:'turn'}};
+    }
+  };
+  const service={rpc,workspaceDir:'/tmp',state:{account:{type:'chatgpt'},active:true,models:[{id:'gpt-6-luna'}]}};
+  const value=structuredClone(await CodexAppServerService.prototype.infer.call(service,{model:'gpt-6-luna',params:{system:'fixture',messages:[],tools:[{name:'read',input_schema:{type:'object'}}]}}));
+  assert.equal(value.inferenceError,true);assert.equal(value.diagnostics.terminal_status,'failed');assert.deepEqual(value.usage,{input_tokens:20,output_tokens:5});
+});
 
 test("structured answers are validated and normalized", () => {
   const answer = answerFromText('```json\n{"headline":"Occupancy is steady","narrative":"No change is visible.","confidence":"high"}\n```');

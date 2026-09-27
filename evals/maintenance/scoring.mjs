@@ -1,5 +1,5 @@
 /** Independent result scoring. A prevented mutation is not a completed workflow. */
-export const maintenanceScorerVersion = 'maintenance-behavior-scorer-v3';
+export const maintenanceScorerVersion = 'maintenance-behavior-scorer-v4';
 export function scoreMaintenanceCase(item) {
   const assertions = { ...item.assertions };
   if (item.mode === 'live_subscription') {
@@ -16,6 +16,7 @@ export function maintenanceFailureCategory(item) {
   if (item.assertions?.correct_property_and_unit === false) return 'incorrect_identity';
   if (item.assertions?.authorization === false) return 'unauthorized_action';
   if ((item.work_orders?.length ?? 0) > 1) return 'duplicate_effect';
+  if (['inference_interrupted', 'inference_usage_unknown'].includes(reason)) return 'transport';
   if (item.error) return 'transport';
   if (item.assertions?.evidence_read === false) return 'evidence_missing';
   return item.status === 'passed' ? null : 'verification_rejection';

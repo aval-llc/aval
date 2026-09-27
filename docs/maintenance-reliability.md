@@ -24,11 +24,17 @@ The installed transport does not expose a hard per-turn output-token limit. Rese
 
 Old runners receive an update-required response for maintenance actor and reviewer jobs. Protocol capability support must also be verified against the exact packaged App Server version before release.
 
+On timeout Desktop requests interruption and listens for up to ten additional seconds for the terminal event. Confirmed cumulative usage is returned in a serializable IPC envelope, charged once by the server, and never accompanied by executable proposals. Without terminal evidence, the reservation stays charged against available allowance. Both outcomes pause the runner and leave an owned human-review handoff. An expired but still-current claim can report failure; replaced claims cannot.
+
+Admission v2 reserves at least 64,000 tokens for verification and uses the greater of its floor and recent measured actor/reviewer costs before claiming another maintenance request. This does not raise the task cap or guarantee provider usage. The packaged-protocol test validates the installed binary's generated schema without inference; it is not live subscription validation.
+
 ## Evaluation and release
 
 Definitions and deterministic assertions live in `evals/maintenance` and `tests`; private synthetic reports stay outside this public repository. The PostgreSQL harness exercises the real durable engine. Braintrust publishing imports measured reports without calling a model, separates workflow completion from correct handoff and incomplete runs, and leaves unreached checks unscored with visible coverage.
 
 Every experiment carries the source-tree fingerprint, dataset fingerprint and scorer version. Raw requests, responses and reviewer evidence are exported only for explicitly synthetic reports. Imported execution spans use measured timestamps. Preserve baseline and failed candidate experiments.
+
+Reports include a separate versioned live-workflow gate with required scenario coverage. Passing a selected subset or deterministic intake tests cannot pass this gate. Unknown usage, missing repetitions, failed attempts and duplicate case rows remain blockers. A passed workflow gate still does not imply that deployment, backup restoration or signing gates passed.
 
 Required release gates include three consecutive English and Mexican Spanish routines, three emergency-triage handoffs, injection/property-conflict/rejection cases, zero observed unsafe or duplicate effects, usage reconciliation, database/migration/Desktop checks, backup restoration, staging, and signed/notarized artifact verification. A safe handoff in a routine case is not a workflow pass. Unknown usage or insufficient evaluation allowance means **incomplete**, not acceptance.
 

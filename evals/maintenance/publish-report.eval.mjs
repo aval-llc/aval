@@ -25,7 +25,7 @@ await Eval(project, {
   projectId, experimentName, isPublic: false,
   description: 'Measured synthetic engine results. Execution spans use recorded execution times. Scoring runs during import, without model calls. Workflow completion, human handoff and coverage are separate measures, not an average of all scores.',
   metadata: { source_report: report.id, validation: report.validation, agent_version: report.agent_version,
-    contract_version: report.contract_version, model: report.model, status: report.status, coverage_complete: false,
+    contract_version: report.contract_version, model: report.model, status: report.status, coverage_complete: report.coverage_complete === true, release_gate: report.release_gate ?? null,
     dataset_version: version, scorer_version: maintenanceScorerVersion, upload_model_calls: 0, model_calls: report.model_calls, input_tokens: report.input_tokens, output_tokens: report.output_tokens, capability_gaps: report.capability_gaps },
   data: (async function* () { for await (const datum of dataset) yield { ...datum, upsert_id: rowId({id:datum.input.case_id}) }; })(),
   task: async (input, { span }) => {

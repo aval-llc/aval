@@ -40,13 +40,20 @@ export function DesktopAgentRunner({ desktop }: { desktop: ReturnType<typeof use
         const data = await response.json() as { error?: string; job?: { id: string; claimToken: string; model: string; params: unknown } };
         if (!response.ok) throw Error(data.error || 'Desktop disconnected');
         if (data.job && !stopped) {
+          const claimedConnection = connection.current;
           let result;
           try { result = await bridge.infer({ model: data.job.model, params: data.job.params }); }
           catch (error) {
-            await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...connection.current, action: 'report_failure', jobId: data.job.id, claimToken: data.job.claimToken, diagnostics: { protocol_version: 2, usage_status: 'unknown' } }) });
+            await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...claimedConnection, action: 'report_failure', jobId: data.job.id, claimToken: data.job.claimToken, diagnostics: { protocol_version: 2, usage_status: 'unknown' } }) });
             throw error;
           }
-          const saved = await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...connection.current, action: 'complete', jobId: data.job.id, claimToken: data.job.claimToken, response: result }) });
+          const failure = result as {inferenceError?: boolean; diagnostics?: unknown; usage?: unknown};
+          if (failure?.inferenceError) {
+            const reported = await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...claimedConnection, action: 'report_failure', jobId: data.job.id, claimToken: data.job.claimToken, diagnostics: failure.diagnostics, usage: failure.usage }) });
+            if (!reported.ok) throw Error(es ? 'No se pudo guardar la interrupción. Revisa la tarea antes de reconectar.' : 'Could not save the interruption. Review the task before reconnecting.');
+            throw Error(es ? 'La inferencia se interrumpió. El progreso se guardó para revisión.' : 'Inference interrupted. Progress was saved for review.');
+          }
+          const saved = await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...claimedConnection, action: 'complete', jobId: data.job.id, claimToken: data.job.claimToken, response: result }) });
           if (!saved.ok) throw Error('Could not save the model response; reconnect Desktop');
         }
       } catch (error) { if (!stopped) { setNotice(error instanceof Error ? error.message : 'Desktop unavailable'); setRunning(false); } return; }
@@ -54,7 +61,7 @@ export function DesktopAgentRunner({ desktop }: { desktop: ReturnType<typeof use
     };
     void tick();
     return () => { stopped = true; clearTimeout(timer); };
-  }, [running, bridge]);
+  }, [running, bridge, es]);
   return <span><button className="soft-button" onClick={() => { if (running) { void call({ action: 'pause' }).catch(() => {}); setRunning(false); } else void start(); }}>
     {running ? (es ? 'Agentes conectados · Luna' : 'Agents connected · Luna') : (es ? 'Activar agentes con Luna' : 'Enable agents with Luna')}
   </button>{notice && <span role="status">{notice}</span>}</span>;
