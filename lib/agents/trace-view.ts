@@ -19,6 +19,7 @@
  * first live production run is an expensive place to find it.
  */
 export interface SerializedTraceStep {
+  executionManifest: Record<string, unknown> | null;
   sequence: number;
   step: number;
   kind: string;
@@ -35,6 +36,7 @@ export interface SerializedTraceStep {
 }
 
 export interface TraceStepRow {
+  executionManifestJson?: string | null;
   sequence: number;
   stepIndex: number;
   kind: string;
@@ -52,6 +54,7 @@ export interface TraceStepRow {
 
 export function serializeTraceStep(step: TraceStepRow): SerializedTraceStep {
   return {
+    executionManifest: step.executionManifestJson ? JSON.parse(step.executionManifestJson) : null,
     sequence: step.sequence,
     step: step.stepIndex,
     kind: step.kind,

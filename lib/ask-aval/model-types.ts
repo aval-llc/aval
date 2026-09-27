@@ -20,6 +20,7 @@ export interface ToolSchema {
 }
 
 export interface MessagesResponse {
+  executionManifest?: import('../agents/execution-manifest').ExecutionManifest;
   id: string;
   content: ContentBlock[];
   stop_reason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";

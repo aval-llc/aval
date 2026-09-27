@@ -187,9 +187,12 @@ Do not silently change models or raise the authorized evaluation token budget.
 Unknown usage and interrupted calls remain visible; budget exhaustion is
 incomplete, not successful.
 
-Implementation status: the engine already records model provider/name on steps,
-argument/result digests, and stored model contexts. The complete manifest above
-is a **required next implementation**, not a guarantee supplied by this document.
+Implementation status: the first manifest implementation records versioned step
+metadata, actor/reviewer prompt and tool hashes, evidence digests and current
+policy/memory fingerprints; see `BRAINTRUST.md` for coverage and configuration.
+Historical steps remain explicitly unversioned. Full retrieval lineage and
+property-policy version management are still follow-up work, not implied by a
+successful telemetry upload.
 
 ## 8. Evaluation contract
 

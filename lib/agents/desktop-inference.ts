@@ -3,6 +3,7 @@ import type { MessagesResponse } from '@/lib/ask-aval/model-types';
 import { callModel } from '@/lib/ask-aval/model-router';
 import { payloadHash } from './canonical-payload';
 import { sql } from 'drizzle-orm';
+import { taskManifest } from './manifest-storage';
 
 /** SQL text is always a source constant; values remain bound parameters. */
 export function desktopQuery(session: DbSession, text: string, values: unknown[] = []) {
@@ -20,14 +21,20 @@ export async function callTaskModel(
   params: Parameters<typeof callModel>[3], taskId: string, step: number, phase: string,
 ): Promise<MessagesResponse> {
   const selected = await desktopQuery(session, 'SELECT active_model_provider FROM organizations WHERE id=$1', [organizationId]);
-  if (selected.rows[0]?.active_model_provider !== 'desktop_codex') return callModel(session, env, organizationId, params);
+  if (selected.rows[0]?.active_model_provider !== 'desktop_codex') {
+    const manifest = await taskManifest(session, organizationId, taskId, { ...params, phase });
+    const started = Date.now();
+    const response = await callModel(session, env, organizationId, params);
+    return { ...response, executionManifest: { ...manifest, model: response.routing?.model ?? 'unknown', model_provider: response.routing?.providerId ?? 'unknown', ...response.usage, inference_duration_ms: Date.now() - started } };
+  }
   // Invocation deadlines change on resume; the semantic request does not.
   const request = { ...params };
   delete request.timeout_ms;
   const key = `${step}:${phase}:${await payloadHash(request)}`;
-  await desktopQuery(session, `INSERT INTO desktop_model_jobs(id,organization_id,task_id,request_key,request_json)
-    VALUES($1,$2,$3,$4,$5) ON CONFLICT(organization_id,task_id,request_key) DO NOTHING`,
-  [crypto.randomUUID(), organizationId, taskId, key, JSON.stringify(request)]);
+  const manifest = await taskManifest(session, organizationId, taskId, { ...params, phase, model: 'pending', provider: 'desktop_codex' });
+  await desktopQuery(session, `INSERT INTO desktop_model_jobs(id,organization_id,task_id,request_key,request_json,execution_manifest_json)
+    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(organization_id,task_id,request_key) DO NOTHING`,
+  [crypto.randomUUID(), organizationId, taskId, key, JSON.stringify(request), JSON.stringify(manifest)]);
   const result = await desktopQuery(session, `SELECT response_json FROM desktop_model_jobs
     WHERE organization_id=$1 AND task_id=$2 AND request_key=$3 AND status='completed'`, [organizationId, taskId, key]);
   if (result.rows[0]?.response_json) return result.rows[0].response_json as MessagesResponse;
