@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
+import type { MaintenanceOutcome } from '@/lib/agents/maintenance-receipt';
 import { AgentApprovalPrompt, type ApprovalDecision } from './agent-approval-prompt';
 import { AvalActivityTrace } from './agent-ui/activity';
 import type { SafeStep, VisualActivity } from '@/lib/ask-aval/visual-activity';
@@ -8,10 +9,11 @@ import { visualActivity } from '@/lib/ask-aval/visual-activity';
 import { approvalsForChat } from '@/lib/agents/chat-task-scope';
 
 type Approval = {id:string;taskId:string;tool:string;evidence?:{review?:Record<string,unknown>;arguments?:Record<string,unknown>;reason?:string};requiredApprovals:number;approvalsReceived:number};
-type Task = {id:string;status:string;goal:string;error?:string;result?:{headline?:string;narrative?:string};plan?:{nodes:{id:string;goal:string;status:string}[]};createdAt?:string|number;finishedAt?:string|number|null;trace?:(SafeStep & {sequence:number})[]};
+type Task = {id:string;status:string;goal:string;error?:string;maintenanceOutcome?:MaintenanceOutcome|null;result?:{headline?:string;narrative?:string};plan?:{nodes:{id:string;goal:string;status:string}[]};createdAt?:string|number;finishedAt?:string|number|null;trace?:(SafeStep & {sequence:number})[]};
 const DONE = new Set(['COMPLETED','FAILED','CANCELLED','SUPERSEDED']);
 export function AgentTaskConversation({taskId,onActivity}: {taskId:string;onActivity?:(id:string,activity:VisualActivity,status:string)=>void}) {
   const t = useTranslations('AgentExperience');
+  const es = useLocale() === 'es-mx';
   const [task,setTask] = useState<Task|null>(null);
   const [approvals,setApprovals] = useState<Approval[]>([]);
   const [error,setError] = useState('');
@@ -52,6 +54,10 @@ export function AgentTaskConversation({taskId,onActivity}: {taskId:string;onActi
     {task?.plan?.nodes?.length ? <details className="aval-task-plan"><summary>{t('windowTitle')}</summary>{task.plan.nodes.map(node=><p key={node.id}>{node.goal} · {t.has(`statuses.${node.status}`)?t(`statuses.${node.status}`):node.status}</p>)}</details> : null}
     {approvals.map(approval=><div key={approval.id}>{approval.evidence?.reason&&<p className="agent-window-message">{approval.evidence.reason}</p>}<AgentApprovalPrompt tool={approval.tool} review={approval.evidence?.review??approval.evidence?.arguments??{}} disabled={busy} onDecision={decision=>void decide(approval,decision)}/>{approval.requiredApprovals>1&&<p>{t('approvalCount',{received:approval.approvalsReceived,required:approval.requiredApprovals})}</p>}</div>)}
     {task?.result?.headline&&<p className="agent-window-message">{task.result.headline}</p>}
+    {task?.maintenanceOutcome && <div role="status" className="agent-window-message">
+      <p>{task.maintenanceOutcome.actionState === 'executed' ? (task.maintenanceOutcome.verificationState === 'verified' ? (es ? 'Orden interna creada. La reparación sigue abierta.' : 'Internal work order created. The repair remains open.') : (es ? 'Orden creada: requiere revisión.' : 'Created—review required.')) : task.maintenanceOutcome.actionState === 'declined' ? (es ? 'Acción rechazada o vencida. Requiere decisión humana.' : 'Action declined or expired. Human decision required.') : (es ? 'Solicitud de mantenimiento pendiente.' : 'Maintenance request pending.')}</p>
+      {task.maintenanceOutcome.ownerUserId && <p>{es ? 'Responsable' : 'Responsible user'}: {task.maintenanceOutcome.ownerUserId} · {es ? 'Revisión requerida ahora' : 'Review due now'}</p>}
+    </div>}
     {task?.result?.narrative&&<p>{task.result.narrative}</p>}
     {task?.error&&<p role="alert" className="onboarding-error">{task.error}</p>}
   </div>;

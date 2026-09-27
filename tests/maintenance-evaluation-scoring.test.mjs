@@ -16,3 +16,10 @@ test('all required checks must pass for a clean completed task', () => {
   assert.equal(scoreMaintenanceCase({ mode: 'live_subscription', task_status: 'COMPLETED', assertions: { exact_work_order_count: false } }).status, 'failed');
   assert.equal(scoreMaintenanceCase({ mode: 'live_subscription', task_status: 'COMPLETED', assertions: { exact_work_order_count: true } }).status, 'passed');
 });
+test('unreached checks stay distinct from wrong effects and cannot override the expected outcome', () => {
+  const result = scoreMaintenanceCase({mode:'live_subscription',task_status:'WAITING_FOR_HUMAN',assertions:{expected_outcome:false,correct_priority:'not_reached',authorization:true}});
+  assert.equal(result.status,'failed');
+  assert.equal(result.assertions.correct_priority,'not_reached');
+  const rejected = scoreMaintenanceCase({mode:'live_subscription',task_status:'WAITING_FOR_HUMAN',assertions:{expected_outcome:true,correct_priority:'not_reached',authorization:true}});
+  assert.equal(rejected.status,'passed');
+});

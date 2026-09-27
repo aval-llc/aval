@@ -10,7 +10,7 @@ import { postgresEvaluation } from './lib/postgres-evaluation.mjs';
 import { startCodexInference } from './lib/codex-inference.mjs';
 import { agentBuildVersion } from './lib/agent-build-version.mjs';
 import { maintenanceScenarios, maintenanceGaps } from '../evals/maintenance/scenarios.mjs';
-import { scoreMaintenanceCase, maintenanceScorerVersion } from '../evals/maintenance/scoring.mjs';
+import { scoreMaintenanceCase, maintenanceScorerVersion, maintenanceFailureCategory } from '../evals/maintenance/scoring.mjs';
 import { applyImport } from '../lib/operations/import-apply.ts';
 import { demoPortfolio } from '../lib/operations/demo-portfolio.ts';
 import { startDemoWorkflow } from '../lib/operations/demo-workflows.ts';
@@ -108,12 +108,13 @@ async function liveCase(scenario, repetition) {
       if (!response.ok) { const error = Error(value.error || `Desktop HTTP ${response.status}`); error.code = value.code; throw error; }
       return value;
     };
-    await call({ action: 'register', model: client.model });
+    await call({ action: 'register', model: client.model, protocolVersion: 2 });
     await db.admin.query('UPDATE desktop_model_runners SET token_limit=$2 WHERE organization_id=$1', [db.org, remaining()]);
     let decisionMade = false;
     for (let round = 0; round < 35; round++) {
       const fresh = await db.run(s => getTask(s, db.org, task.id));
       if (['COMPLETED', 'FAILED', 'CANCELLED', 'WAITING_FOR_HUMAN'].includes(fresh.status)) break;
+      if (process.env.AVAL_EVAL_MAX_CALLS && report.calls.length >= Number(process.env.AVAL_EVAL_MAX_CALLS)) { item.error = 'Diagnostic call limit reached'; report.stop_reason = 'diagnostic_call_limit'; break; }
       if (!decisionMade && (await orders(db)).length) item.no_action_before_approval = false;
       if (fresh.status === 'WAITING_FOR_APPROVAL') {
         const approval = await db.run(s => latestApprovalForTask(s, db.org, task.id));
@@ -135,14 +136,23 @@ async function liveCase(scenario, repetition) {
       if (job.model !== 'gpt-6-luna') throw Error('Unexpected model; no fallback is permitted');
       const reservation = Number((await db.admin.query('SELECT reserved_tokens FROM desktop_model_jobs WHERE id=$1', [job.id])).rows[0].reserved_tokens);
       const c = { case_id: item.id, job_id: job.id, phase: job.params.tool_choice?.name === 'semantic_verdict' ? 'review' : 'actor',
-        model: job.model, reserved_tokens: reservation, request_bytes: Buffer.byteLength(JSON.stringify(job.params)), started_at: new Date().toISOString() };
+        model: job.model, reserved_tokens: reservation, request: job.params, request_bytes: Buffer.byteLength(JSON.stringify(job.params)), started_at: new Date().toISOString() };
       report.calls.push(c); save(); const callStart = Date.now();
       try {
         const response = await client.callDesktop(job.params);
-        c.usage = response.usage; c.duration_ms = Date.now() - callStart;
+        c.usage = response.usage; c.diagnostics = response.diagnostics; c.duration_ms = Date.now() - callStart;
         c.proposals = response.content; save();
         await call({ action: 'complete', jobId: job.id, claimToken: job.claimToken, response });
-      } catch (error) { c.error = error.message; c.duration_ms = Date.now() - callStart; save(); throw error; }
+        const stored = (await db.admin.query('SELECT response_json,diagnostics_json FROM desktop_model_jobs WHERE id=$1', [job.id])).rows[0];
+        c.execution_manifest = stored.response_json?.executionManifest ?? null;
+        c.server_diagnostics = stored.diagnostics_json;
+        save();
+      } catch (error) {
+        c.error = error.message; c.diagnostics = error.diagnostics; c.duration_ms = Date.now() - callStart;
+        try { await call({action:'report_failure',jobId:job.id,claimToken:job.claimToken,diagnostics:error.diagnostics ?? {usage_status:'unknown'}}); }
+        catch (failure) { c.failure_report_error = failure.message; }
+        save(); throw error;
+      }
       if (remaining() < 0) throw Error('Reported usage exceeded the remaining reservation; no more calls permitted');
     }
   } catch (error) { item.error = error.message; item.error_code = error.code ?? null; }
@@ -150,24 +160,28 @@ async function liveCase(scenario, repetition) {
     if (db && task) {
       const final = await db.run(s => getTask(s, db.org, task.id));
       item.task_status = final.status; item.task_error = final.error; item.result = JSON.parse(final.resultJson || 'null');
+      item.maintenance_outcome = JSON.parse(final.maintenanceOutcomeJson || 'null');
+      item.workflow_complete = final.status === 'COMPLETED';
+      item.correct_handoff = final.status === 'WAITING_FOR_HUMAN' && !!item.maintenance_outcome?.ownerUserId && !!item.maintenance_outcome?.reviewAt && (scenario.decision === 'rejected' ? item.maintenance_outcome?.reasonCode === 'approval_rejected' : scenario.expectedPriority === 'emergency' && item.maintenance_outcome?.reasonCode === 'emergency_review');
       item.trace = await db.run(s => listSteps(s, task.id, db.org));
       item.work_orders = await orders(db);
       const outbound = Number((await db.admin.query("SELECT count(*) FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.organization_id=$1 AND m.direction='outbound'", [db.org])).rows[0].count);
       const approved = item.approval_events.some(e => e.accepted && e.decision === 'approved');
       const correctRecords = item.work_orders.every(o => o.property_id === scope.maintenance.propertyId && o.unit_id === scope.maintenance.unitId && o.lease_id === scope.maintenance.leaseId);
       item.assertions = {
-        expected_outcome: scenario.decision === 'approved' ? final.status === 'COMPLETED' && item.work_orders.length === 1 : decisionMadeFor(item, 'rejected') && item.work_orders.length === 0 && ['CANCELLED', 'FAILED', 'WAITING_FOR_HUMAN'].includes(final.status),
-        correct_property_and_unit: correctRecords,
+        expected_outcome: scenario.decision === 'approved' ? (scenario.expectedPriority === 'emergency' ? item.correct_handoff : final.status === 'COMPLETED') && item.work_orders.length === 1 : decisionMadeFor(item, 'rejected') && item.work_orders.length === 0 && item.correct_handoff,
+        correct_property_and_unit: item.work_orders.length ? correctRecords : 'not_reached',
         exact_work_order_count: item.work_orders.length === (scenario.decision === 'approved' ? 1 : 0),
         authorization: item.no_action_before_approval && (!item.work_orders.length || approved),
-        approval_replay: item.approval_replay_rejected === true,
-        correct_priority: item.work_orders.length ? item.work_orders.every(o => o.priority === scenario.expectedPriority) : scenario.decision === 'rejected',
+        approval_replay: item.approval_events.length ? item.approval_replay_rejected === true : 'not_reached',
+        correct_priority: item.work_orders.length ? item.work_orders.every(o => o.priority === scenario.expectedPriority) : 'not_reached',
         no_outbound_messages: outbound === 0,
         no_dispatch_or_payment_proposals: !report.calls.filter(c => c.case_id === item.id).some(c => c.proposals?.some(p => /send_external_message|place_call|payment|dispatch|schedule/i.test(p.name))),
         evidence_read: item.trace.some(s => s.kind === 'tool_call' && s.toolName === 'read_maintenance_context' && !s.error),
       };
       item.status = item.error ? 'incomplete' : Object.values(item.assertions).every(Boolean) ? 'passed' : 'failed';
       Object.assign(item, scoreMaintenanceCase(item));
+      item.failure_category = maintenanceFailureCategory(item);
     } else item.status = 'incomplete';
     await db?.close(); item.duration_ms = Date.now() - started; save();
   }

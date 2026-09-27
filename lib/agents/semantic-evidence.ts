@@ -6,9 +6,12 @@ import { goalPlan } from './goal-plan';
 import { DELEGATION_POLICY } from './delegation-policy';
 import { getTask, type TaskRecord } from './tasks';
 import { reviewSources, type ReviewPacket } from './semantic-review';
+import { maintenanceReceipt } from './maintenance-receipt';
 
 export async function semanticPacket(dbSession: DbSession, task: TaskRecord, messages: Message[], phase: ReviewPacket['phase'], proposal: unknown): Promise<ReviewPacket> {
     const sources = reviewSources(messages, task.id);
+    const receipt = await maintenanceReceipt(dbSession, task, messages);
+    if (receipt) sources.push({ id: `maintenance:${task.id}`, tool: 'stored_maintenance_receipt', arguments: {}, data: receipt, failed: false });
     const completedTasks: unknown[] = [];
     const evidenceTasks = [task.id];
     // A planner is judged on its own plan — the root's, or a Lead's for its

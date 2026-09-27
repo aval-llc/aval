@@ -24,7 +24,9 @@ export function DesktopAgentRunner({ desktop }: { desktop: ReturnType<typeof use
       const state = await response.json() as { organizationId?: string; error?: string };
       if (!response.ok || !state.organizationId) throw Error(state.error || 'Workspace owner required');
       connection.current = { organizationId: state.organizationId, runnerId: crypto.randomUUID() };
-      await call({ action: 'register', model: 'gpt-6-luna' });
+      const capabilities = await bridge.infer({ action: 'capabilities', model: 'gpt-6-luna' }) as { protocolVersion?: number };
+      if (capabilities.protocolVersion !== 2) throw Error(es ? 'Actualiza Aval Desktop para continuar.' : 'Update Aval Desktop to continue.');
+      await call({ action: 'register', model: 'gpt-6-luna', protocolVersion: capabilities.protocolVersion });
       setNotice(''); setRunning(true);
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Desktop unavailable'); }
   };
@@ -38,7 +40,12 @@ export function DesktopAgentRunner({ desktop }: { desktop: ReturnType<typeof use
         const data = await response.json() as { error?: string; job?: { id: string; claimToken: string; model: string; params: unknown } };
         if (!response.ok) throw Error(data.error || 'Desktop disconnected');
         if (data.job && !stopped) {
-          const result = await bridge.infer({ model: data.job.model, params: data.job.params });
+          let result;
+          try { result = await bridge.infer({ model: data.job.model, params: data.job.params }); }
+          catch (error) {
+            await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...connection.current, action: 'report_failure', jobId: data.job.id, claimToken: data.job.claimToken, diagnostics: { protocol_version: 2, usage_status: 'unknown' } }) });
+            throw error;
+          }
           const saved = await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...connection.current, action: 'complete', jobId: data.job.id, claimToken: data.job.claimToken, response: result }) });
           if (!saved.ok) throw Error('Could not save the model response; reconnect Desktop');
         }

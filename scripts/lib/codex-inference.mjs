@@ -79,7 +79,7 @@ export async function startCodexInference() {
     rpc = new bridge.JsonLineRpc(child.stdout, child.stdin);
     child.on('error', error => rpc.close(error));
     rpc.on('request', request => rpc.respondError(request.id, -32601, 'Evaluation exposes no execution capabilities.'));
-    await rpc.request('initialize', { clientInfo: { name: 'aval_live_validation', version: '1.0.0' }, capabilities: null });
+    rpc.serverInfo = await rpc.request('initialize', { clientInfo: { name: 'aval_live_validation', version: '1.0.0' }, capabilities: null });
     rpc.notify('initialized');
     const account = await rpc.request('account/read', { refreshToken: false });
     if (account.account?.type !== 'chatgpt') throw Error('Sign in to Codex with ChatGPT before this evaluation.');

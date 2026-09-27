@@ -50,7 +50,7 @@ export interface DesktopCodexBridge {
   setActive(active: boolean): Promise<DesktopCodexState>;
   setModel(modelId: string): Promise<DesktopCodexState>;
   ask<T>(payload: DesktopAskPayload): Promise<T>;
-  infer(payload: { model: string; params: unknown }): Promise<unknown>;
+  infer(payload: { model: string; params?: unknown; action?: 'capabilities' }): Promise<unknown>;
   cancelTurn(conversationId: string): Promise<null>;
   onEvent(listener: (event: { type: "state"; state: DesktopCodexState } | { type: "delta"; requestId: string; delta: string }) => void): () => void;
 }
