@@ -24,6 +24,8 @@ source = source
     'import { bigint, boolean, check, date, doublePrecision, foreignKey, index, integer, numeric, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";\nimport { jsonText } from "./json-text.ts";',
   )
   .replaceAll("sqliteTable(", "pgTable(")
+  // Post-cutover maintenance outcomes remain absent from historical D1.
+  .replace('    checkJson: text("check_json")', '    maintenanceOutcomeJson: text("maintenance_outcome_json"),\n    checkJson: text("check_json")')
   // PostgreSQL-only execution manifests; do not rewrite the historical D1 inventory.
   .replace('    modelName: text("model_name"),', '    modelName: text("model_name"),\n    executionManifestJson: text("execution_manifest_json"),')
   // Post-cutover draft ownership is defined by 20260920000200.
