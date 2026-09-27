@@ -388,7 +388,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       inputTokens += response.usage.input_tokens;
       outputTokens += response.usage.output_tokens;
       await frame({ kind: 'semantic_response', ...scope, response });
-      await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'model_call', toolName: 'semantic_verdict', modelProvider: response.routing?.providerId, modelName: response.routing?.model, resultDigest: await digestPayload(response.content) });
+      await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'model_call', toolName: 'semantic_verdict', executionManifest: response.executionManifest, modelProvider: response.routing?.providerId, modelName: response.routing?.model, resultDigest: await digestPayload(response.content) });
       audit.push({ kind: 'model_call', label: 'semantic_verdict', payloadDigest: await digestPayload(response.content), count: stepIndex });
       const current = await getTask(dbSession, organizationId, taskId);
       if (!current || current.cancelRequested || current.leaseOwner !== workerId || current.leaseGeneration !== task!.leaseGeneration || (current.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || Date.now() >= Math.min(deadline, current.deadlineAt?.getTime() ?? 0) || task!.tokensUsed + inputTokens + outputTokens > current.maxTokens)
@@ -760,7 +760,8 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       if(Date.now()>=(fresh.deadlineAt?.getTime()??Infinity))return finish("FAILED",{error:"The task reached its total wall-clock limit before its proposed actions could run."});
 
       await persistStep(dbSession, {
-        taskId, organizationId, stepIndex, kind: "model_call",
+        taskId, organizationId, stepIndex, kind: replaying ? "model_response_replayed" : "model_call",
+        executionManifest: res.executionManifest,
         modelProvider: res.routing?.providerId,
         modelName: res.routing?.model,
         resultDigest: await digestPayload(res.content),

@@ -59,6 +59,8 @@ export const POST = withApiSession(async (session, request) => {
       if (job.status === 'completed') return Response.json({ accepted: true, replay: true });
       if (job.status !== 'claimed' || new Date(String(job.lease_until)).getTime() <= Date.now()) return Response.json({ error: 'Inference claim expired' }, { status: 409 });
       const response = validateDesktopResponse(body.response, job.request_json as Parameters<typeof validateDesktopResponse>[1], String(job.model));
+      // Never accept client-supplied provenance; retain the queued server snapshot.
+      if (job.execution_manifest_json) response.executionManifest = { ...job.execution_manifest_json as NonNullable<typeof response.executionManifest>, model: String(job.model), model_provider: 'desktop_codex', ...response.usage };
       const task = (await query(session, 'SELECT status,cancel_requested FROM agent_tasks WHERE id=$1 AND organization_id=$2 FOR UPDATE', [job.task_id, org])).rows[0];
       const cancelled = !task || task.cancel_requested || task.status !== 'WAITING_FOR_MODEL';
       await query(session, `UPDATE desktop_model_jobs SET status=$2,response_json=$3,completed_at=now(),lease_until=NULL WHERE id=$1`, [job.id, cancelled ? 'cancelled' : 'completed', JSON.stringify(response)]);

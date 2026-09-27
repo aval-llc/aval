@@ -24,6 +24,8 @@ source = source
     'import { bigint, boolean, check, date, doublePrecision, foreignKey, index, integer, numeric, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";\nimport { jsonText } from "./json-text.ts";',
   )
   .replaceAll("sqliteTable(", "pgTable(")
+  // PostgreSQL-only execution manifests; do not rewrite the historical D1 inventory.
+  .replace('    modelName: text("model_name"),', '    modelName: text("model_name"),\n    executionManifestJson: text("execution_manifest_json"),')
   // Post-cutover draft ownership is defined by 20260920000200.
   .replace('    moduleLabel: text("module_label"),', '    moduleLabel: text("module_label"),\n    personaId: text("persona_id"),')
   .replace(/integer\((['"][^'"]+['"])\s*,\s*\{\s*mode:\s*['"]timestamp_ms['"]\s*\}\)/g,

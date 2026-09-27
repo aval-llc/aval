@@ -1317,6 +1317,7 @@ export const agentTaskSteps = pgTable(
     // an org changes providers after a task has already run.
     modelProvider: text("model_provider"),
     modelName: text("model_name"),
+    executionManifestJson: jsonText("execution_manifest_json"),
     toolName: text("tool_name"),
     // allow | deny | require_approval — the policy engine's verdict, recorded
     // whether or not the tool then ran.

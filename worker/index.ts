@@ -65,6 +65,9 @@ const worker = {
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Observability cannot interrupt or starve the operational sweep.
+    ctx.waitUntil(import('@/lib/observability/braintrust-export').then(({ exportBraintrustTraces }) =>
+      exportBraintrustTraces(env)).catch(() => console.error('braintrust_export_failed')));
     // Request waitUntil gives new tasks a fast start; this minute sweep is the
     // durable continuation and crash-recovery path. The sweep resolves tenant
     // work with the system role and opens one RLS-scoped session per tenant.

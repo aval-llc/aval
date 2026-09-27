@@ -1,4 +1,6 @@
 import { parseTaskCheck, type TaskCheck } from './checks';
+import { taskManifest } from './manifest-storage';
+import type { ExecutionManifest } from './execution-manifest';
 /**
  * Durable task state for the agent runtime (§13, §14 of the production
  * readiness guide).
@@ -446,6 +448,7 @@ export async function resumableApprovalTasks(dbSession: DbSession, limit = 10): 
 /* ── steps ───────────────────────────────────────────────────────────────── */
 
 export interface StepInput {
+  executionManifest?: ExecutionManifest;
   taskId: string;
   organizationId: string;
   stepIndex: number;
@@ -497,6 +500,7 @@ export async function appendStep(dbSession: DbSession, step: StepInput): Promise
     kind: step.kind,
     modelProvider: step.modelProvider ?? null,
     modelName: step.modelName ?? null,
+    executionManifestJson: JSON.stringify(step.executionManifest ?? await taskManifest(dbSession, step.organizationId, step.taskId, { phase: step.kind, model: step.modelName, provider: step.modelProvider })),
     toolName: step.toolName ?? null,
     policyEffect: step.policyEffect ?? null,
     denyCode: step.denyCode ?? null,
