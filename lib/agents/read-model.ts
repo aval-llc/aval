@@ -47,6 +47,7 @@ function waitingReason(state: TaskState, error: string | null): string | null {
     case "WAITING_FOR_HUMAN": return error ?? "a person must take the next step";
     case "PENDING_VERIFICATION": return "an external effect is not yet proven";
     case "WAITING_FOR_TOOL": return "a tool has not returned";
+    case "WAITING_FOR_MODEL": return "Aval Desktop must return a model response";
     default: return null;
   }
 }

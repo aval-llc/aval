@@ -5,6 +5,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import bridge from '../../desktop/codex-app-server.cjs';
+import desktopInference from '../../desktop/inference.cjs';
 
 // Fixed-shape tools can use native structured output instead of generating a
 // second, escaped JSON document inside a string (especially costly for reviews).
@@ -138,6 +139,6 @@ export async function startCodexInference() {
       };
       } catch (error) { error.diagnostics = diagnostics(); throw error; }
     };
-    return { model, call, close };
+    return { model, call, callDesktop: params => desktopInference.infer(rpc, workspace, model, params), close };
   } catch (error) { await close(); throw error; }
 }

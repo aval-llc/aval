@@ -12,6 +12,7 @@ export const TASK_STATES = [
   "QUEUED",
   "RUNNING",
   "WAITING_FOR_TOOL",
+  "WAITING_FOR_MODEL",
   "WAITING_FOR_APPROVAL",
   // An external effect was accepted but is not yet proven. AVAL_AGENT.md §7.5:
   // "If an action is accepted but not confirmed, the correct state is
@@ -124,6 +125,7 @@ export function claimFromState(status: TaskState): TaskState {
  * intact.
  */
 export const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
+  WAITING_FOR_MODEL: ["RUNNING", "QUEUED", "FAILED", "CANCELLED"],
   QUEUED: ["RUNNING", "CANCELLED", "FAILED", "SUPERSEDED"],
   RUNNING: ["WAITING_FOR_TOOL", "WAITING_FOR_APPROVAL", "PENDING_VERIFICATION", "WAITING_FOR_HUMAN", "WAITING_FOR_PROVIDER", "WAITING_FOR_RESIDENT", "WAITING_FOR_VENDOR", "WAITING_FOR_DOCUMENT", "WAITING_FOR_OWNER", "WAITING_FOR_APPLICANT", "WAITING_FOR_AGENT", "SCHEDULED", "BLOCKED", "COMPLETED", "FAILED", "CANCELLED", "QUEUED"],
   WAITING_FOR_TOOL: ["RUNNING", "FAILED", "CANCELLED", "SUPERSEDED"],
@@ -157,6 +159,7 @@ export const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
 };
 
 export function canTransition(from: TaskState, to: TaskState): boolean {
+  if (from === 'RUNNING' && to === 'WAITING_FOR_MODEL') return true;
   return TRANSITIONS[from].includes(to);
 }
 
