@@ -51,7 +51,7 @@ const EMPTY: SeatState = {
   canEdit: false,
 };
 
-export function PmsSeat() {
+export function PmsSeat({ initialProvider = '' }: { initialProvider?: string } = {}) {
   const t = useTranslations("PmsSeat");
   const [state, setState] = useState<SeatState>(EMPTY);
   const [loaded, setLoaded] = useState(false);
@@ -59,7 +59,7 @@ export function PmsSeat() {
   const [busy, setBusy] = useState("");
   const [slug, setSlug] = useState("");
   const [domain, setDomain] = useState("");
-  const [provider, setProvider] = useState("");
+  const [provider, setProvider] = useState(initialProvider);
 
   // Fetched inline in the effect rather than through the memoized helper below:
   // the helper form reads to the linter as setState during the effect body, and

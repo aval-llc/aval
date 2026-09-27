@@ -14,7 +14,7 @@ import { isSubscriptionProviderId } from "@/lib/integrations/subscription-oauth"
 // Keep blocked Yardi entries out of the customer-facing catalog until their
 // partner access and adapter are ready. The provider definitions and server
 // side blocker remain in place for future implementation.
-const HIDDEN_CATALOG_PROVIDERS = new Set(["yardi", "yardi_breeze", "yardi_kube"]);
+const HIDDEN_CATALOG_PROVIDERS = new Set(["yardi_breeze", "yardi_kube"]);
 const visibleIntegrationCatalog = integrationCatalog.filter((provider) => !HIDDEN_CATALOG_PROVIDERS.has(provider.id));
 
 async function GETWithSession(dbSession: DbSession, request: Request) {

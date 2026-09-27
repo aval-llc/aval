@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl";
 import { CheckCircle, Search, ShieldCheck } from "iconoir-react";
 import type { Provider } from "./connection-dialog";
 import { BrandMark } from "./brand-mark";
+import { DemoPortfolioPanel } from './demo-portfolio-panel';
 
 /** Not a category — the tab that answers "what have we already connected?". */
 const CONNECTED = "#connected";
@@ -28,6 +29,7 @@ type RowState = "connected" | "attention" | "blocked" | "available";
  * button, so every row ends in the next action rather than in a status.
  */
 function rowState(provider: Provider): RowState {
+  if (['appfolio','yardi'].includes(provider.id)) return 'available';
   // A blocker is Aval's side of the connection being unfinished; a provider
   // that is not configured is the same problem seen from the other end.
   // Neither is something pressing "connect" can solve, so both say so.
@@ -94,6 +96,7 @@ export function IntegrationsCatalog({
           {t("connectedCount", { count: connected })}
         </span>
       </header>
+      <DemoPortfolioPanel />
 
       {/* Built and testable, but not something a customer should meet here
           yet. See `internal-preview.ts`. */}

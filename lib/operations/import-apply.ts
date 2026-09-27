@@ -77,7 +77,7 @@ export interface ImportResult {
 const date = (value: string | null | undefined): Date | null => (value ? new Date(value) : null);
 
 /** External ids this workspace already holds, per entity, so the planner can resolve references against the database as well as the batch. */
-async function loadKnownExternalIds(dbSession: DbSession, organizationId: string, sourceProvider: string) {
+export async function loadKnownExternalIds(dbSession: DbSession, organizationId: string, sourceProvider: string) {
   const db = dbSession.db;
   const scope = <T extends { organizationId: unknown; sourceProvider: unknown; externalId: unknown }>(table: T) =>
     and(

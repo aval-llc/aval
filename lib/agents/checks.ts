@@ -4,10 +4,12 @@ import { agentChecks, communicationDeliveries, learnedPreferences, agentPlanNode
 import { implementedTools } from './registry';
 import type { TaskRecord } from './tasks';
 import type { Message } from '@/lib/ask-aval/model-types';
+import { maintenanceContext } from '@/lib/communications/maintenance-intake';
+import { digestPayload } from '@/lib/audit/chain';
 export type TaskCheck = {
     kind: 'evidence';
     tools: string[];
-} | {
+} | { kind: 'internal_maintenance'; conversationId: string; messageId: string } | {
     kind: 'delivery';
     operation: 'message' | 'call' | 'listing';
     status: 'accepted' | 'delivered';
@@ -54,6 +56,8 @@ export function parseTaskCheck(value: unknown): TaskCheck {
     if (!value || typeof value !== 'object' || Array.isArray(value))
         throw Error('A machine-checkable completion condition is required.');
     const c = value as Record<string, unknown>;
+    if(c.kind==='internal_maintenance' && typeof c.conversationId==='string' && c.conversationId.length>0 && typeof c.messageId==='string' && c.messageId.length>0)
+        return {kind:'internal_maintenance',conversationId:c.conversationId,messageId:c.messageId};
     if (c.kind === 'plan')
         return { kind: 'plan' };
     if (c.kind === 'evidence' && Array.isArray(c.tools) && c.tools.length > 0 && c.tools.length <= 4 && c.tools.every(t => typeof t === 'string' && EVIDENCE_TOOL_NAMES.includes(t)))
@@ -127,6 +131,12 @@ export async function checkTask(dbSession: DbSession, task: TaskRecord, messages
         const current = [...latest.values()];
         if (!current.length || current.some(n => n.status !== 'COMPLETED'))
             problems.push('The goal needs a persisted plan whose required tasks all pass their independent checks.');
+    }
+    if(check?.kind==='internal_maintenance') {
+        const context=await maintenanceContext(dbSession,task.organizationId,check.conversationId,check.messageId);
+        const externalId=`inbound_${await digestPayload({org:task.organizationId,conversationId:check.conversationId,messageId:check.messageId})}`;
+        const result=await dbSession.db.execute(sql`SELECT id FROM work_orders WHERE organization_id=${task.organizationId} AND source_provider='manual' AND external_id=${externalId} AND property_id=${context.match?.propertyId??''} AND unit_id=${context.match?.unitId??''}`);
+        if(!context.match||result.rows.length!==1)problems.push('The approved internal work order does not exist for this matched request.');
     }
     const semantic = !problems.length && review ? await review() : undefined;
     if (semantic) problems.push(...semantic.problems);

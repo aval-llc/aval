@@ -31,6 +31,7 @@ import { canTransition, LEASE_MS, SCHEDULED_WAKE_ONLY_STATES, TERMINAL_STATES, t
 import { DEFAULT_MAX_STEPS, DEFAULT_MAX_TOKENS } from "./task-state.ts";
 import { retryJitterMs, taskRetryDelayMs } from "./retry-policy.ts";
 import { DELEGATION_POLICY } from "./delegation-policy.ts";
+import { payloadHash } from './canonical-payload';
 
 export {
   TASK_STATES,
@@ -46,7 +47,7 @@ export {
 export interface NewTask {
   id?: string;
   executionScope?:
-    | { source: "inbound"; conversationId: string; messageId?: string; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } }
+    | { source: "inbound"; conversationId: string; messageId?: string; draftOnly?: boolean; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } }
     // Work created by `lib/agents/intake.ts` from an authorized external
     // event. It carries the provenance the coordinator needs and the identity
     // the intake dedupe is keyed on, so a redelivery reaches the same row.
@@ -157,7 +158,7 @@ export async function createTask(dbSession: DbSession, input: NewTask): Promise<
   };
   await dbSession.db.insert(agentTasks).values(row).onConflictDoNothing();
   const stored=await getTask(dbSession, input.organizationId,row.id);
-  if(!stored||stored.userId!==input.userId||stored.goal!==row.goal||stored.agentId!==row.agentId||stored.checkJson!==row.checkJson||stored.parentTaskId!==row.parentTaskId)throw Error("Task id already belongs to a different request.");
+  if(!stored||stored.userId!==input.userId||stored.goal!==row.goal||stored.agentId!==row.agentId||await payloadHash(JSON.parse(stored.checkJson!))!==await payloadHash(check)||stored.parentTaskId!==row.parentTaskId)throw Error("Task id already belongs to a different request.");
   return stored;
 }
 

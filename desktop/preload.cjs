@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("avalDesktop", Object.freeze({
   setActive: (active) => invoke("set-active", { active: active === true }),
   setModel: (modelId) => invoke("set-model", { modelId }),
   ask: (payload) => invoke("ask", payload),
+  infer: (payload) => invoke("infer", payload),
   cancelTurn: (conversationId) => invoke("cancel-turn", { conversationId }),
   /**
    * Provider operations for the customer-authorized browser path.

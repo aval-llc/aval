@@ -1,6 +1,7 @@
 "use client";
 
 import { SapConnectionDialog } from "./sap-connection-dialog";
+import { PmsConnectDialog } from './pms-connect-dialog';
 import { IntegrationSyncControls } from "./integration-sync-controls";
 import { connectionBlocker } from "@/lib/integrations/readiness";
 import { useState } from "react";
@@ -101,6 +102,7 @@ function QrPlaceholder() {
 }
 
 export function ConnectionDialog(props: { provider: Provider | null; onClose: () => void; onRefresh: () => void }) {
+  if (props.provider && ['appfolio','yardi'].includes(props.provider.id)) return <PmsConnectDialog key={props.provider.id} provider={props.provider} onClose={props.onClose} />;
   if (props.provider?.id === "sap_bydesign") return <SapConnectionDialog key={props.provider.id} provider={props.provider} onClose={props.onClose} onRefresh={props.onRefresh} />;
   return <StandardConnectionDialog {...props} />;
 }
