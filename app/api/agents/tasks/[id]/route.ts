@@ -3,6 +3,7 @@ import { and, eq, asc } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { agentChecks } from "@/db/postgres/schema";
 import { goalPlan } from "@/lib/agents/goal-plan";
+import { stopKind, workTitle } from "@/lib/agents/work-presentation";
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { serializeTraceStep } from "@/lib/agents/trace-view";
@@ -39,8 +40,9 @@ async function GETWithSession(dbSession: DbSession, request: Request, context: {
   return Response.json({
     id: task.id,
     agentId: task.agentId,
-    goal: task.goal,
+    goal: workTitle(task.goal),
     status: task.status,
+    stop: stopKind(task.status, task.error),
     steps: { used: task.stepCount, max: task.maxSteps },
     tokens: { used: task.tokensUsed, max: task.maxTokens },
     delegationDepth: task.delegationDepth,

@@ -1627,6 +1627,20 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 .agent-task-card[data-status="completed"] .agent-task-progress-bar { background: var(--viz-green); }
 .agent-task-card[data-status="failed"] .agent-task-progress-bar { background: var(--viz-red); }
 .agent-task-card[data-status="waiting_for_approval"] .agent-task-progress-bar { background: var(--viz-amber); }
+/* Settled work shows a full bar in its status colour; live work a quiet sweep.
+   Neither is a percentage: no step budget is progress. */
+.agent-task-progress-bar { width: 100%; }
+.agent-task-card:not([data-status="completed"]):not([data-status="failed"]):not([data-status="waiting_for_approval"]) .agent-task-progress:not(.is-live) .agent-task-progress-bar { background: var(--line); }
+.agent-task-progress.is-live { overflow: hidden; }
+.agent-task-progress.is-live .agent-task-progress-bar { width: 32%; animation: agent-task-sweep 1.6s ease-in-out infinite; }
+@keyframes agent-task-sweep { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+@media (prefers-reduced-motion: reduce) { .agent-task-progress.is-live .agent-task-progress-bar { animation: none; width: 100%; opacity: .45; } }
+.agent-task-stop { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--viz-red) 7%, var(--surface)); color: var(--ink); }
+.agent-task-stop svg { flex-shrink: 0; margin-top: 2px; color: var(--viz-red); }
+.agent-task-stop[data-kind="needs_person"], .agent-task-stop[data-kind="needs_setup"] { background: color-mix(in srgb, var(--viz-amber) 9%, var(--surface)); }
+.agent-task-stop[data-kind="needs_person"] svg, .agent-task-stop[data-kind="needs_setup"] svg { color: var(--viz-amber); }
+.agent-task-stop strong { display: block; font-size: 12px; font-weight: 600; }
+.agent-task-stop p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 
 /* ── the trace itself: steps group, rows hang off them ──────────────────── */
 .agent-task-detail { padding: 12px 13px 13px; border-top: 1px solid var(--line); background: var(--surface-soft); }

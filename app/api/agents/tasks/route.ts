@@ -6,6 +6,7 @@ import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { clientIp, isRateLimited, recordAttempt } from "@/lib/security/rate-limit";
 import { listTasks } from "@/lib/agents/tasks";
+import { stopKind, workTitle } from "@/lib/agents/work-presentation";
 
 /**
  * Durable agent tasks — the goal-shaped counterpart to /api/assistant/ask.
@@ -35,8 +36,10 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
       id: task.id,
       agentId: task.agentId,
       employeeId: task.employeeId,
-      goal: task.goal,
+      // The person's own words; what the system attached stays server-side.
+      goal: workTitle(task.goal),
       status: task.status,
+      stop: stopKind(task.status, task.error),
       steps: { used: task.stepCount, max: task.maxSteps },
       createdAt: task.createdAt,
       finishedAt: task.finishedAt,
