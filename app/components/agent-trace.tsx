@@ -71,7 +71,7 @@ interface TaskSummary {
   error: string | null;
 }
 
-type StopKind = "model_unavailable" | "unverified_figures" | "time_limit" | "too_large" | "needs_setup" | "needs_person" | "interrupted" | "unknown";
+type StopKind = "model_unavailable" | "unverified_figures" | "time_limit" | "too_large" | "needs_setup" | "needs_desktop" | "needs_person" | "interrupted" | "unknown";
 
 interface TraceEntry {
   sequence: number;

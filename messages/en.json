@@ -172,6 +172,8 @@
     "stop_too_large_body": "Aval stopped before finishing. Try asking for one specific thing at a time.",
     "stop_needs_setup_title": "Something needs to be set up first",
     "stop_needs_setup_body": "A connection or permission this needs isn't available. Check Setup, and this will continue once it's in place.",
+    "stop_needs_desktop_title": "Waiting for Aval Desktop",
+    "stop_needs_desktop_body": "This runs on a ChatGPT plan through Aval Desktop. It continues as soon as Aval Desktop is open with agents turned on.",
     "stop_needs_person_title": "Aval needs your decision",
     "stop_needs_person_body": "It couldn't continue on its own. Open it to see what's needed, then resume it.",
     "stop_interrupted_title": "This was interrupted",

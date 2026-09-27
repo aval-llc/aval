@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 import { stopKind, workTitle, type StopKind } from "../lib/agents/work-presentation.ts";
 
-const KINDS: StopKind[] = ["model_unavailable", "unverified_figures", "time_limit", "too_large", "needs_setup", "needs_person", "interrupted", "unknown"];
+const KINDS: StopKind[] = ["model_unavailable", "unverified_figures", "time_limit", "too_large", "needs_setup", "needs_desktop", "needs_person", "interrupted", "unknown"];
 
 test("a Work title is what the person asked, never the page context the system attached", () => {
   // The two titles a customer saw.
@@ -31,6 +31,7 @@ test("every stop the runtime records reads as a kind, not as its own words", () 
     ["FAILED", "", "unknown"],
     ["FAILED", "something nobody anticipated", "unknown"],
     ["WAITING_FOR_HUMAN", "Completion checks failed after bounded repair: …", "needs_person"],
+    ["WAITING_FOR_MODEL", null as unknown as string, "needs_desktop"],
     ["WAITING_FOR_PROVIDER", "Employee access is unavailable. Configure its connections and capabilities in Setup; this work will retry automatically.", "needs_setup"],
   ];
   for (const [status, error, kind] of recorded) assert.equal(stopKind(status, error), kind, error);

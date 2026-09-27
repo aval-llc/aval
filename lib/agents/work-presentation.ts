@@ -35,6 +35,8 @@ export type StopKind =
   | "too_large"
   /** A connection, permission or setting is missing. */
   | "needs_setup"
+  /** It runs on a ChatGPT plan through Aval Desktop, which has not answered yet (lib/agents/desktop-inference.ts). */
+  | "needs_desktop"
   /** It is waiting for a person's decision. */
   | "needs_person"
   /** The run was interrupted and did not record a result. */
@@ -53,6 +55,7 @@ const PATTERNS: readonly [RegExp, StopKind][] = [
 /** The kind of stop, for a task that stopped or is waiting on something outside it; null while it is working normally. */
 export function stopKind(status: string, error: string | null | undefined): StopKind | null {
   if (status === "WAITING_FOR_HUMAN") return "needs_person";
+  if (status === "WAITING_FOR_MODEL") return "needs_desktop";
   if (status === "WAITING_FOR_PROVIDER" || status === "BLOCKED") return "needs_setup";
   if (status !== "FAILED") return null;
   const text = error ?? "";

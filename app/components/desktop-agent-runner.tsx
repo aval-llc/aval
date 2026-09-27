@@ -35,8 +35,17 @@ export function DesktopAgentRunner({ desktop }: { desktop: ReturnType<typeof use
     const tick = async () => {
       try {
         const response = await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...connection.current, action: 'claim' }) });
-        const data = await response.json() as { error?: string; job?: { id: string; claimToken: string; model: string; params: unknown } };
+        const data = await response.json() as { error?: string; code?: string; resetsAt?: string; job?: { id: string; claimToken: string; model: string; params: unknown } };
+        // The day's allowance is used up: say when it resets and keep checking,
+        // so waiting work continues on its own rather than the runner stopping.
+        if (response.status === 429 && data.code === 'budget_exhausted') {
+          const at = data.resetsAt ? new Date(data.resetsAt).toLocaleTimeString(es ? 'es-MX' : 'en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+          setNotice(es ? `Se agotó la asignación de hoy para agentes con este plan. Se renueva a las ${at}.` : `Today's allowance for agents on this plan is used up. It resets at ${at}.`);
+          if (!stopped) timer = setTimeout(() => void tick(), 60_000);
+          return;
+        }
         if (!response.ok) throw Error(data.error || 'Desktop disconnected');
+        setNotice('');
         if (data.job && !stopped) {
           const result = await bridge.infer({ model: data.job.model, params: data.job.params });
           const saved = await fetch('/api/agents/desktop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...connection.current, action: 'complete', jobId: data.job.id, claimToken: data.job.claimToken, response: result }) });
@@ -47,7 +56,7 @@ export function DesktopAgentRunner({ desktop }: { desktop: ReturnType<typeof use
     };
     void tick();
     return () => { stopped = true; clearTimeout(timer); };
-  }, [running, bridge]);
+  }, [running, bridge, es]);
   return <span><button className="soft-button" onClick={() => { if (running) { void call({ action: 'pause' }).catch(() => {}); setRunning(false); } else void start(); }}>
     {running ? (es ? 'Agentes conectados · Luna' : 'Agents connected · Luna') : (es ? 'Activar agentes con Luna' : 'Enable agents with Luna')}
   </button>{notice && <span role="status">{notice}</span>}</span>;

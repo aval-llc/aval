@@ -7,6 +7,9 @@ import { runAgentWorkerBatch } from '@/lib/agents/worker';
 import { runtimeBindings } from '@/lib/runtime/bindings';
 import { getRequestExecutionContext } from 'vinext/shims/request-context';
 
+/** A runner's token allowance is per day, not for its life. */
+const ALLOWANCE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export const GET = withApiSession(async (session, request) => {
   const identity = await getApiIdentity(session, request);
   if (!identity || identity.role !== 'owner') return Response.json({ error: 'Owner access required' }, { status: 403 });
@@ -35,6 +38,13 @@ export const POST = withApiSession(async (session, request) => {
     await query(session, 'UPDATE desktop_model_runners SET heartbeat_at=now() WHERE organization_id=$1', [org]);
     if (body.action === 'claim') {
       if (!runner.enabled) return Response.json({ error:'Desktop runner paused' },{status:409});
+      // The allowance is per day (20260928000200_desktop_runner_daily_allowance.sql).
+      // A new window keeps only the reservations of claims that are still live.
+      if (new Date(String(runner.window_started_at)).getTime() <= Date.now() - ALLOWANCE_WINDOW_MS) {
+        await query(session, `UPDATE desktop_model_runners SET tokens_used=0,window_started_at=now(),
+          tokens_reserved=COALESCE((SELECT sum(reserved_tokens) FROM desktop_model_jobs WHERE organization_id=$1 AND status='claimed' AND lease_until>now()),0)
+          WHERE organization_id=$1`, [org]);
+      }
       // One in-flight inference per workspace bounds spend and response ordering.
       const busy = await query(session, `SELECT id FROM desktop_model_jobs WHERE organization_id=$1 AND status='claimed' AND lease_until>now() LIMIT 1`, [org]);
       if (busy.rows.length) return Response.json({ job: null });
@@ -43,10 +53,21 @@ export const POST = withApiSession(async (session, request) => {
         AND t.status='WAITING_FOR_MODEL' AND t.cancel_requested=false ORDER BY j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED`, [org]);
       const job = candidates.rows[0];
       if (!job) return Response.json({ job: null });
+      // Re-claiming an abandoned claim: its reservation moves to what was used
+      // (an unknown billed attempt is never free), instead of staying reserved
+      // forever on top of the new one.
+      if (job.status === 'claimed' && Number(job.reserved_tokens) > 0) {
+        await query(session, 'UPDATE desktop_model_runners SET tokens_reserved=GREATEST(tokens_reserved-$2,0),tokens_used=tokens_used+$2 WHERE organization_id=$1', [org, Number(job.reserved_tokens)]);
+        await query(session, 'UPDATE desktop_model_jobs SET reserved_tokens=0 WHERE id=$1', [job.id]);
+      }
+      const budget = (await query(session, 'SELECT tokens_used,tokens_reserved,token_limit,window_started_at FROM desktop_model_runners WHERE organization_id=$1', [org])).rows[0];
       // Reserve a conservative upper bound before starting another model call.
       const request = job.request_json as {tool_choice?:{name?:string}};
       const allowance = Math.max(request.tool_choice?.name==='semantic_verdict'?64000:128000, new TextEncoder().encode(JSON.stringify(job.request_json)).length + 32768);
-      if (Number(runner.tokens_used) + Number(runner.tokens_reserved) + allowance > Number(runner.token_limit)) return Response.json({ error: 'Evaluation token cap reached; work remains incomplete', code: 'budget_exhausted' }, { status: 429 });
+      if (Number(budget.tokens_used) + Number(budget.tokens_reserved) + allowance > Number(budget.token_limit)) {
+        const resetsAt = new Date(new Date(String(budget.window_started_at)).getTime() + ALLOWANCE_WINDOW_MS).toISOString();
+        return Response.json({ error: `Today's allowance for agents on this plan is used up. It resets at ${resetsAt}; work waits until then.`, code: 'budget_exhausted', resetsAt }, { status: 429 });
+      }
       const claim = crypto.randomUUID();
       // An abandoned claim keeps its reservation: an unknown billed attempt is never free.
       await query(session,'UPDATE desktop_model_runners SET tokens_reserved=tokens_reserved+$2 WHERE organization_id=$1',[org,allowance]);

@@ -1637,8 +1637,8 @@ html.aval-module-picking .content-shell { cursor: crosshair; }
 @media (prefers-reduced-motion: reduce) { .agent-task-progress.is-live .agent-task-progress-bar { animation: none; width: 100%; opacity: .45; } }
 .agent-task-stop { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 0; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--viz-red) 7%, var(--surface)); color: var(--ink); }
 .agent-task-stop svg { flex-shrink: 0; margin-top: 2px; color: var(--viz-red); }
-.agent-task-stop[data-kind="needs_person"], .agent-task-stop[data-kind="needs_setup"] { background: color-mix(in srgb, var(--viz-amber) 9%, var(--surface)); }
-.agent-task-stop[data-kind="needs_person"] svg, .agent-task-stop[data-kind="needs_setup"] svg { color: var(--viz-amber); }
+.agent-task-stop[data-kind="needs_person"], .agent-task-stop[data-kind="needs_setup"], .agent-task-stop[data-kind="needs_desktop"] { background: color-mix(in srgb, var(--viz-amber) 9%, var(--surface)); }
+.agent-task-stop[data-kind="needs_person"] svg, .agent-task-stop[data-kind="needs_setup"] svg, .agent-task-stop[data-kind="needs_desktop"] svg { color: var(--viz-amber); }
 .agent-task-stop strong { display: block; font-size: 12px; font-weight: 600; }
 .agent-task-stop p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 

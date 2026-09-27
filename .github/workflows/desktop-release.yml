@@ -162,21 +162,16 @@ jobs:
           Target: https://app.aval.llc. The matching Cloudflare
           deployment and authenticated production readiness check passed.
 
-          Replaces the Overview use tracker with Aval's personal widget board:
-          an attributed Unsplash wallpaper picker and movable, edge-snapping
-          glass cards for time, local weather, calendar, reminders, and
-          Spotify or Apple Music. Layout and preferences persist locally.
-          Includes a bundled Codex runtime.
+          Changes in this build: $(git log -1 --format=%s "$GITHUB_SHA")
 
           The current hosted DMG is signed with Developer ID, notarized by Apple,
           stapled, Gatekeeper-assessed, and accompanied by SHA256SUMS.
           CODESIGN.txt records the signing identity for this build.
 
-          The separately labelled \`-local-server-widget-board-\` assets are the
-          matching local-development build. They target http://127.0.0.1:3010,
-          require that server, are ad-hoc signed, and are not notarized. Their
-          matching versioned checksum file is published beside them. Other
-          \`-local-\` and versioned assets are retained as historical downloads.
+          No local-development asset is built by this workflow. Any \`-local-\`
+          asset on this release is from an earlier version, kept as a historical
+          download: those target http://127.0.0.1:3010, are ad-hoc signed and are
+          not notarized.
           EOF
 
           # Move the rolling tag without deleting earlier versioned downloads.
