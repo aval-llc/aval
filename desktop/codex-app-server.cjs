@@ -352,7 +352,7 @@ class CodexAppServerService extends EventEmitter {
     const childEnv = { ...this.env, CODEX_HOME: this.codexHomeDir };
     delete childEnv.OPENAI_API_KEY;
     delete childEnv.OPENAI_API_KEY_PATH;
-    const child = this.spawnImpl(codexPath, ["app-server", "--stdio"], {
+    const child = this.spawnImpl(codexPath, ["app-server", "--stdio", "-c", "features.shell_tool=false", "-c", "features.unified_exec=false", "-c", "features.apply_patch_freeform=false", "-c", 'web_search="disabled"'], {
       cwd: this.workspaceDir,
       env: childEnv,
       shell: false,
@@ -566,6 +566,13 @@ class CodexAppServerService extends EventEmitter {
         reject(error);
       });
     });
+  }
+
+  async infer(payload) {
+    if (!this.rpc || this.state.account?.type !== 'chatgpt' || !this.state.active) throw Error('Connect ChatGPT in Aval Desktop');
+    if (this.state.rateLimits?.reached) throw Error('ChatGPT subscription limit reached');
+    if (!this.state.models.some(m => m.id === payload.model)) throw Error('Requested model is unavailable');
+    return require('./inference.cjs').infer(this.rpc, this.workspaceDir, payload.model, payload.params);
   }
 
   async cancelTurn({ conversationId }) {

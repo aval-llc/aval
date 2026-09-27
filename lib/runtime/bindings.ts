@@ -3,6 +3,10 @@ import type { ClientConfig } from "pg";
 import type { SupabaseAuthBindings } from "@/lib/auth/supabase";
 
 export interface AvalRuntimeBindings extends SupabaseAuthBindings {
+  BRAINTRUST_API_KEY?: string;
+  BRAINTRUST_REGION?: string;
+  /** JSON [{organizationId, projectId, since}]. Explicit opt-in; no historical export by default. */
+  BRAINTRUST_TRACE_ROUTES?: string;
   HYPERDRIVE?: { connectionString: string };
   /** Local Supabase fallback. Never configure this in browser-exposed vars. */
   DATABASE_URL?: string;

@@ -8,6 +8,7 @@ import { completeWorkOrder, createVendor, createWorkOrder } from "../../lib/oper
 import { createLead, createLease } from "../../lib/operations/leasing.ts";
 import { createProperty, createUnit } from "../../lib/operations/portfolio.ts";
 import { createMeter, recordBill } from "../../lib/infrastructure/meters.ts";
+import { createSite } from "../../lib/infrastructure/sites.ts";
 
 /**
  * The entity reads that tool the Specialist library: each returns this
@@ -32,7 +33,8 @@ export async function runRecordToolsCases(t, { session, config, administrator })
   await run((s, org) => createLease(s, org, { unitId: leased.id, startDate: new Date("2025-11-01"), endDate: new Date(Date.now() + 40 * 86400_000), rentCents: 175_000, depositCents: 175_000 }));
   await run((s, org) => createVendor(s, org, { name: "Lapsed Plumbing", trade: "plumbing", insuranceExpiresAt: new Date("2025-01-01") }));
   await run((s, org) => createLead(s, org, { propertyId: property.id, channel: "zillow", unitTypeLabel: "2BR" }));
-  const meter = await run((s, org) => createMeter(s, org, { utilityType: "water", propertyLabel: property.name, unitOfMeasure: "gal" }));
+  const site = await run((s, org) => createSite(s, org, { name: property.name, propertyId: property.id }));
+  const meter = await run((s, org) => createMeter(s, org, { siteId: site.id, utilityType: "water", propertyLabel: property.name, unitOfMeasure: "gal" }));
   await run((s, org) => recordBill(s, org, { meterId: meter.id, periodStart: new Date("2026-08-01"), periodEnd: new Date("2026-08-31"), usageAmount: 12_000, costCents: 8_400, currency: "USD", source: "manual" }));
 
   await t.test("each read returns this workspace's records, with only the fields the work needs", async () => {

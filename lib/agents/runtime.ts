@@ -33,10 +33,10 @@ import { checkTask, failedCheckCount, parseTaskCheck } from './checks';
  * that argues for wider access changes nothing.
  */
 
-import type { AskAvalEnv, ContentBlock, Message, ToolSchema, ToolUseBlock } from "@/lib/ask-aval/model-types";
+import type { AskAvalEnv, ContentBlock, Message, MessagesResponse, ToolSchema, ToolUseBlock } from "@/lib/ask-aval/model-types";
 import { ModelProviderError } from "@/lib/ask-aval/model-types";
 import { workTitle } from "./work-presentation.ts";
-import { callModel } from "@/lib/ask-aval/model-router";
+import { callTaskModel, DesktopInferencePending } from './desktop-inference';
 import { TOOLS, TOOL_SCHEMAS } from "@/lib/ask-aval/tools";
 import { resolvePersona } from "@/lib/ask-aval/personas";
 import { withDerivedNumbers, round2 } from "@/lib/ask-aval/faithfulness";
@@ -253,6 +253,7 @@ export async function advanceTask(dbSession: DbSession,
   const contract=JSON.parse(task.checkJson??'{}');
   const support=['render_answer','read_memory','write_memory','read_task_history',...(mayRequestPeerHelp(task)?[PEER_HELP_TOOL]:[]),...(contract.kind==='plan'?[]:[WAIT_TOOL])];
   const selected=contract.kind==='plan'?['plan_goal','get_goal_plan']
+    :contract.kind==='internal_maintenance'?['read_conversation','read_maintenance_context','create_maintenance_work_order']
     :contract.kind==='evidence'?[...(contract.tools??[]),...(contract.tools?.includes('read_document')?['list_documents']:[])]
     :contract.kind==='delivery'?['create_maintenance_work_order','read_conversation','list_conversations','get_communication_channels','get_marketing_channels','request_execution_plan','send_external_message','place_call','publish_listing']
     :contract.kind==='preference'?['record_preference']:[];
@@ -263,6 +264,7 @@ export async function advanceTask(dbSession: DbSession,
     || (contract.kind==='delivery' && getTool(t.name)?.mutates===false));
   if (JSON.parse(task.executionScopeJson).source === 'inbound') {
     tools = tools.filter(tool => ['render_answer','read_conversation','read_maintenance_context','create_maintenance_work_order','send_external_message'].includes(tool.name));
+    if(JSON.parse(task.executionScopeJson).draftOnly)tools=tools.filter(tool=>tool.name!=='send_external_message');
   }
 
   const onboarding = await readOnboarding(dbSession, task.userId, organizationId);
@@ -386,17 +388,18 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
     };
     await frame({ kind: 'semantic_request', ...scope, ...params });
     try {
-      const response = await callModel(dbSession, env, organizationId, { ...params, timeout_ms: timeout });
+      const response = await callTaskModel(dbSession, env, organizationId, { ...params, timeout_ms: timeout }, taskId, stepIndex, `review:${phase}`);
       inputTokens += response.usage.input_tokens;
       outputTokens += response.usage.output_tokens;
       await frame({ kind: 'semantic_response', ...scope, response });
-      await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'model_call', toolName: 'semantic_verdict', modelProvider: response.routing?.providerId, modelName: response.routing?.model, resultDigest: await digestPayload(response.content) });
+      await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'model_call', toolName: 'semantic_verdict', executionManifest: response.executionManifest, modelProvider: response.routing?.providerId, modelName: response.routing?.model, resultDigest: await digestPayload(response.content) });
       audit.push({ kind: 'model_call', label: 'semantic_verdict', payloadDigest: await digestPayload(response.content), count: stepIndex });
       const current = await getTask(dbSession, organizationId, taskId);
       if (!current || current.cancelRequested || current.leaseOwner !== workerId || current.leaseGeneration !== task!.leaseGeneration || (current.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || Date.now() >= Math.min(deadline, current.deadlineAt?.getTime() ?? 0) || task!.tokensUsed + inputTokens + outputTokens > current.maxTokens)
         return { ...scope, exitCode: 1, problems: ['The task stopped or exhausted its budget during semantic review.'] };
       return { ...scope, ...parseSemanticVerdict(response, packet) };
     } catch (err) {
+      if (err instanceof DesktopInferencePending) throw err;
       await frame({ kind: 'semantic_error', ...scope, timeoutMs: timeout,
         error: err instanceof ModelProviderError ? err.message : 'Semantic review transport failed.' });
       return { ...scope, exitCode: 1, problems: [err instanceof ModelProviderError ? `Semantic review unavailable: ${err.message}` : 'Semantic review failed; completion was withheld.'] };
@@ -671,7 +674,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       // boundary, so nothing is ever interrupted mid-execution.
       if(Date.now() >= (fresh.deadlineAt?.getTime() ?? fresh.createdAt.getTime()+30*60_000))return finish('FAILED',{error:'The task reached its total wall-clock limit.'});
       if (fresh.cancelRequested) return finish("CANCELLED");
-      if (!pendingAnswer && task.stepCount + stepsRun >= task.maxSteps) {
+      if (!pendingUses.length && task.stepCount + stepsRun >= task.maxSteps) {
         return finish("FAILED", { error: `Reached the ${task.maxSteps}-step limit without a conclusion.` });
       }
       if (task.tokensUsed + inputTokens + outputTokens >= task.maxTokens) {
@@ -721,7 +724,8 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
         continue;
       }
 
-      const stepIndex = task.stepCount + stepsRun;
+      const replaying = pendingUses.length > 0;
+      const stepIndex = task.stepCount + stepsRun - (replaying ? 1 : 0);
       const remainingSteps = task.maxSteps - stepIndex;
 
       const overhead=byteCount({system,tools})+2048;
@@ -733,7 +737,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       const outputBudget=Math.min(2048,remainingTokens-overhead-byteCount(assembled.messages));
       const contextJson=JSON.stringify({system,messages:assembled.messages,tools,outputBudget,evicted:assembled.evicted});
       await dbSession.db.insert(agentModelContexts).values({id:crypto.randomUUID(),organizationId,taskId,stepIndex,contextJson,digest:await digestPayload(contextJson),createdAt:new Date()});
-      const res = await callModel(dbSession, env, organizationId, {
+      const res: MessagesResponse = replaying ? { id: 'replayed', content: pendingUses, usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: 'tool_use', routing: undefined } : await callTaskModel(dbSession, env, organizationId, {
         system,
         messages:assembled.messages,
         tools,
@@ -742,10 +746,10 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
         tool_choice: remainingSteps <= 1 ? { type: "tool", name: "render_answer" } : { type: "auto" },
         max_tokens: outputBudget,
         timeout_ms: Math.max(1,Math.min(25_000,deadline-Date.now(),(fresh.deadlineAt?.getTime()??Infinity)-Date.now())),
-      });
+      }, taskId, stepIndex, 'actor');
       inputTokens += res.usage.input_tokens;
       outputTokens += res.usage.output_tokens;
-      stepsRun++;
+      if (!replaying) stepsRun++;
       // Inference committed the claim and released the transaction. Re-check
       // ownership before saving a response or executing anything it proposed.
       const afterModel = await getTask(dbSession, organizationId, taskId);
@@ -760,7 +764,8 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       if(Date.now()>=(fresh.deadlineAt?.getTime()??Infinity))return finish("FAILED",{error:"The task reached its total wall-clock limit before its proposed actions could run."});
 
       await persistStep(dbSession, {
-        taskId, organizationId, stepIndex, kind: "model_call",
+        taskId, organizationId, stepIndex, kind: replaying ? "model_response_replayed" : "model_call",
+        executionManifest: res.executionManifest,
         modelProvider: res.routing?.providerId,
         modelName: res.routing?.model,
         resultDigest: await digestPayload(res.content),
@@ -791,7 +796,10 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
         continue;
       }
 
-      messages.push({ role: "assistant", content: res.content });
+      if (!replaying) {
+        messages.push({ role: "assistant", content: res.content });
+        const lost = await checkpoint(); if (lost) return lost;
+      }
       const results: ContentBlock[] = [];
 
       for (const use of toolUses) {
@@ -973,6 +981,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       if(results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name===PEER_HELP_TOOL&&u.id===r.tool_use_id)))return finish('WAITING_FOR_AGENT',{nextAttemptAt:new Date(Date.now()+DELEGATION_POLICY.peerRecheckMs)});
     }
   } catch (err) {
+    if (err instanceof DesktopInferencePending) return finish('WAITING_FOR_MODEL');
     const message = err instanceof ModelProviderError ? err.message : "The agent runtime failed.";
     console.error("agent_runtime_error", { taskId, err });
     audit.push({ kind: "task_failed", label: task.agentId, payloadDigest: await digestPayload(message), count: stepsRun });

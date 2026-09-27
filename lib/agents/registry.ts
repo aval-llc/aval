@@ -137,6 +137,7 @@ const DESCRIPTORS: ToolDescriptor[] = [
   { ...READ_DEFAULTS, name: "get_delinquent_accounts", summary: "Past-due resident accounts with aging and contact channel.", requiredPermission: "accounting.read", timeoutMs: 15_000 },
 
   /* ── reads: property, leasing, maintenance ───────────────────────────── */
+  { ...READ_DEFAULTS, name: "get_utility_investigations", summary: "Read utility bill evidence and same-meter comparisons.", requiredPermission: "portfolio.read", timeoutMs: 15000 },
   { ...READ_DEFAULTS, name: "get_property_breakdown", summary: "Per-property and per-unit-type occupancy and rent position.", requiredPermission: "portfolio.read", timeoutMs: 15_000 },
   { ...READ_DEFAULTS, name: "get_leasing_funnel", summary: "Lead-to-lease funnel counts and stage conversion.", requiredPermission: "leasing.read" },
   { ...READ_DEFAULTS, name: "get_leasing_velocity", summary: "Funnel timing, channel performance and the expiration schedule.", requiredPermission: "leasing.read", timeoutMs: 15_000 },

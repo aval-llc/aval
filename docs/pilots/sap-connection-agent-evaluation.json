@@ -1,0 +1,441 @@
+{
+  "date": "2026-09-26",
+  "branch": "khas",
+  "mainIntegrated": "fb174c5",
+  "sapUiCommit": "3a2cc37",
+  "mergeCommit": "070d477",
+  "liveSapValidated": false,
+  "liveModelEvaluated": false,
+  "externalModelCostUsd": 0,
+  "testResults": {
+    "postgres": {
+      "passed": 297,
+      "failed": 0,
+      "skipped": 0
+    },
+    "unit": {
+      "passed": 1102,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "Existing Apple Silicon-only case on Windows"
+    },
+    "sapTransport": {
+      "passed": 18,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "i18n": {
+      "result": "passed",
+      "matchingKeys": 2430
+    },
+    "lint": {
+      "errors": 0,
+      "existingWarnings": 5
+    },
+    "browser": {
+      "environment": "local harness with simulated API responses; real React components",
+      "englishSuccess": "passed",
+      "spanishUnauthorized": "passed",
+      "passwordInput": "masked",
+      "saveDoesNotStartSync": true
+    },
+    "migration": {
+      "passed": 11,
+      "failed": 0
+    },
+    "productionBuild": "passed"
+  },
+  "sapAgentWorkflow": {
+    "modelCalls": 6,
+    "reviewCalls": 5,
+    "tasks": 3,
+    "liveModel": false,
+    "liveSap": false
+  },
+  "domainEfficiency": [
+    {
+      "domain": "leasing-marketing",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "resident-experience",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "renewals",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "maintenance",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "turns",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "finance",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "receivables",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "spend-vendor",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "owner-services",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "lease-admin",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "property-operations",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "portfolio-strategy",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "market-revenue",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "utilities",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "data-integrations",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    },
+    {
+      "domain": "people-operations",
+      "metrics": [
+        {
+          "level": "Q",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "L",
+          "modelCalls": 2,
+          "reviewCalls": 2
+        },
+        {
+          "level": "S",
+          "modelCalls": 2,
+          "reviewCalls": 1
+        }
+      ],
+      "tasks": 3,
+      "evidenceReads": 1,
+      "liveModel": false
+    }
+  ],
+  "limits": [
+    "Scripted inference and semantic verdicts measure orchestration, not model judgment.",
+    "No live SAP credentials, metadata, field mapping, provider writes or automatic sync tested.",
+    "One representative read-only objective per runnable domain is not validation of every specialist or business workflow.",
+    "No production latency or real model token-cost benchmark."
+  ],
+  "sourceSha256Lf": {
+    "lib/integrations/sap-bydesign/odata.ts": "7992670873aab325cfa7c9c7a56e8ad077559b028809b29f4a471424b4de662e",
+    "lib/integrations/catalog.ts": "7d554683018a749a05387544571d7f893519172a9acd5a5c9dff46d25aba3ddf",
+    "lib/integrations/credential-verification.ts": "31eb7e299afbfcbe9a1e75f09cf378c04b106f07f3ebbf3bf419db44bca06c4c",
+    "app/components/connection-dialog.tsx": "f009abdfc3b0e52ea407cf187ed1496b0293789747c0b299e971d1017035436c",
+    "lib/agents/organization/capabilities.ts": "a1d99febe8fba994648c2eb416821fde59cea3005f315c7e1aff3a8d457969a4",
+    "tests/postgres/organization-e2e-cases.mjs": "2dfcc175847c343fe6187c703e95fa9016ebf2acfad0413d51f3e09df2dc88f0",
+    "tests/postgres/sap-bydesign-cases.mjs": "0ed6422ed472c4565188eea9630257cbecc1a13bd6d49998bc811685db16bc0e"
+  },
+  "evaluatedSourceCommit": "e291069f374cedf8e8162352a480045ec7858ffd"
+}

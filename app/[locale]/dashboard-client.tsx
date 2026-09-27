@@ -1,8 +1,7 @@
 "use client";
-/* eslint-disable jsx-a11y/no-autofocus */
 
 import { useEffect, useMemo, useState } from "react";
-import type { ComponentType, FormEvent, ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
@@ -29,7 +28,7 @@ import { BrandMark } from "@/app/components/brand-mark";
 import { DesktopServiceBar } from "@/app/components/desktop-codex";
 import { ConnectionDialog, type Provider } from "@/app/components/connection-dialog";
 import type { NotificationItem } from "@/app/data/sample";
-import type { UtilityType } from "@/lib/infrastructure/types";
+import { UtilityWorkspace } from "@/app/components/utility-workspace";
 import { DocumentUploader } from "@/app/components/document-uploader";
 import { IntegrationsCatalog } from "@/app/components/integrations-catalog";
 import { PlanningWorkspace } from "@/app/components/planning-workspace";
@@ -391,91 +390,11 @@ function OperationsView({ view, openConnections }: { view: View; openConnections
   return <OperationsWorkspace view={view as "properties" | "leasing" | "maintenance" | "accounting"} openConnections={openConnections}/>;
 }
 
-// Not gated behind a Provider connection like OperationsView's tabs — meters
-// and bills are native Aval data (lib/infrastructure/), not synced from an
-// upstream PMS/accounting system, so there's no "connect a source" story
-// here. This surface stays empty until native meter data is available.
-const UTILITY_LABEL_KEY: Record<UtilityType, string> = {
-  electricity: "InfrastructureView.electricity",
-  water: "InfrastructureView.water",
-  gas: "InfrastructureView.gas",
-};
-function InfrastructureView({ onAddMeter }: { onAddMeter: () => void }) {
-  const t = useTranslations();
-  return <div className="view-wrap infra-view"><AppHeader title={t("InfrastructureView.infrastructure")} subtitle={t("InfrastructureView.infrastructureSubtitle")} actions={<button className="primary-button" onClick={onAddMeter}><Flash width={18} height={18}/>{t("InfrastructureView.addMeter")}</button>}/><section className="panel locked-panel"><div><h2>{t("InfrastructureView.emptyDescription")}</h2><button className="primary-button" onClick={onAddMeter}>{t("InfrastructureView.addMeter")}<NavArrowRight width={17} height={17}/></button></div></section></div>;
-}
-
-
 function SettingsView({ openConnections, displayName, email }: { openConnections: () => void; displayName: string; email: string }) {
   const t = useTranslations();
   return <SettingsModule header={<AppHeader title={t("SettingsView.settings")} subtitle={t("SettingsModule.subtitle")}/>} openConnections={openConnections} displayName={displayName} email={email}/>;
 }
 
-
-const UTILITY_TYPE_OPTIONS: UtilityType[] = ["electricity", "water", "gas"];
-const DEFAULT_UNIT_BY_UTILITY: Record<UtilityType, string> = { electricity: "kWh", water: "gal", gas: "therm" };
-
-
-function AddMeterDialog({ onClose }: { onClose: () => void }) {
-  const t = useTranslations();
-  const { notify } = useExperience();
-  const [propertyLabel, setPropertyLabel] = useState("");
-  const [utilityType, setUtilityType] = useState<UtilityType>("electricity");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const label = propertyLabel.trim();
-    if (!label || submitting) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/infrastructure/meters", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ utilityType, propertyLabel: label, unitOfMeasure: DEFAULT_UNIT_BY_UTILITY[utilityType] }),
-      });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      if (response.ok) {
-        notify(t("InfrastructureView.addMeter"), label);
-        onClose();
-      } else {
-        setError(data.error || t("InfrastructureView.addMeterError"));
-      }
-    } catch {
-      setError(t("InfrastructureView.addMeterError"));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="small-dialog">
-          <div className="dialog-top">
-            <Dialog.Title>{t("InfrastructureView.addMeter")}</Dialog.Title>
-            <Dialog.Close className="icon-button" aria-label={t("Overview.close")}><Xmark width={20} height={20} /></Dialog.Close>
-          </div>
-          <form className="aval-draft-panel" onSubmit={submit}>
-            <input value={propertyLabel} onChange={(event) => setPropertyLabel(event.target.value)} placeholder={t("InfrastructureView.propertyLabelPlaceholder")} autoFocus />
-            <div className="aval-draft-panel-row">
-              <select value={utilityType} onChange={(event) => setUtilityType(event.target.value as UtilityType)}>
-                {UTILITY_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{t(UTILITY_LABEL_KEY[option])}</option>)}
-              </select>
-              <button type="submit" className="primary-button" disabled={!propertyLabel.trim() || submitting}>
-                <NavArrowRight width={16} height={16} />{t("InfrastructureView.addMeter")}
-              </button>
-            </div>
-            {error && <p className="aval-agent-create-error">{error}</p>}
-          </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
 
 function DesktopApp({ authMode, displayName, email, initialView }: { authMode: AuthMode; displayName: string; email: string; initialView: View }) {
   // Everyone signed out shares one workspace, so anything saved here is
@@ -493,7 +412,7 @@ function DesktopApp({ authMode, displayName, email, initialView }: { authMode: A
   const { jobs: draftJobs, createJob: createDraftJob, pauseJob: pauseDraftJob, resumeJob: resumeDraftJob, retryJob: retryDraftJob, sendJob: sendDraftJob, removeJobs: removeDraftJobs, loading: draftsLoading } = useDraftJobs(currentLocale);
   const router = useRouter();
   const pathname = usePathname();
-  const switchLocale = (nextLocale: "en" | "es-mx") => router.replace(pathname, { locale: nextLocale }); const [view, setView] = useState<View>(initialView); const [providers, setProviders] = useState<Provider[]>(fallbackProviders); const [loading, setLoading] = useState(true); const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null); const [addMeterOpen, setAddMeterOpen] = useState(false); const [collapsed, setCollapsed] = useState(false); const [profile, setProfile] = useState(false); const [notifications, setNotifications] = useState(false); const [notificationItems, setNotificationItems] = useState<NotificationItem[]>([]); const unreadCount = notificationItems.filter((item) => !item.read).length; const accountingProviderId = market === "latam" ? "contpaqi" : "quickbooks";
+  const switchLocale = (nextLocale: "en" | "es-mx") => router.replace(pathname, { locale: nextLocale }); const [view, setView] = useState<View>(initialView); const [providers, setProviders] = useState<Provider[]>(fallbackProviders); const [loading, setLoading] = useState(true); const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null); const [collapsed, setCollapsed] = useState(false); const [profile, setProfile] = useState(false); const [notifications, setNotifications] = useState(false); const [notificationItems, setNotificationItems] = useState<NotificationItem[]>([]); const unreadCount = notificationItems.filter((item) => !item.read).length; const accountingProviderId = market === "latam" ? "contpaqi" : "quickbooks";
   const [connectionFocus, setConnectionFocus] = useState<string>();
   const pendingReviewCount = 0;
   const loadProviders = async () => { try { const response = await fetch("/api/integrations"); const data = await response.json() as { providers?: Provider[] }; if (data.providers?.length) setProviders(data.providers); } catch { /* local preview stays usable */ } setLoading(false); };
@@ -518,7 +437,7 @@ function DesktopApp({ authMode, displayName, email, initialView }: { authMode: A
         ? <button type="button" onClick={signOutOfPasswordAccount}><LogOut width={17} height={17}/>{t("DesktopApp.signOut")}</button>
         // eslint-disable-next-line @next/next/no-html-link-for-pages -- external platform sign-out route, not part of this app router
         : <a href="/signout-with-chatgpt?return_to=/"><LogOut width={17} height={17}/>{t("DesktopApp.signOut")}</a>}
-      </div>}</aside><section className="content-shell" aria-label={t(titleKey)}><UsageRecorder enabled={!isGuest}/><DesktopServiceBar/>{(view === "calendar" || view === "projects" || view === "teams") && <PlanningWorkspace key={view} view={view} isGuest={isGuest}/>} {view === "overview" && <OperationsWorkspace view="overview" openConnections={openConnections} hero={<OverviewHero displayName={displayName} t={t}/>}/>} {view === "inbox" && <ConnectedInbox/>} {view === "connections" && <ConnectionsView providers={providers} loading={loading} onOpen={openProvider} focus={connectionFocus}/>} {view === "settings" && <SettingsView openConnections={openConnections} displayName={displayName} email={email}/>} {view === "infrastructure" && <InfrastructureView onAddMeter={() => setAddMeterOpen(true)}/>} {view === "setup" && <SetupWorkspace onNavigateAgents={() => setActiveView("agents")}/>} {view === "agents" && <div className="view-wrap"><AppHeader title={t("Nav.agents")} subtitle={t("AgentLibrary.subtitle")}/><EmployeeDirectory work={{ jobs: draftJobs, onCreate: createDraftJob, onPause: pauseDraftJob, onResume: resumeDraftJob, onRetry: retryDraftJob, onSend: sendDraftJob, onRemove: removeDraftJobs, loading: draftsLoading }}/></div>} {view === "documents" && <DocumentsView isGuest={isGuest}/>} {(["properties", "leasing", "maintenance", "accounting"] as View[]).includes(view) && <OperationsView view={view} openConnections={openConnections} providers={providers}/>}</section>{selectedProvider && <ConnectionDialog provider={selectedProvider} onClose={() => setSelectedProvider(null)} onRefresh={loadProviders}/>}{addMeterOpen && <AddMeterDialog onClose={() => setAddMeterOpen(false)}/>}<Dialog.Root open={notifications} onOpenChange={setNotifications}><Dialog.Portal><Dialog.Overlay className="dialog-overlay subtle"/><Dialog.Content className="notification-drawer"><div className="drawer-heading"><div><p className="eyebrow">{t("DesktopApp.liveWorkspace")}</p><Dialog.Title>{t("DesktopApp.notifications")}</Dialog.Title></div><Dialog.Close className="icon-button" aria-label={t("Overview.close")}><Xmark width={20} height={20}/></Dialog.Close></div><div className="notification-list">{notificationItems.map((item) => <button key={item.id} className={item.read ? "" : "unread"} onClick={() => openNotification(item)}><BrandMark provider={resolveNotificationProvider(item)} small/><span><strong>{t(item.titleKey)}</strong><small>{t(item.detailKey, item.detailParams)}</small></span><span className="notif-trailing">{!item.read && <i className="unread-dot"/>}<time>{formatMinutesAgo(item.minutesAgo, currentLocale)}</time></span></button>)}</div><button className="wide-button" onClick={() => setNotificationItems((current) => current.map((item) => ({ ...item, read: true })))}><Check width={17} height={17}/>{unreadCount ? t("DesktopApp.markAllAsRead") : t("DesktopApp.allCaughtUp")}</button></Dialog.Content></Dialog.Portal></Dialog.Root><AvalAssistant view={view} onCreateDraft={createDraftJob}/><ModuleTour currentView={view} onNavigate={setActiveView}/></main>;
+      </div>}</aside><section className="content-shell" aria-label={t(titleKey)}><UsageRecorder enabled={!isGuest}/><DesktopServiceBar/>{(view === "calendar" || view === "projects" || view === "teams") && <PlanningWorkspace key={view} view={view} isGuest={isGuest}/>} {view === "overview" && <OperationsWorkspace view="overview" openConnections={openConnections} hero={<OverviewHero displayName={displayName} t={t}/>}/>} {view === "inbox" && <ConnectedInbox/>} {view === "connections" && <ConnectionsView providers={providers} loading={loading} onOpen={openProvider} focus={connectionFocus}/>} {view === "settings" && <SettingsView openConnections={openConnections} displayName={displayName} email={email}/>} {view === "infrastructure" && <UtilityWorkspace/>} {view === "setup" && <SetupWorkspace onNavigateAgents={() => setActiveView("agents")}/>} {view === "agents" && <div className="view-wrap"><AppHeader title={t("Nav.agents")} subtitle={t("AgentLibrary.subtitle")}/><EmployeeDirectory work={{ jobs: draftJobs, onCreate: createDraftJob, onPause: pauseDraftJob, onResume: resumeDraftJob, onRetry: retryDraftJob, onSend: sendDraftJob, onRemove: removeDraftJobs, loading: draftsLoading }}/></div>} {view === "documents" && <DocumentsView isGuest={isGuest}/>} {(["properties", "leasing", "maintenance", "accounting"] as View[]).includes(view) && <OperationsView view={view} openConnections={openConnections} providers={providers}/>}</section>{selectedProvider && <ConnectionDialog provider={selectedProvider} onClose={() => setSelectedProvider(null)} onRefresh={loadProviders}/>}<Dialog.Root open={notifications} onOpenChange={setNotifications}><Dialog.Portal><Dialog.Overlay className="dialog-overlay subtle"/><Dialog.Content className="notification-drawer"><div className="drawer-heading"><div><p className="eyebrow">{t("DesktopApp.liveWorkspace")}</p><Dialog.Title>{t("DesktopApp.notifications")}</Dialog.Title></div><Dialog.Close className="icon-button" aria-label={t("Overview.close")}><Xmark width={20} height={20}/></Dialog.Close></div><div className="notification-list">{notificationItems.map((item) => <button key={item.id} className={item.read ? "" : "unread"} onClick={() => openNotification(item)}><BrandMark provider={resolveNotificationProvider(item)} small/><span><strong>{t(item.titleKey)}</strong><small>{t(item.detailKey, item.detailParams)}</small></span><span className="notif-trailing">{!item.read && <i className="unread-dot"/>}<time>{formatMinutesAgo(item.minutesAgo, currentLocale)}</time></span></button>)}</div><button className="wide-button" onClick={() => setNotificationItems((current) => current.map((item) => ({ ...item, read: true })))}><Check width={17} height={17}/>{unreadCount ? t("DesktopApp.markAllAsRead") : t("DesktopApp.allCaughtUp")}</button></Dialog.Content></Dialog.Portal></Dialog.Root><AvalAssistant view={view} onCreateDraft={createDraftJob}/><ModuleTour currentView={view} onNavigate={setActiveView}/></main>;
 }
 
 export function AvalDashboard({ authMode, displayName, email, requestedView }: { authMode: AuthMode; displayName: string; email: string; requestedView?: string }) {

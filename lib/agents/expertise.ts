@@ -197,13 +197,14 @@ export interface EmployeeTemplate {
 
 export const STARTER_TEMPLATES: readonly EmployeeTemplate[] = [
   { slug: "resident-operations", name: "Resident Operations", role: "Resident Operations",
+
     objective: "Own resident issues end to end until they are verified resolved.",
     expertise: ["resident-experience", "maintenance", "vendor-coordination", "escalation"],
     capabilities: ["read_maintenance_context", "read_conversation", "list_conversations", "get_maintenance_performance"] },
   { slug: "maintenance-operations", name: "Maintenance Operations", role: "Maintenance Operations",
     objective: "Take repairs from report to verified completion.",
     expertise: ["maintenance", "vendor-coordination", "escalation"],
-    capabilities: ["get_maintenance_performance", "get_portfolio_metrics", "read_maintenance_context"] },
+    capabilities: ["get_maintenance_performance", "get_portfolio_metrics", "read_maintenance_context", "get_utility_investigations"] },
   { slug: "leasing-operations", name: "Leasing Operations", role: "Leasing Operations",
     objective: "Move the leasing funnel and keep vacancy falling.",
     expertise: ["brokerage-leasing", "market-research"],
@@ -211,7 +212,7 @@ export const STARTER_TEMPLATES: readonly EmployeeTemplate[] = [
   { slug: "portfolio-analyst", name: "Portfolio Analyst", role: "Portfolio Analyst",
     objective: "Explain where the portfolio stands, where it is heading, and on what evidence.",
     expertise: ["portfolio-outlook", "financial-analysis", "risk-analysis"],
-    capabilities: ["get_portfolio_metrics", "get_metric_series", "get_operating_statement", "get_accounting_breakdown"] },
+    capabilities: ["get_portfolio_metrics", "get_metric_series", "get_operating_statement", "get_accounting_breakdown", "get_utility_investigations"] },
   { slug: "owner-reporting", name: "Owner Reporting", role: "Owner Reporting",
     objective: "Give each owner an accurate, reconciled picture of their property every period.",
     expertise: ["financial-analysis", "portfolio-outlook"],

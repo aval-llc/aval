@@ -1,6 +1,7 @@
 import { additionalProviders, type AdditionalProviderId } from "./additional-providers.ts";
 
 export type ProviderId = AdditionalProviderId
+  | "sap_bydesign"
   | "quickbooks"
   | "xero"
   | "contpaqi"
@@ -91,6 +92,25 @@ export const MODEL_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set([
 
 export const integrationCatalog: IntegrationProvider[] = [
   ...additionalProviders,
+  {
+    id: "sap_bydesign",
+    title: "SAP Business ByDesign",
+    category: "Accounting",
+    description: "Connect a company-scoped, read-only SAP service for the utilities pilot.",
+    authMode: "credentials",
+    permissions: ["Read the configured company and collection only"],
+    credentialFields: [
+      { key: "tenantUrl", label: "SAP address" },
+      { key: "username", label: "Integration username" },
+      { key: "password", label: "Integration password", secret: true },
+      { key: "collectionPath", label: "OData collection path" },
+      { key: "companyField", label: "Company field name" },
+      { key: "companyId", label: "Company ID" },
+      { key: "recordKeyFields", label: "Unique record fields (comma-separated)" },
+    ],
+    env: [], webhook: false, readOnly: true,
+    note: "Your SAP administrator supplies the enabled service and field names. Verification checks read access only. Utility mapping and a reviewed import are required before data reaches Aval; automatic syncing is not enabled.",
+  },
   {
     id: "quickbooks",
     title: "QuickBooks Online",

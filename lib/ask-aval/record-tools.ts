@@ -20,7 +20,7 @@ import { noDataAvailable } from "./portfolio-data";
 import { integrationConnections, leases, organizationMembers, ownershipEntities, properties, units, users, workOrders } from "@/db/postgres/schema";
 import { OPEN_WORK_ORDER_STATUSES } from "@/lib/operations/types";
 import { listVendors } from "@/lib/operations/maintenance";
-import { listLeads, availableUnits } from "@/lib/operations/leasing";
+import { listLeads, availableUnits, residentsForLeases } from "@/lib/operations/leasing";
 import { listBills, listMeters } from "@/lib/infrastructure/meters";
 
 export const RECORD_TOOLS: ToolSchema[] = [
@@ -90,8 +90,17 @@ export async function runRecordTool(dbSession: DbSession, name: string, input: R
       const within = Math.min(Math.max(Number(input.within_days) || 90, 1), 365);
       const rows = await dbSession.db.select().from(leases).where(and(eq(leases.organizationId, organizationId), eq(leases.status, "active"), gte(leases.endDate, now), lte(leases.endDate, new Date(now.getTime() + within * DAY)))).orderBy(leases.endDate).limit(100);
       if (!rows.length) return { json: { available: true, expiring_leases: [], note: `No active lease ends within ${within} days.` }, numbers: [] };
-      const out = rows.map((row) => ({ id: row.id, unit_id: row.unitId, property_id: row.propertyId, ends_on: iso(row.endDate), days_left: row.endDate ? Math.ceil((row.endDate.getTime() - now.getTime()) / DAY) : null, rent_cents: row.rentCents, deposit_cents: row.depositCents, month_to_month: row.isMonthToMonth }));
-      return { json: { available: true, within_days: within, expiring_leases: out }, numbers: out.flatMap((row) => [row.rent_cents, row.deposit_cents, row.days_left].filter((value): value is number => typeof value === "number")) };
+      const [residentMap,propertyRows]=await Promise.all([
+        residentsForLeases(dbSession,organizationId,rows.map(row=>row.id)),
+        dbSession.db.select({id:properties.id,name:properties.name}).from(properties).where(and(eq(properties.organizationId,organizationId),inArray(properties.id,[...new Set(rows.map(row=>row.propertyId))]))),
+      ]);
+      const propertyNames=new Map(propertyRows.map(row=>[row.id,row.name]));
+      const out = rows.map((row) => ({ id: row.id, unit_id: row.unitId, property_id: row.propertyId, property_name:propertyNames.get(row.propertyId)??null,
+        residents:(residentMap.get(row.id)??[]).map(r=>({id:r.id,name:r.displayName})),
+        source_provider:row.sourceProvider,external_id:row.externalId,
+        ends_on: iso(row.endDate), days_left: row.endDate ? Math.ceil((row.endDate.getTime() - now.getTime()) / DAY) : null, rent_cents: row.rentCents, deposit_cents: row.depositCents, month_to_month: row.isMonthToMonth }));
+      const windows=[30,60,90].filter(days=>days<=within).map(days=>({within_days:days,lease_count:out.filter(row=>row.days_left!==null&&row.days_left<=days).length}));
+      return { json: { available: true, as_of_on:iso(now),within_days: within, lease_count:out.length,windows,expiring_leases: out,not_recorded:['renewal offer terms','resident renewal intent'] }, numbers: [out.length,within,...windows.flatMap(w=>[w.within_days,w.lease_count]),...out.flatMap((row) => [row.rent_cents, row.deposit_cents, row.days_left].filter((value): value is number => typeof value === "number"))] };
     }
     case "get_leads": {
       const limit = Math.min(Math.max(Number(input.limit) || 20, 1), 50);

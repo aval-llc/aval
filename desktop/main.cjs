@@ -49,6 +49,7 @@ function createWindow() {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      backgroundThrottling: false,
     },
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
@@ -133,6 +134,7 @@ app.whenReady().then(async () => {
   registerIpc("set-active", ({ active } = {}) => service.setActive(active === true));
   registerIpc("set-model", ({ modelId } = {}) => service.setModel(modelId));
   registerIpc("ask", (payload) => service.ask(payload));
+  registerIpc("infer", (payload) => service.infer(payload));
   // The customer-authorized provider surface. Registered through the same
   // trusted-sender check as everything else, and each name is one structured
   // provider operation rather than a browser primitive.

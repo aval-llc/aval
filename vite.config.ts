@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { sites } from "@openai/sites-vite-plugin";
 import vinext from "vinext";
 import { defineConfig } from "vite";
+import { agentBuildVersion } from './scripts/lib/agent-build-version.mjs';
 // `npx @vinext/cloudflare deploy`'s pre-flight check
 // (viteConfigHasCloudflarePlugin in @vinext/cloudflare/dist/deploy-config.js)
 // is a plain regex over this file's own source text: it requires a static
@@ -44,6 +45,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    define: { __AVAL_BUILD_ID__: JSON.stringify(agentBuildVersion()) },
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,

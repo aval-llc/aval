@@ -7,13 +7,17 @@
  * trusted without a scoped lookup first).
  */
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { utilityBills, utilityMeters } from "@/db/postgres/schema";
+import { validateUnit, UtilityError } from "./validation";
+import { lockUtilityWorkspace, validateMeterSite } from "./sites";
 import type { UnitOfMeasure, UtilityType } from "./types";
 
 export interface CreateMeterInput {
   utilityType: UtilityType;
+  siteId: string;
+  parentMeterId?: string | null;
   propertyLabel: string;
   unitLabel?: string;
   meterNumber?: string;
@@ -23,12 +27,17 @@ export interface CreateMeterInput {
 
 export async function createMeter(dbSession: DbSession, organizationId: string, input: CreateMeterInput) {
   const db = dbSession.db;
+  validateUnit(input.utilityType,input.unitOfMeasure);
+  await lockUtilityWorkspace(dbSession,organizationId);
+  const site = await validateMeterSite(dbSession,organizationId,input.siteId,input.parentMeterId,input.utilityType);
   const now = new Date();
   const meter = {
     id: crypto.randomUUID(),
     organizationId,
     utilityType: input.utilityType,
-    propertyLabel: input.propertyLabel,
+    siteId: site.id,
+    parentMeterId: input.parentMeterId ?? null,
+    propertyLabel: site.name,
     unitLabel: input.unitLabel ?? null,
     meterNumber: input.meterNumber ?? null,
     provider: input.provider ?? null,
@@ -58,7 +67,15 @@ export interface RecordBillInput {
   usageAmount: number;
   costCents: number;
   currency: "USD" | "MXN";
-  source: "manual" | "ai_extracted";
+  source: "manual" | "ai_extracted" | "reviewed_export";
+  unitOfMeasure?: string;
+  readingKind?: string;
+  sourceSystem?: string;
+  externalId?: string;
+  tariffCode?: string | null;
+  subtotalCents?: number | null;
+  taxCents?: number | null;
+  supersedesBillId?: string;
   extractionConfidence?: "high" | "low";
   extractionNote?: string;
 }
@@ -73,12 +90,13 @@ export class MeterNotFoundError extends Error {
 export async function recordBill(dbSession: DbSession, organizationId: string, input: RecordBillInput) {
   const db = dbSession.db;
   const [meter] = await db
-    .select({ id: utilityMeters.id })
+    .select()
     .from(utilityMeters)
     .where(and(eq(utilityMeters.id, input.meterId), eq(utilityMeters.organizationId, organizationId)))
     .limit(1);
   if (!meter) throw new MeterNotFoundError(input.meterId);
 
+  if (input.unitOfMeasure && input.unitOfMeasure !== meter.unitOfMeasure) throw new UtilityError("Bill unit differs from meter unit");
   const bill = {
     id: crypto.randomUUID(),
     organizationId,
@@ -89,6 +107,14 @@ export async function recordBill(dbSession: DbSession, organizationId: string, i
     costCents: input.costCents,
     currency: input.currency,
     source: input.source,
+    unitOfMeasure: meter.unitOfMeasure,
+    readingKind: input.readingKind ?? "unknown",
+    sourceSystem: input.sourceSystem ?? null,
+    externalId: input.externalId ?? null,
+    tariffCode: input.tariffCode ?? null,
+    subtotalCents: input.subtotalCents ?? null,
+    taxCents: input.taxCents ?? null,
+    supersedesBillId: input.supersedesBillId ?? null,
     extractionConfidence: input.extractionConfidence ?? null,
     extractionNote: input.extractionNote ?? null,
     createdAt: new Date(),
@@ -107,7 +133,7 @@ export async function listBills(dbSession: DbSession, organizationId: string, fi
     if (meterIds.length === 0) return [];
   }
 
-  const conditions = [eq(utilityBills.organizationId, organizationId)];
+  const conditions = [eq(utilityBills.organizationId, organizationId), isNull(utilityBills.supersededAt)];
   if (filters.meterId) conditions.push(eq(utilityBills.meterId, filters.meterId));
   if (meterIds) conditions.push(inArray(utilityBills.meterId, meterIds));
 

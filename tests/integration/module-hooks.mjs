@@ -5,6 +5,10 @@ import { pathToFileURL } from "node:url";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "esbuild";
+import { agentBuildVersion } from '../../scripts/lib/agent-build-version.mjs';
+
+// Immutable build identity for Node integration/evaluation traces, like Vite's define.
+globalThis.__AVAL_BUILD_ID__ = agentBuildVersion();
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url)).replace(/\/$/, "");
 const VIRTUAL = {

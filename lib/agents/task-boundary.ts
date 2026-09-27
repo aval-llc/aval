@@ -8,11 +8,11 @@ import { MAX_DELEGATION_DEPTH } from './delegation-policy';
 import { actorHolds, actorOrchestrates, isOrchestrator } from './organization/index.ts';
 import { employeeEnvelope } from './policy';
 import { employeeScopes, getEmployee } from './employees';
-export function inboundToolAllowed(scope: { conversationId?: string; messageId?: string; maintenance?: { residentId: string; propertyId: string; unitId: string } }, name: string, args: Record<string, unknown>) {
+export function inboundToolAllowed(scope: { conversationId?: string; messageId?: string; draftOnly?: boolean; maintenance?: { residentId: string; propertyId: string; unitId: string } }, name: string, args: Record<string, unknown>) {
   if (name === 'request_execution_plan') return false;
   if (args.conversation_id !== scope.conversationId) return false;
   if (name === 'read_conversation') return true;
-  if (name === 'send_external_message') return args.to === undefined && args.provider === undefined && (!scope.messageId || args.message_id === scope.messageId);
+  if (name === 'send_external_message') return !scope.draftOnly && args.to === undefined && args.provider === undefined && (!scope.messageId || args.message_id === scope.messageId);
   if (!scope.maintenance || args.message_id !== scope.messageId) return false;
   if (name === 'read_maintenance_context') return true;
   return name === 'create_maintenance_work_order' && args.resident_id === scope.maintenance.residentId && args.property_id === scope.maintenance.propertyId && args.unit_id === scope.maintenance.unitId;

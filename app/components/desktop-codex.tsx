@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle, Refresh, WarningTriangle } from "iconoir-react";
 import { useTranslations } from "next-intl";
+import { DesktopAgentRunner } from './desktop-agent-runner';
 
 export type DesktopCodexStatus =
   | "starting"
@@ -49,6 +50,7 @@ export interface DesktopCodexBridge {
   setActive(active: boolean): Promise<DesktopCodexState>;
   setModel(modelId: string): Promise<DesktopCodexState>;
   ask<T>(payload: DesktopAskPayload): Promise<T>;
+  infer(payload: { model: string; params: unknown }): Promise<unknown>;
   cancelTurn(conversationId: string): Promise<null>;
   onEvent(listener: (event: { type: "state"; state: DesktopCodexState } | { type: "delta"; requestId: string; delta: string }) => void): () => void;
 }
@@ -109,6 +111,7 @@ export function DesktopServiceBar() {
       {connected ? <CheckCircle width={15} height={15} /> : warning ? <WarningTriangle width={15} height={15} /> : <Refresh width={15} height={15} className={desktop.state.status === "starting" || desktop.state.status === "restarting" ? "spinning" : ""} />}
       <span>{t(statusKey)}</span>
       {desktop.state.active && connected && <strong>{desktop.state.selectedModel ?? t("DesktopCodex.defaultModel")}</strong>}
+      <DesktopAgentRunner desktop={desktop} />
     </div>
   );
 }

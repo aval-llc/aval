@@ -285,6 +285,43 @@ button:not(:disabled):active {
   border-radius: 16px;
   animation: aval-dialog-in var(--motion-slow) var(--ease-ui);
 }
+
+/* SAP uses the same dialog surface, with a compact account-first setup. */
+.connection-dialog.sap-connect-dialog {
+  width: min(440px, calc(100vw - 28px));
+  padding: 24px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.sap-connect-dialog h2 { margin: 18px 0 6px; font-size: 22px; letter-spacing: -.6px; }
+.sap-connect-dialog > p { font-size: 13px; line-height: 1.5; }
+.sap-connect-dialog .credential-form { gap: 14px; }
+.sap-connect-dialog .sap-account-fields { margin-top: 24px; }
+.sap-connect-dialog .credential-form label { font-size: 12px; gap: 7px; color: var(--ink); }
+.sap-connect-dialog .credential-form input {
+  height: 42px; border-radius: 8px; font-size: 13px;
+  background: var(--surface); color: var(--ink);
+}
+.sap-connect-dialog .credential-form input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.sap-connect-dialog .credential-form input::placeholder { color: var(--muted); }
+.sap-service-setup { margin-top: 16px; }
+.sap-setup-toggle {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer;
+}
+.sap-setup-toggle .is-open { transform: rotate(180deg); }
+.sap-connect-dialog .sap-service-fields { padding-top: 4px; }
+.sap-service-fields > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.sap-connect-dialog .sap-connect-actions { align-items: center; justify-content: space-between; gap: 12px; }
+.sap-access-note { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
+.sap-connect-dialog .dialog-message { font-size: 12px !important; line-height: 1.5; }
+.sap-connection-summary { display: flex; align-items: center; gap: 9px; padding: 16px 0 6px; font-size: 13px; }
+.sap-reconnect { display: block; margin: 14px auto 0; padding: 4px; background: transparent; border: 0; color: var(--muted); font-size: 12px; cursor: pointer; }
+@media (max-width: 420px) {
+  .connection-dialog.sap-connect-dialog { padding: 20px; }
+  .sap-connect-actions { flex-wrap: wrap; }
+  .sap-connect-actions .primary-button { margin-left: auto; }
+}
 [data-state="closed"].dialog-overlay {
   animation: aval-fade-out 150ms ease;
 }

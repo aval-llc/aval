@@ -146,7 +146,7 @@ export const CAPABILITY_TOOLS: Partial<Record<CanonicalCapability, readonly stri
   "vendor.insurance.read": ["get_vendors"],
   "renewal.read": ["get_expiring_leases"],
   "deposit.read": ["get_expiring_leases"],
-  "utility.read": ["get_utility_bills"],
+  "utility.read": ["get_utility_bills", "get_utility_investigations"],
   "utility.bill.read": ["get_utility_bills"],
   "integration.health.read": ["get_connection_health"],
   "staff.read": ["get_workspace_staff"],

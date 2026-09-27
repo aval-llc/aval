@@ -79,13 +79,15 @@ export async function runOrganizationE2ECases(t, { config, administrator }) {
       if (!role) return answer("Outside this scenario");
       const uses = params.messages.flatMap((m) => Array.isArray(m.content) ? m.content.filter((b) => b.type === "tool_use") : []);
       const results = params.messages.flatMap((m) => Array.isArray(m.content) ? m.content.filter((b) => b.type === "tool_result") : []);
-      const entry = seen.get(role) ?? { calls: 0, offered: [], system: "" };
+      const entry = seen.get(role) ?? { calls: 0, reviews: 0, offered: [], system: "" };
       entry.calls++; entry.offered = params.tools.map((tool) => tool.name); entry.system = params.system;
       seen.set(role, entry);
       return roles[role]({ uses, results, n: entry.calls, system: params.system });
     };
     globalThis.__SEMANTIC_MODEL__ = async (_env, _org, params) => {
       const packet = JSON.parse(params.messages[0].content);
+      const role = Object.keys(roles).find((tag) => packet.goal.includes(tag));
+      if (role && seen.has(role)) seen.get(role).reviews++;
       const keys = packet.phase === "plan" ? (packet.proposal?.tasks ?? []).map((task) => task.key) : [];
       const source = (packet.sources ?? []).find((s) => !s.failed && s.data && typeof s.data === "object" && Object.keys(s.data).length);
       const claims = packet.phase === "plan" || !source ? [] : [{ claim: "Records read", kind: "fact", supported: true, citations: [{ sourceId: source.id, pointer: "/" + Object.keys(source.data)[0].replaceAll("~", "~0").replaceAll("/", "~1") }] }];
@@ -162,6 +164,22 @@ export async function runOrganizationE2ECases(t, { config, administrator }) {
         // Budgets: every level funded for its own work.
         assert.equal(lead.max_steps, grantFor(row.lead).steps, `${row.domain}: Lead budget`);
         assert.equal(leaf.max_steps, grantFor(row.specialist).steps, `${row.domain}: Specialist budget`);
+        // A minimal read-only objective should not burn its whole allowance.
+        // Scripted counts measure runtime overhead, not real-model efficiency.
+        const metrics = ["Q", "L", "S"].map(level => {
+          const entry = seen.get(`[${level}:${tag}]`);
+          assert.equal(entry.calls, 2, `${row.domain}/${level}: one action and one conclusion`);
+          assert.ok(entry.reviews >= 1 && entry.reviews <= 2, `${row.domain}/${level}: bounded review calls (${entry.reviews})`);
+          return { level, modelCalls: entry.calls, reviewCalls: entry.reviews };
+        });
+        assert.equal((await rowsOf(workId)).length, 3, `${row.domain}: no duplicate delegated tasks`);
+        assert.equal(steps.filter(step => step.kind === "tool_call" && step.tool_name === row.tool).length, 1, `${row.domain}: gather evidence once`);
+        const before = metrics.map(entry => [entry.modelCalls, entry.reviewCalls]);
+        await runScheduledSweep(env);
+        assert.deepEqual(["Q", "L", "S"].map(level => {
+          const entry = seen.get(`[${level}:${tag}]`); return [entry.calls, entry.reviews];
+        }), before, `${row.domain}: completed work causes no more model or review calls`);
+        t.diagnostic(`AGENT_EFFICIENCY ${JSON.stringify({ domain: row.domain, metrics, tasks: 3, evidenceReads: 1, liveModel: false })}`);
       }
     });
 
