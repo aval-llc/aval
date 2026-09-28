@@ -34,9 +34,9 @@ test('desktop inference rejects missing usage, unoffered tools and execution',as
 });
 test('maintenance proposals use typed arguments and compact final answers use direct output',async()=>{
   const create={name:'create_maintenance_work_order',input_schema:{type:'object',properties:{summary:{type:'string'}},required:['summary']}};
-  const final={name:'render_answer',input_schema:{type:'object',properties:{headline:{type:'string'},narrative:{type:'string'},confidence:{type:'string'}},required:['headline','narrative','confidence']}};
+  const final={name:'render_answer',input_schema:{type:'object',properties:{headline:{type:'string'},narrative:{type:'string'},confidence:{type:'string'},resident_reply_draft:{type:'string'}},required:['headline','narrative','confidence','resident_reply_draft']}};
   for(const direct of [false,true]) {
-    const rpc=new EventEmitter();const input=direct?{headline:'Recorded',narrative:'Draft only',confidence:'high'}:{summary:'Slow drain'};
+    const rpc=new EventEmitter();const input=direct?{headline:'Recorded',narrative:'Draft only',confidence:'high',resident_reply_draft:'Thank you for reporting the issue.'}:{summary:'Slow drain'};
     rpc.request=async(method,args)=>{
       if(method==='thread/start')return{thread:{id:'thread'}};
       if(method==='turn/start') {

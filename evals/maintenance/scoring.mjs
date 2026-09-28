@@ -1,5 +1,5 @@
 /** Independent result scoring. A prevented mutation is not a completed workflow. */
-export const maintenanceScorerVersion = 'maintenance-behavior-scorer-v4';
+export const maintenanceScorerVersion = 'maintenance-behavior-scorer-v5';
 export function scoreMaintenanceCase(item) {
   const assertions = { ...item.assertions };
   if (item.mode === 'live_subscription') {

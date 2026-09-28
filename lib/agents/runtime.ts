@@ -272,7 +272,7 @@ export async function advanceTask(dbSession: DbSession,
   // Maintenance produces a concise reply draft, not charts or generated documents.
   // Reducing the offered shape does not change what the completion checker requires.
   if (isMaintenance) tools = tools.map(tool => tool.name !== 'render_answer' ? tool : {
-    ...tool, input_schema: { type: 'object', properties: Object.fromEntries(['headline','narrative','confidence'].map(key => [key, tool.input_schema.properties[key]])), required: ['headline','narrative','confidence'] },
+    ...tool, input_schema: { type: 'object', properties: { ...Object.fromEntries(['headline','narrative','confidence'].map(key => [key, tool.input_schema.properties[key]])), resident_reply_draft: { type: 'string', minLength: 1, maxLength: 4000, description: 'The actual message proposed to the resident, in the requested language. Not a statement that a draft exists. No unsupported claim of notification, dispatch, scheduling, or completion. This text is NOT sent.' } }, required: ['headline','narrative','confidence','resident_reply_draft'] },
   });
 
   const onboarding = await readOnboarding(dbSession, task.userId, organizationId);
@@ -380,7 +380,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       catch (error) { return { phase, reviewer: 'structural-preflight', exitCode: 1, problems: [error instanceof Error ? error.message : 'Invalid goal plan.'] }; }
     }
     const packet = await semanticPacket(dbSession, task!, messages, phase, proposal);
-    const params = { system: SEMANTIC_REVIEW_SYSTEM, messages: [{ role: 'user' as const, content: JSON.stringify(packet) }], tools: [isMaintenance ? groundedReviewTool(packet) : SEMANTIC_REVIEW_TOOL], tool_choice: { type: 'tool' as const, name: 'semantic_verdict' }, max_tokens: 1800 };
+    const params = { system: SEMANTIC_REVIEW_SYSTEM + (isMaintenance ? '\nMaintenance draft requirement: resident_reply_draft must contain the actual proposed tenant-facing message in the requested language, not a status statement that a draft exists. Inspect its claims just like the narrative. Reject missing or non-message drafts.' : ''), messages: [{ role: 'user' as const, content: JSON.stringify(packet) }], tools: [isMaintenance ? groundedReviewTool(packet) : SEMANTIC_REVIEW_TOOL], tool_choice: { type: 'tool' as const, name: 'semantic_verdict' }, max_tokens: 1800 };
     const proposalDigest = await digestPayload(proposal);
     const scope = { phase, proposalDigest, reviewer: 'independent-session-v1' };
     const fresh = await getTask(dbSession, organizationId, taskId);
@@ -443,6 +443,12 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
 
   const completeAnswer = async (final: ToolUseBlock, stepIndex: number): Promise<AdvanceOutcome | null> => {
     const answer = stripDashes(final.input);
+    if (isMaintenance) {
+      const draft = answer.resident_reply_draft;
+      if (typeof draft !== 'string' || !draft.trim() || draft.length > 4000) return finish('WAITING_FOR_HUMAN', { reasonCode: 'missing_reply_draft', error: 'The work order progress is preserved, but the actual resident reply draft is missing. A human must review.' });
+      const label = /español/i.test(task.goal) ? 'Borrador para la persona residente (no enviado)' : 'Resident reply draft (not sent)';
+      answer.narrative = `${typeof answer.narrative === 'string' ? answer.narrative : ''}\n\n${label}:\n${draft}`;
+    }
     const packet = await semanticPacket(dbSession, task, messages, 'answer', answer);
     const gate = checkDocumentAnswerNumbers(answer, withDerivedNumbers(seenNumbers), packet.sources);
     if (!gate.ok) {

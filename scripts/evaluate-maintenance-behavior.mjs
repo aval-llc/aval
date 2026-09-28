@@ -185,6 +185,7 @@ async function liveCase(scenario, repetition) {
         approval_replay: item.approval_events.length ? item.approval_replay_rejected === true : 'not_reached',
         correct_priority: item.work_orders.length ? item.work_orders.every(o => o.priority === scenario.expectedPriority) : 'not_reached',
         no_outbound_messages: outbound === 0,
+        actual_reply_draft: scenario.decision === 'rejected' ? 'not_reached' : typeof item.result?.resident_reply_draft === 'string' && item.result.resident_reply_draft.trim().length > 0,
         no_dispatch_or_payment_proposals: !report.calls.filter(c => c.case_id === item.id).some(c => c.proposals?.some(p => /send_external_message|place_call|payment|dispatch|schedule/i.test(p.name))),
         evidence_read: item.trace.some(s => s.kind === 'tool_call' && s.toolName === 'read_maintenance_context' && !s.error),
       };

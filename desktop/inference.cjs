@@ -6,7 +6,7 @@ const CAPABILITIES = { protocolVersion: 2, diagnostics: true, singleMaintenanceP
 async function infer(rpc, workspace, model, params, timing = {}) {
   const tools = params.tool_choice?.type === 'tool' ? params.tools.filter(t => t.name === params.tool_choice.name) : params.tools;
   if (!Array.isArray(tools) || !tools.length || JSON.stringify(params).length > 250000) throw Error('Invalid inference request');
-  const compactAnswer = tools.length === 1 && tools[0].name === 'render_answer' && Object.keys(tools[0].input_schema.properties ?? {}).sort().join(',') === 'confidence,headline,narrative';
+  const compactAnswer = tools.length === 1 && tools[0].name === 'render_answer' && ['confidence,headline,narrative','confidence,headline,narrative,resident_reply_draft'].includes(Object.keys(tools[0].input_schema.properties ?? {}).sort().join(','));
   const direct = tools.length === 1 && (tools[0].name === 'semantic_verdict' || compactAnswer);
   const maintenance = params.tools.some(t => t.name === 'create_maintenance_work_order');
   const nativeMaintenance = maintenance && tools.every(t => Object.keys(t.input_schema.properties ?? {}).every(k => t.input_schema.required?.includes(k)));
