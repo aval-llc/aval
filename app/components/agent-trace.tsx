@@ -64,10 +64,14 @@ interface TaskSummary {
   goal: string;
   status: string;
   steps: { used: number; max: number };
+  /** What kind of stop this is, from the server (lib/agents/work-presentation.ts); null while working. */
+  stop?: StopKind | null;
   createdAt: number;
   finishedAt: number | null;
   error: string | null;
 }
+
+type StopKind = "model_unavailable" | "unverified_figures" | "time_limit" | "too_large" | "needs_setup" | "needs_desktop" | "needs_person" | "interrupted" | "unknown";
 
 interface TraceEntry {
   sequence: number;
@@ -114,6 +118,8 @@ interface PendingApproval {
 
 /** Terminal states, mirroring TERMINAL_STATES in lib/agents/task-state.ts. A task in one of these never changes again, so it is never polled. */
 const SETTLED = new Set(["COMPLETED", "FAILED", "CANCELLED", "SUPERSEDED"]);
+/** Doing something now, as opposed to settled or waiting on someone or something outside it. */
+const WORKING = new Set(["QUEUED", "RUNNING", "WAITING_FOR_TOOL", "WAITING_FOR_AGENT"]);
 
 /** Tool name → the same readable label the Setup diagram uses, so a tool is named identically wherever it appears. */
 const TOOL_LABEL_KEYS = new Map(DATA_SOURCE_NODES.map((node) => [node.tool, node.labelKey]));
@@ -269,7 +275,11 @@ function TaskCard({ task, detail, expanded, busy, onToggle, onCancel }: {
   const label = useEnumLabel();
   const persona = personaFor(task.agentId);
   const live = !SETTLED.has(task.status);
-  const progress = task.steps.max > 0 ? Math.min(100, (task.steps.used / task.steps.max) * 100) : 0;
+  const locale = useLocale();
+  // When it finished, or that it is still working. A step budget is an
+  // internal limit, not progress, so it is never shown as either.
+  const working = WORKING.has(task.status);
+  const when = task.finishedAt ? new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(task.finishedAt)) : null;
   const Chevron = expanded ? NavArrowDown : NavArrowRight;
 
   return (
@@ -281,7 +291,7 @@ function TaskCard({ task, detail, expanded, busy, onToggle, onCancel }: {
           <strong>{task.goal}</strong>
           <span>{t(persona.labelKey)}</span>
         </span>
-        <span className="agent-task-steps">{t("AgentTrace.stepsOf", { used: task.steps.used, max: task.steps.max })}</span>
+        <span className="agent-task-steps">{working ? t("AgentTrace.working") : when}</span>
         <span className={`agent-status-pill status-${task.status.toLowerCase()}`}>
           {/* A running task gets a moving dot as well as a word: state should
               read at a glance without parsing text. */}
@@ -290,8 +300,8 @@ function TaskCard({ task, detail, expanded, busy, onToggle, onCancel }: {
         </span>
       </button>
 
-      <div className="agent-task-progress" role="presentation">
-        <span className="agent-task-progress-bar" style={{ width: `${progress}%` }}/>
+      <div className={`agent-task-progress${working ? " is-live" : ""}`} role="presentation">
+        <span className="agent-task-progress-bar"/>
       </div>
 
       {expanded && (
@@ -316,7 +326,14 @@ function TaskCard({ task, detail, expanded, busy, onToggle, onCancel }: {
                 </div>)}
                 <small>{t("AgentTrace.checkScope")}</small>
               </section>}
-
+              {detail.error && <section className="agent-task-result">
+                <p className="eyebrow">{t("AgentTrace.recordedReason")}</p>
+                <p>{detail.error}</p>
+              </section>}
+              <div className="agent-task-meta">
+                <span>{t("AgentTrace.tokensUsed", { used: detail.tokens.used.toLocaleString(), max: detail.tokens.max.toLocaleString() })}</span>
+                {detail.delegationDepth > 0 && <span>{t("AgentTrace.delegatedDepth", { depth: detail.delegationDepth })}</span>}
+              </div>
               </details>
               {(detail.result?.headline || detail.result?.narrative || detail.result?.document) && (
                 <div className="agent-task-result">
@@ -329,19 +346,21 @@ function TaskCard({ task, detail, expanded, busy, onToggle, onCancel }: {
               {/* A withheld or failed run is reported, not hidden. The
                   faithfulness gate refusing to state an unverified figure is
                   the system working correctly, and an operator should see it. */}
-              {detail.error && (
-                <p className="agent-task-failure"><WarningTriangle width={14} height={14}/>{detail.error}</p>
+              {task.stop && (
+                <div className="agent-task-stop" data-kind={task.stop}>
+                  <WarningTriangle width={15} height={15}/>
+                  <div>
+                    <strong>{t(`AgentTrace.stop_${task.stop}_title`)}</strong>
+                    <p>{t(`AgentTrace.stop_${task.stop}_body`)}</p>
+                  </div>
+                </div>
               )}
 
-              <div className="agent-task-meta">
-                <span>{t("AgentTrace.tokensUsed", { used: detail.tokens.used.toLocaleString(), max: detail.tokens.max.toLocaleString() })}</span>
-                {detail.delegationDepth > 0 && <span>{t("AgentTrace.delegatedDepth", { depth: detail.delegationDepth })}</span>}
-                {live && (
-                  <button type="button" className="agent-task-cancel" disabled={busy} onClick={onCancel}>
-                    {t("AgentTrace.cancelTask")}
-                  </button>
-                )}
-              </div>
+              {live && <div className="agent-task-meta">
+                <button type="button" className="agent-task-cancel" disabled={busy} onClick={onCancel}>
+                  {t("AgentTrace.cancelTask")}
+                </button>
+              </div>}
             </>
           ) : (
             <p className="agent-trace-empty">{t("AgentTrace.loadingTrace")}</p>

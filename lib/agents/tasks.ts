@@ -53,7 +53,10 @@ export interface NewTask {
     // Work created by `lib/agents/intake.ts` from an authorized external
     // event. It carries the provenance the coordinator needs and the identity
     // the intake dedupe is keyed on, so a redelivery reaches the same row.
-    | { source: "pms_event"; origin: string; sourceId: string; trustState: "verified"; providerId?: string };
+    | { source: "pms_event"; origin: string; sourceId: string; trustState: "verified"; providerId?: string }
+    // Work a person opened from a page: what that page showed them, as
+    // context for the run and never as part of the goal they are shown.
+    | { pageContext: string };
   organizationId: string;
   userId: string;
   agentId: string;

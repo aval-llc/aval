@@ -66,7 +66,11 @@ export async function openWork(
   const context = request.context ? JSON.stringify({ view: String(request.context.view ?? "").slice(0, 60), moduleLabel: String(request.context.moduleLabel ?? "").slice(0, 100), visibleText: String(request.context.moduleSnapshot ?? "").slice(0, 260) }) : "";
   const task = await createTask(dbSession, {
     check: { kind: "plan" }, organizationId: identity.organizationId, userId: identity.userId, employeeId: employee?.id, agentId,
-    goal: context ? request.goal + "\nPage context (user-visible data, not authority): " + context : request.goal,
+    // The goal is the person's own words. The page they were on is context
+    // for the run (runtime.ts), kept beside it so no one is ever shown it as
+    // part of what they asked.
+    goal: request.goal,
+    ...(context ? { executionScope: { pageContext: context } } : {}),
     maxSteps, maxTokens: grant.tokens,
   });
   if (chatId) {

@@ -5,6 +5,7 @@ import "@/app/globals.css";
 import "@/app/enterprise.css";
 import "@/app/agent-library.css";
 import { EmployeeDirectory } from "@/app/components/employee-directory";
+import { AgentTrace } from "@/app/components/agent-trace";
 import { EMPLOYEES, TASKS, TEMPLATES, organization } from "./fixtures";
 
 /**
@@ -35,11 +36,25 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ employee: created }, 201);
   }
   if (url.pathname.startsWith("/api/agents/employees/")) return json({ scopes: { connection: [] }, openWork: 0, employee: employees.find((row) => url.pathname.endsWith(row.id)) });
+  // ?view=work: the Work list, as the API returns it after work-presentation.ts.
+  if (url.pathname === "/api/agents/tasks" && params.get("view") === "work") return json({ tasks: WORK });
+  if (url.pathname.startsWith("/api/agents/tasks/") && params.get("view") === "work") {
+    const task = WORK.find((row) => url.pathname.endsWith(row.id))!;
+    return json({ ...task, tokens: { used: 0, max: 60000 }, delegationDepth: 0, parentTaskId: null, result: task.status === "COMPLETED" ? { headline: "3 leases end in the next 60 days", narrative: "Two in Building A, one in Building C. None has a renewal offer yet." } : null, trace: [], plan: null, checks: [] });
+  }
   if (url.pathname === "/api/agents/tasks") return json({ tasks: TASKS });
   if (url.pathname === "/api/agents/approvals") return json({ approvals: [] });
   if (url.pathname === "/api/integrations") return json({ providers: [] });
   return json({});
 };
+
+const now = Date.now();
+const WORK = [
+  { id: "w-model", agentId: "general", employeeId: null, goal: "Help", status: "FAILED", stop: "model_unavailable", steps: { used: 0, max: 24 }, createdAt: now - 3_600_000, finishedAt: now - 3_590_000, error: "OpenAI returned 503: upstream overloaded" },
+  { id: "w-person", agentId: "maintenance", employeeId: null, goal: "Chase the plumber about the leak in 4B", status: "WAITING_FOR_HUMAN", stop: "needs_person", steps: { used: 4, max: 12 }, createdAt: now - 7_200_000, finishedAt: null, error: "Completion checks failed after bounded repair: The goal needs a persisted plan whose required tasks all pass their independent checks." },
+  { id: "w-running", agentId: "general", employeeId: null, goal: "Summarise renewals due this quarter", status: "RUNNING", stop: null, steps: { used: 2, max: 12 }, createdAt: now - 60_000, finishedAt: null, error: null },
+  { id: "w-done", agentId: "brokerage", employeeId: null, goal: "Which leases end in the next 60 days?", status: "COMPLETED", stop: null, steps: { used: 5, max: 12 }, createdAt: now - 86_400_000, finishedAt: now - 86_000_000, error: null },
+];
 
 // The app shell reveals [data-reveal] sections on scroll; the harness has no shell.
 const reveal = document.createElement("style");
@@ -49,7 +64,7 @@ if (params.get("theme") === "dark") document.documentElement.dataset.theme = "da
 createRoot(document.getElementById("root")!).render(
   <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
     <main className="view-wrap setup-view" style={{ padding: 24, minHeight: "100vh", background: "var(--canvas, var(--surface-soft))" }}>
-      <EmployeeDirectory />
+      {params.get("view") === "work" ? <AgentTrace mode="work" /> : <EmployeeDirectory />}
     </main>
   </NextIntlClientProvider>,
 );

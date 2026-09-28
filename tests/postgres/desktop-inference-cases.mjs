@@ -15,7 +15,7 @@ import {decideApproval,latestApprovalForTask} from '../../lib/agents/approvals.t
 
 export async function runDesktopInferenceCases(t,{session,userA,userB,administrator,config}) {
   const previous={...env};env.DATABASE_URL=config.connectionString;delete env.HYPERDRIVE;
-  const runnerId=randomUUID();let org,task,job;
+  const runnerId=randomUUID();let org,task,job,abandonedReservation=0;
   const request=(user,o,body)=>new Request('https://app.aval.llc/api/test',{method:'POST',headers:withVerifiedIdentityHeaders(new Headers({'content-type':'application/json',cookie:`aval-active-organization=${o}`}),{userId:user,email:`${user}@example.test`,displayName:user,emailVerified:true}),body:JSON.stringify(body)});
   const call=async(route,user,o,body)=>{const r=await route(request(user,o,body),undefined);return {status:r.status,...await r.json()};};
   const run=work=>session(userA,s=>work(s,s.identity.organizationId));
@@ -41,7 +41,9 @@ export async function runDesktopInferenceCases(t,{session,userA,userB,administra
       assert.equal((await call(desktop,userB,other,{action:'complete',organizationId:org,runnerId,jobId:job.id,claimToken:job.claimToken,response})).status,409);
       assert.equal((await call(desktop,userA,org,{action:'complete',organizationId:org,runnerId,jobId:job.id,claimToken:'wrong',response})).status,409);
     });
-    await t.test('desktop: expired claims retry with a new fence and retain unknown-usage reservation',async()=>{
+    await t.test('desktop: expired claims retry with a new fence and charge the unknown attempt as used',async()=>{
+      abandonedReservation=Number((await administrator.query('SELECT reserved_tokens FROM desktop_model_jobs WHERE id=$1',[job.id])).rows[0].reserved_tokens);
+      assert.ok(abandonedReservation>0);
       await administrator.query("UPDATE desktop_model_jobs SET lease_until=now()-interval '1 minute' WHERE id=$1",[job.id]);
       const old=job;job=(await call(desktop,userA,org,{action:'claim',organizationId:org,runnerId})).job;
       assert.notEqual(job.claimToken,old.claimToken);
@@ -52,7 +54,10 @@ export async function runDesktopInferenceCases(t,{session,userA,userB,administra
       const complete=()=>call(desktop,userA,org,{action:'complete',organizationId:org,runnerId,jobId:job.id,claimToken:job.claimToken,response});
       const saved=await complete();assert.equal(saved.status,200);assert.equal(saved.accepted,false);
       await complete();const row=(await administrator.query('SELECT tokens_used,tokens_reserved FROM desktop_model_runners WHERE organization_id=$1',[org])).rows[0];
-      assert.equal(Number(row.tokens_used),30);assert.ok(Number(row.tokens_reserved)>0);
+      // The abandoned claim was charged as used when it was re-claimed (an
+      // unknown billed attempt is never free), rather than staying reserved
+      // forever; the live claim's reservation is released on completion.
+      assert.equal(Number(row.tokens_used),30+abandonedReservation);assert.equal(Number(row.tokens_reserved),0);
     });
     await t.test('desktop: identical semantic requests share a durable response',async()=>{
       const review=await run((s,o)=>createTask(s,{organizationId:o,userId:userA,agentId:'general',goal:'Review',check:{kind:'evidence',tools:['get_portfolio_metrics']}}));
@@ -60,6 +65,22 @@ export async function runDesktopInferenceCases(t,{session,userA,userB,administra
       const rows=await administrator.query('SELECT * FROM desktop_model_jobs WHERE task_id=$1',[review.id]);assert.equal(rows.rowCount,1);
       await administrator.query("UPDATE desktop_model_jobs SET status='completed',response_json=$2 WHERE id=$1",[rows.rows[0].id,JSON.stringify(response)]);
       assert.deepEqual(await run((s,o)=>callTaskModel(s,{},o,params,review.id,0,'review:answer')),response);
+    });
+    await t.test('desktop: a used-up allowance says when it resets, and a new day restores it',async()=>{
+      const waiting=await run((s,o)=>createTask(s,{organizationId:o,userId:userA,agentId:'general',goal:'Read portfolio again',check:{kind:'evidence',tools:['get_portfolio_metrics']}}));
+      assert.equal((await run((s,o)=>advanceTask(s,{},o,waiting.id,randomUUID(),{invocationBudgetMs:45000}))).status,'WAITING_FOR_MODEL');
+      await administrator.query("UPDATE desktop_model_runners SET tokens_used=token_limit,tokens_reserved=0,window_started_at=now() WHERE organization_id=$1",[org]);
+      const refused=await call(desktop,userA,org,{action:'claim',organizationId:org,runnerId});
+      assert.equal(refused.status,429);assert.equal(refused.code,'budget_exhausted');
+      const resetsIn=new Date(refused.resetsAt).getTime()-Date.now();
+      assert.ok(resetsIn>23*3600_000&&resetsIn<=24*3600_000,'it says when the allowance resets');
+      // A day later the window starts over and the waiting work is claimed.
+      await administrator.query("UPDATE desktop_model_runners SET window_started_at=now()-interval '25 hours' WHERE organization_id=$1",[org]);
+      const claimed=await call(desktop,userA,org,{action:'claim',organizationId:org,runnerId});
+      assert.equal(claimed.status,200,JSON.stringify(claimed));assert.ok(claimed.job,'the waiting work is claimed');
+      const row=(await administrator.query('SELECT tokens_used,window_started_at FROM desktop_model_runners WHERE organization_id=$1',[org])).rows[0];
+      assert.equal(Number(row.tokens_used),0);assert.ok(Date.now()-new Date(row.window_started_at).getTime()<60_000);
+      await call(desktop,userA,org,{action:'complete',organizationId:org,runnerId,jobId:claimed.job.id,claimToken:claimed.job.claimToken,response});
     });
     await t.test('demo: creation and seeding are idempotent and isolated',async()=>{
       const created=await call(demo,userA,org,{action:'create'});assert.equal(created.status,200);const demoOrg=created.organizationId;

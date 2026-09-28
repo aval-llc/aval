@@ -10,6 +10,9 @@ import { runAgentWorkerBatch } from '@/lib/agents/worker';
 import { runtimeBindings } from '@/lib/runtime/bindings';
 import { getRequestExecutionContext } from 'vinext/shims/request-context';
 
+/** A runner's token allowance is per day, not for its life. */
+const ALLOWANCE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export const GET = withApiSession(async (session, request) => {
   const identity = await getApiIdentity(session, request);
   if (!identity || identity.role !== 'owner') return Response.json({ error: 'Owner access required' }, { status: 403 });
@@ -39,6 +42,13 @@ export const POST = withApiSession(async (session, request) => {
     await query(session, 'UPDATE desktop_model_runners SET heartbeat_at=now() WHERE organization_id=$1', [org]);
     if (body.action === 'claim') {
       if (!runner.enabled) return Response.json({ error:'Desktop runner paused' },{status:409});
+      // The allowance is per day (20260928000200_desktop_runner_daily_allowance.sql).
+      // A new window keeps only the reservations of claims that are still live.
+      if (new Date(String(runner.window_started_at)).getTime() <= Date.now() - ALLOWANCE_WINDOW_MS) {
+        await query(session, `UPDATE desktop_model_runners SET tokens_used=0,window_started_at=now(),
+          tokens_reserved=COALESCE((SELECT sum(reserved_tokens) FROM desktop_model_jobs WHERE organization_id=$1 AND status='claimed' AND lease_until>now()),0)
+          WHERE organization_id=$1`, [org]);
+      }
       // One in-flight inference per workspace bounds spend and response ordering.
       const busy = await query(session, `SELECT id FROM desktop_model_jobs WHERE organization_id=$1 AND status='claimed' AND lease_until>now() LIMIT 1`, [org]);
       if (busy.rows.length) return Response.json({ job: null });
@@ -71,11 +81,24 @@ export const POST = withApiSession(async (session, request) => {
           return Response.json({job:null,handoff:true,reason:'inference_budget'});
         }
       }
+      // Re-claiming an abandoned claim: its reservation moves to what was used
+      // (an unknown billed attempt is never free), instead of staying reserved
+      // forever on top of the new one.
+      if (job.status === 'claimed' && Number(job.reserved_tokens) > 0) {
+        await query(session, 'UPDATE desktop_model_runners SET tokens_reserved=GREATEST(tokens_reserved-$2,0),tokens_used=tokens_used+$2 WHERE organization_id=$1', [org, Number(job.reserved_tokens)]);
+        await query(session, 'UPDATE desktop_model_jobs SET reserved_tokens=0 WHERE id=$1', [job.id]);
+      }
+      const budget = (await query(session, 'SELECT tokens_used,tokens_reserved,token_limit,window_started_at FROM desktop_model_runners WHERE organization_id=$1', [org])).rows[0];
+      // Reserve admission allowance, not a provider-enforced token ceiling.
       const allowance = Math.max(request.tool_choice?.name==='semantic_verdict'?64000:128000, estimateInputTokens(job.request_json) + 32768);
-      if (Number(runner.tokens_used) + Number(runner.tokens_reserved) + allowance > Number(runner.token_limit)) return Response.json({ error: 'Evaluation token cap reached; work remains incomplete', code: 'budget_exhausted' }, { status: 429 });
+      if (Number(budget.tokens_used) + Number(budget.tokens_reserved) + allowance > Number(budget.token_limit)) {
+        const resetsAt = new Date(new Date(String(budget.window_started_at)).getTime() + ALLOWANCE_WINDOW_MS).toISOString();
+        return Response.json({ error: `Today's allowance for agents on this plan is used up. It resets at ${resetsAt}; work waits until then.`, code: 'budget_exhausted', resetsAt }, { status: 429 });
+      }
       const claim = crypto.randomUUID();
       await query(session, `UPDATE desktop_model_jobs SET attempt_history_json=attempt_history_json || jsonb_build_array(jsonb_build_object('claimToken',$2::text,'reservedTokens',$3::bigint,'startedAt',now(),'usageStatus','unknown')) WHERE id=$1`, [job.id,claim,allowance]);
-      // An abandoned claim keeps its reservation: an unknown billed attempt is never free.
+      // The prior unknown attempt stays in history and is conservatively charged
+      // to this daily window above; reserve the new attempt separately.
       await query(session,'UPDATE desktop_model_runners SET tokens_reserved=tokens_reserved+$2 WHERE organization_id=$1',[org,allowance]);
       await query(session, `UPDATE desktop_model_jobs SET status='claimed',runner_id=$2,claim_token=$3,lease_until=now()+interval '2 minutes',model=$4,reserved_tokens=$5,error=NULL,diagnostics_json=$6 WHERE id=$1`, [job.id, runnerId, claim,runner.model,allowance,JSON.stringify({admission})]);
       return Response.json({ job: { id: job.id, taskId: job.task_id, claimToken: claim, params: job.request_json, model: runner.model } });

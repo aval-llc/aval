@@ -18,6 +18,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
 import { agentTasks, agentApprovals, actionEvidence, operationalFacts } from "@/db/postgres/schema";
 import { TASK_STATES, TERMINAL_STATES, type TaskState } from "./task-state.ts";
+import { workTitle } from "./work-presentation.ts";
 
 /** States where the work is alive: someone or something still owes it a move. */
 // Every non-terminal state. Work waiting on a provider, a resident, a vendor,
@@ -62,7 +63,7 @@ export async function openWork(dbSession: DbSession, organizationId: string): Pr
 
   return rows.map((row) => ({
     id: row.id,
-    goal: row.goal,
+    goal: workTitle(row.goal),
     state: row.status as TaskState,
     owner: row.agentId,
     waitingOn: waitingReason(row.status as TaskState, row.error),
