@@ -72,7 +72,8 @@ async function runCase(options = {}) {
       assert.equal((await db.run(s=>maintenanceReceipt(s,final,JSON.parse(final.transcriptJson)))).execution.verified,false);
       await assert.rejects(db.session(`other_${randomUUID()}`,s=>maintenanceReceipt(s,final,JSON.parse(final.transcriptJson))),/Maintenance intake/);
     }
-    return {final,receipt,outcome,actorCalls,reviewerCalls,user:db.user};
+    const prefetchCount=Number((await db.admin.query("SELECT count(*) FROM agent_task_steps WHERE task_id=$1 AND kind='context_read_proposed'",[task.id])).rows[0].count);
+    return {final,receipt,outcome,actorCalls,reviewerCalls,prefetchCount,user:db.user};
   } finally {await db.close();}
 }
 
@@ -137,14 +138,14 @@ test('maintenance reliability on PostgreSQL', {skip:!process.env.AVAL_TEST_DATAB
     }finally{await db.close();}
   });
   await t.test('approved work has a bound receipt, one order and an open repair',async()=>{
-    const r=await runCase({tamper:true});assert.equal(r.final.status,'COMPLETED',r.final.error);assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.outcome.actionState,'executed');assert.equal(r.outcome.verificationState,'verified');assert.notEqual(r.receipt.execution.workOrderStatus,'completed');assert.equal(r.reviewerCalls,1);
+    const r=await runCase({tamper:true});assert.equal(r.final.status,'COMPLETED',r.final.error);assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.outcome.actionState,'executed');assert.equal(r.outcome.verificationState,'verified');assert.notEqual(r.receipt.execution.workOrderStatus,'completed');assert.equal(r.reviewerCalls,1);assert.equal(r.actorCalls,2,'server context read saves an actor call');assert.equal(r.prefetchCount,1,'resumes preserve the mandatory observation');
   });
   for(const option of ['reject','expire'])await t.test(`${option} creates no work order and assigns human ownership`,async()=>{
     const r=await runCase({[option]:true});assert.equal(r.final.status,'WAITING_FOR_HUMAN',r.final.error);assert.equal(r.receipt.execution.recordCount,0);assert.equal(r.outcome.actionState,'declined');assert.equal(r.outcome.ownerUserId,r.user);assert.ok(r.outcome.reviewAt);assert.equal(r.final.nextAttemptAt,null);assert.equal(r.reviewerCalls,0);
   });
   await t.test('one mixed proposal is repaired without executing either proposed tool',async()=>{const r=await runCase({mixed:1});assert.equal(r.final.status,'COMPLETED',r.final.error);assert.equal(r.receipt.execution.recordCount,1);});
   await t.test('repeated malformed proposals hand off without effects',async()=>{const r=await runCase({mixed:2});assert.equal(r.outcome.reasonCode,'invalid_proposal');assert.equal(r.receipt.execution.recordCount,0);});
-  await t.test('unchanged reads terminate with owned review',async()=>{const r=await runCase({repeat:true});assert.equal(r.outcome.reasonCode,'no_progress');assert.equal(r.actorCalls,4);});
+  await t.test('unchanged reads terminate with owned review',async()=>{const r=await runCase({repeat:true});assert.equal(r.outcome.reasonCode,'no_progress');assert.equal(r.actorCalls,3);});
   await t.test('review failure preserves the created work order',async()=>{const r=await runCase({reviewFails:true});assert.equal(r.final.status,'WAITING_FOR_HUMAN');assert.equal(r.outcome.actionState,'executed');assert.equal(r.outcome.verificationState,'review_required');assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.reviewerCalls,2);});
   await t.test('insufficient inference allowance produces an owned handoff',async()=>{const r=await runCase({budget:true});assert.equal(r.outcome.reasonCode,'inference_budget');assert.equal(r.actorCalls,0);assert.equal(r.outcome.ownerUserId,r.user);});
   await t.test('exhaustion after creation preserves the effect for a human',async()=>{const r=await runCase({budgetAfter:true});assert.equal(r.outcome.reasonCode,'inference_budget');assert.equal(r.outcome.actionState,'executed');assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.outcome.ownerUserId,r.user);});

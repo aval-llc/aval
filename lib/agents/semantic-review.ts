@@ -56,6 +56,29 @@ export const SEMANTIC_REVIEW_TOOL: ToolSchema = {
     }, required: ['passed', 'requirements', 'claims', 'issues'] },
 };
 
+/** Exact source-local leaves, not paths into the packet wrapper. No evidence is removed. */
+export function citationPointers(data: unknown, path = ''): string[] {
+    if (data === undefined) return [];
+    if (data === null || typeof data !== 'object') return path || data !== null ? [path] : [];
+    const entries = Object.entries(data);
+    if (!entries.length) return [path];
+    return entries.flatMap(([key, value]) => citationPointers(value, `${path}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`));
+}
+
+/** Constrain syntax to real source/path pairs; semantic support is still reviewed and validated. */
+export function groundedReviewTool(packet: ReviewPacket): ToolSchema {
+    const alternatives = packet.sources.map(source => ({
+        type: 'object', properties: { sourceId: { type: 'string', enum: [source.id] }, pointer: { type: 'string', enum: citationPointers(source.data) } },
+        required: ['sourceId', 'pointer'], additionalProperties: false,
+    })).filter(schema => schema.properties.pointer.enum.length);
+    // Large general-purpose packets retain ordinary validation, never trimmed evidence.
+    if (!alternatives.length || alternatives.reduce((n, s) => n + s.properties.pointer.enum.length, 0) > 256 || JSON.stringify(alternatives).length > 16000) return SEMANTIC_REVIEW_TOOL;
+    const schema = structuredClone(SEMANTIC_REVIEW_TOOL.input_schema);
+    const properties = schema.properties as Record<string, { items: { properties: Record<string, { items: unknown }> } }>;
+    properties.claims.items.properties.citations.items = { anyOf: alternatives };
+    return { ...SEMANTIC_REVIEW_TOOL, input_schema: schema };
+}
+
 function object(v: unknown): v is Record<string, unknown> { return !!v && typeof v === 'object' && !Array.isArray(v); }
 function nonempty(v: unknown): v is string { return typeof v === 'string' && !!v.trim(); }
 export function hasPointer(data: unknown, pointer: string): boolean {

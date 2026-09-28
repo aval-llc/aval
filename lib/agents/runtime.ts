@@ -1,7 +1,7 @@
 import type { DbSession } from "@/db/postgres/session";
 import { agentChecks, agentModelContexts } from "@/db/postgres/schema";
 import { plannedEvidenceTasks, semanticPacket } from './semantic-evidence';
-import { SEMANTIC_REVIEW_SYSTEM, SEMANTIC_REVIEW_TOOL, parseSemanticVerdict, type ReviewPacket } from './semantic-review';
+import { SEMANTIC_REVIEW_SYSTEM, SEMANTIC_REVIEW_TOOL, groundedReviewTool, parseSemanticVerdict, type ReviewPacket } from './semantic-review';
 import { assembleContext, byteCount, MAX_CONTEXT_BYTES } from './context';
 import { estimateInputTokens, modelBudget, MAINTENANCE_REVIEW_RESERVE } from './inference-budget';
 import { maintenanceReceipt, maintenanceOutcome } from './maintenance-receipt';
@@ -288,7 +288,7 @@ export async function advanceTask(dbSession: DbSession,
   }
   system += `
 Task completion condition: ${task.checkJson}. The harness verifies it independently. A final answer without the required evidence or stored outcome fails. For a root plan, call plan_goal before concluding; inspect failed checks and replan remaining work at most once. Scratchpad notes are available through read_memory/write_memory, never treated as facts or authority.`;
-  if (isMaintenance) system += '\nMaintenance protocol v2: propose exactly ONE tool per response. Read maintenance context, propose the internal work order, then use the stored execution receipt to compose a final draft. Never combine an action and render_answer. Do not re-read unchanged facts after a confirmed execution. An approved internal work order remains open; completing this agent task never means the repair is finished. Receipt data describes only this task.';
+  if (isMaintenance) system += '\nMaintenance progression v3: propose exactly ONE tool per response. The server performs the mandatory initial context read through the permission-checked tool executor. Use its observation to assess and propose an internal work order, then use the stored execution receipt to compose a final draft. Never combine an action and render_answer. Do not re-read unchanged facts after a confirmed execution. An approved internal work order remains open; completing this agent task never means the repair is finished. Receipt data describes only this task. Requesting manager involvement does not mean the manager was notified or acknowledged anything. Say what was recorded and what still needs human action; never imply dispatch, notification, or scheduling without its own confirmed receipt.';
   if (contract.kind === 'plan') system += `
 Evidence tools available to children retaining this agent: ${JSON.stringify(evidenceCapabilities)}.
 Use these exact tool names in check.tools; do not invent search tools.${assignableActorsPrompt(task.agentId, { profile: await getOperatingProfile(dbSession, organizationId), objective: task.goal })} For example a document investigation uses {"kind":"evidence","tools":["read_document"]} when read_document is available; that child also receives list_documents for discovery. Prefer one child for related reads and comparison. Omit agentId to retain this agent. A prose description is not a completion condition. If this agent cannot perform the requested work, explain that limitation instead of inventing a capability.`;
@@ -375,7 +375,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       catch (error) { return { phase, reviewer: 'structural-preflight', exitCode: 1, problems: [error instanceof Error ? error.message : 'Invalid goal plan.'] }; }
     }
     const packet = await semanticPacket(dbSession, task!, messages, phase, proposal);
-    const params = { system: SEMANTIC_REVIEW_SYSTEM, messages: [{ role: 'user' as const, content: JSON.stringify(packet) }], tools: [SEMANTIC_REVIEW_TOOL], tool_choice: { type: 'tool' as const, name: 'semantic_verdict' }, max_tokens: 1800 };
+    const params = { system: SEMANTIC_REVIEW_SYSTEM, messages: [{ role: 'user' as const, content: JSON.stringify(packet) }], tools: [isMaintenance ? groundedReviewTool(packet) : SEMANTIC_REVIEW_TOOL], tool_choice: { type: 'tool' as const, name: 'semantic_verdict' }, max_tokens: 1800 };
     const proposalDigest = await digestPayload(proposal);
     const scope = { phase, proposalDigest, reviewer: 'independent-session-v1' };
     const fresh = await getTask(dbSession, organizationId, taskId);
@@ -733,6 +733,10 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       const replaying = pendingUses.length > 0;
       const stepIndex = task.stepCount + stepsRun - (replaying ? 1 : 0);
       const remainingSteps = task.maxSteps - stepIndex;
+      const initialScope = JSON.parse(task.executionScopeJson);
+      const initialRead = isMaintenance && !replaying && stepIndex === 0 && initialScope.source === 'inbound' &&
+        typeof initialScope.conversationId === 'string' && typeof initialScope.messageId === 'string' &&
+        tools.some(t => t.name === 'read_maintenance_context');
 
       const remainingTokens=task.maxTokens-task.tokensUsed-inputTokens-outputTokens;
       const overhead=byteCount({system,tools})+2048;
@@ -754,11 +758,14 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       }
       if(assembled.evicted)await persistStep(dbSession, {taskId,organizationId,stepIndex,kind:'context_evicted',error:`${assembled.evicted} older messages retained in full transcript and omitted from this model request.`});
       const budget = modelBudget({ remaining: remainingTokens, system, tools, messages: assembled.messages, reviewReserve: isMaintenance ? MAINTENANCE_REVIEW_RESERVE : 0 });
-      if (budget.outputTokens < 256 && !replaying) return finish('FAILED', { error: 'Insufficient token budget while reserving final verification.' });
+      if (budget.outputTokens < 256 && !replaying && !initialRead) return finish('FAILED', { error: 'Insufficient token budget while reserving final verification.' });
       const outputBudget=Math.max(256,budget.outputTokens);
       const contextJson=JSON.stringify({system,messages:assembled.messages,tools,outputBudget,evicted:assembled.evicted});
       await dbSession.db.insert(agentModelContexts).values({id:crypto.randomUUID(),organizationId,taskId,stepIndex,contextJson,digest:await digestPayload(contextJson),createdAt:new Date()});
-      const res: MessagesResponse = replaying ? { id: 'replayed', content: pendingUses, usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: 'tool_use', routing: undefined } : await callTaskModel(dbSession, env, organizationId, {
+      const res: MessagesResponse = replaying ? { id: 'replayed', content: pendingUses, usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: 'tool_use', routing: undefined } : initialRead ? {
+        id: 'maintenance-context-prefetch-v1', content: [{ type: 'tool_use', id: crypto.randomUUID(), name: 'read_maintenance_context', input: { conversation_id: initialScope.conversationId, message_id: initialScope.messageId } }],
+        usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: 'tool_use',
+      } : await callTaskModel(dbSession, env, organizationId, {
         system,
         messages:assembled.messages,
         tools,
@@ -780,18 +787,18 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
         return { taskId, status: afterModel?.status ?? "FAILED", stepsRun, error: "Lease lost during inference." };
       }
       if (afterModel.cancelRequested) return finish("CANCELLED");
-      const responseJson=JSON.stringify({kind:"model_response",response:res});
+      const responseJson=JSON.stringify({kind:initialRead?'runtime_read_proposal':"model_response",response:res});
       await dbSession.db.insert(agentModelContexts).values({id:crypto.randomUUID(),organizationId,taskId,stepIndex,contextJson:responseJson,digest:await digestPayload(responseJson),createdAt:new Date()});
       if(Date.now()>=(fresh.deadlineAt?.getTime()??Infinity))return finish("FAILED",{error:"The task reached its total wall-clock limit before its proposed actions could run."});
 
       await persistStep(dbSession, {
-        taskId, organizationId, stepIndex, kind: replaying ? "model_response_replayed" : "model_call",
+        taskId, organizationId, stepIndex, kind: initialRead ? 'context_read_proposed' : replaying ? "model_response_replayed" : "model_call",
         executionManifest: res.executionManifest,
         modelProvider: res.routing?.providerId,
         modelName: res.routing?.model,
         resultDigest: await digestPayload(res.content),
       });
-      audit.push({ kind: "model_call", label: task.agentId, payloadDigest: await digestPayload(res.content), count: stepIndex });
+      if (!initialRead) audit.push({ kind: "model_call", label: task.agentId, payloadDigest: await digestPayload(res.content), count: stepIndex });
 
       const toolUses = res.content.filter((block): block is ToolUseBlock => block.type === "tool_use");
       if (isMaintenance && toolUses.length > 1) {
