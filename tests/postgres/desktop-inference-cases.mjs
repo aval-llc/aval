@@ -113,7 +113,8 @@ export async function runDesktopInferenceCases(t,{session,userA,userB,administra
       }
       assert.equal((await work((s,o)=>getTask(s,o,current.id))).status,'COMPLETED');assert.equal(reviewCalls,1);
       assert.equal(Number((await administrator.query("SELECT count(*) FROM work_orders WHERE organization_id=$1 AND source_provider='manual'",[target])).rows[0].count),1);
-      const modelCalls=await administrator.query("SELECT count(*) FROM agent_task_steps WHERE task_id=$1 AND kind='model_call'",[current.id]);assert.equal(Number(modelCalls.rows[0].count),4);
+      const modelCalls=await administrator.query("SELECT count(*) FROM agent_task_steps WHERE task_id=$1 AND kind='model_call'",[current.id]);assert.equal(Number(modelCalls.rows[0].count),3,'two actor calls and one independent review');
+      const reads=await administrator.query("SELECT count(*) FROM agent_task_steps WHERE task_id=$1 AND kind='context_read_proposed'",[current.id]);assert.equal(Number(reads.rows[0].count),1,'mandatory context is read once without inference');
     });
   } finally {for(const key of Object.keys(env))delete env[key];Object.assign(env,previous);await administrator.query('UPDATE organizations SET active_model_provider=NULL WHERE id=$1',[org]);}
 }
