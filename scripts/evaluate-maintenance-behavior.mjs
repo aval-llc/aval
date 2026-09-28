@@ -22,8 +22,15 @@ import { getTask, listSteps } from '../lib/agents/tasks.ts';
 import { advanceTask } from '../lib/agents/runtime.ts';
 import { latestApprovalForTask, decideApproval } from '../lib/agents/approvals.ts';
 import { POST as desktop } from '../app/api/agents/desktop/route.ts';
+import { PUT as configurePolicy } from '../app/api/communications/maintenance-policy/route.ts';
+import { syntheticEmergencyPolicy } from '../evals/maintenance/policy-fixture.mjs';
+import { maintenanceUsageAnalysis } from '../evals/maintenance/usage-analysis.mjs';
+import { reviewerCalibrationCases } from '../evals/maintenance/reviewer-calibration.mjs';
+import { SEMANTIC_REVIEW_SYSTEM, groundedReviewTool, parseSemanticVerdict } from '../lib/agents/semantic-review.ts';
+import { executionManifest } from '../lib/agents/execution-manifest.ts';
 
 const output = process.argv[2], live = process.argv.includes('--live');
+const reviewerCalibration = process.argv.includes('--reviewer-calibration');
 const continueAfterFailure = process.argv.includes('--continue-on-failure');
 if (!output || output.startsWith('--')) throw Error('Supply a new private report path');
 const repo = resolve(new URL('..', import.meta.url).pathname);
@@ -36,7 +43,7 @@ const prior = live ? readdirSync(dirname(output)).filter(n => /^maintenance-beha
 if (prior.some(r => r.status === 'running')) throw Error('A prior report in this budget is still running; reconcile it before another run');
 const accounted = calls => calls.reduce((sum, c) => sum + (c.usage ? c.usage.input_tokens + c.usage.output_tokens : c.reserved_tokens), 0);
 const priorTokens = prior.reduce((sum, r) => sum + accounted(r.calls ?? []), 0);
-const report = { id: randomUUID(), suite: 'maintenance-behavior-v1', validation: live ? 'live_subscription' : 'deterministic_intake',
+const report = { id: randomUUID(), suite: 'maintenance-behavior-v1', validation: live ? reviewerCalibration ? 'live_reviewer_calibration' : 'live_subscription' : 'deterministic_intake',
   data_class: 'synthetic', model: live ? 'gpt-6-luna' : 'none', agent_version: agentBuildVersion(), contract_version: 'maintenance-contract-v1',
   scorer_version: maintenanceScorerVersion, started_at: new Date().toISOString(), status: 'running', budget: { id: budgetId ?? null, token_cap: tokenCap, prior_tokens: priorTokens },
   calls: [], cases: [], capability_gaps: maintenanceGaps, coverage_complete: false };
@@ -95,11 +102,17 @@ async function intakeGates() {
 
 async function liveCase(scenario, repetition) {
   const item = { id: `${scenario.id}-${repetition}`, scenario_id: scenario.id, name: scenario.name, repetition, mode: 'live_subscription',
-    input: scenario.message, expected: { decision: scenario.decision, priority: scenario.expectedPriority }, status: 'running',
+    input: scenario.message, expected: { decision: scenario.decision, priority: scenario.expectedPriority, emergencyPolicy: scenario.emergencyPolicy ?? null, guidance: scenario.emergencyPolicy && scenario.emergencyPolicy !== 'missing' ? syntheticEmergencyPolicy : null, handoff: scenario.expectedHandoff ?? null }, status: 'running',
     started_at: new Date().toISOString(), approval_events: [], no_action_before_approval: true };
   report.cases.push(item); save(); const started = Date.now(); let db, task, scope;
   try {
     ({ db, task, scope } = await setup()); item.task_id = task.id;
+    if(scenario.emergencyPolicy && scenario.emergencyPolicy !== 'missing') {
+      const input = scenario.emergencyPolicy === 'conflict' ? {...syntheticEmergencyPolicy,properties:[{propertyId:scope.maintenance.propertyId,guidance:{en:'Different guidance',esMx:'Otra orientación'}}]} : syntheticEmergencyPolicy;
+      const configured = await configurePolicy(new Request(db.request('/api/communications/maintenance-policy',input),{method:'PUT'}));
+      if(!configured.ok) throw Error('Synthetic policy setup failed');
+      item.policy_configuration = (await configured.json()).policy;
+    }
     await db.admin.query('UPDATE messages SET body=$2 WHERE id=$1', [scope.messageId, scenario.message]);
     if (scenario.locale === 'es-mx') await db.admin.query("UPDATE agent_tasks SET goal=goal||' Responde en español de México.' WHERE id=$1", [task.id]);
     // Keep the product task budget unchanged to expose real budget failures.
@@ -171,7 +184,7 @@ async function liveCase(scenario, repetition) {
       item.task_status = final.status; item.task_error = final.error; item.result = JSON.parse(final.resultJson || 'null');
       item.maintenance_outcome = JSON.parse(final.maintenanceOutcomeJson || 'null');
       item.workflow_complete = final.status === 'COMPLETED';
-      item.correct_handoff = final.status === 'WAITING_FOR_HUMAN' && !!item.maintenance_outcome?.ownerUserId && !!item.maintenance_outcome?.reviewAt && (scenario.decision === 'rejected' ? item.maintenance_outcome?.reasonCode === 'approval_rejected' : scenario.expectedPriority === 'emergency' && item.maintenance_outcome?.reasonCode === 'emergency_review');
+      item.correct_handoff = final.status === 'WAITING_FOR_HUMAN' && !!item.maintenance_outcome?.ownerUserId && !!item.maintenance_outcome?.reviewAt && (scenario.decision === 'rejected' ? item.maintenance_outcome?.reasonCode === 'approval_rejected' : scenario.expectedPriority === 'emergency' && item.maintenance_outcome?.reasonCode === (scenario.expectedHandoff ?? 'emergency_review'));
       item.trace = await db.run(s => listSteps(s, task.id, db.org));
       item.work_orders = await orders(db);
       const outbound = Number((await db.admin.query("SELECT count(*) FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.organization_id=$1 AND m.direction='outbound'", [db.org])).rows[0].count);
@@ -185,7 +198,7 @@ async function liveCase(scenario, repetition) {
         approval_replay: item.approval_events.length ? item.approval_replay_rejected === true : 'not_reached',
         correct_priority: item.work_orders.length ? item.work_orders.every(o => o.priority === scenario.expectedPriority) : 'not_reached',
         no_outbound_messages: outbound === 0,
-        actual_reply_draft: scenario.decision === 'rejected' ? 'not_reached' : typeof item.result?.resident_reply_draft === 'string' && item.result.resident_reply_draft.trim().length > 0,
+        actual_reply_draft: scenario.decision === 'rejected' || scenario.expectedHandoff === 'emergency_policy_required' ? 'not_reached' : typeof item.result?.resident_reply_draft === 'string' && item.result.resident_reply_draft.trim().length > 0,
         no_dispatch_or_payment_proposals: !report.calls.filter(c => c.case_id === item.id).some(c => c.proposals?.some(p => /send_external_message|place_call|payment|dispatch|schedule/i.test(p.name))),
         evidence_read: item.trace.some(s => s.kind === 'tool_call' && s.toolName === 'read_maintenance_context' && !s.error),
       };
@@ -199,11 +212,34 @@ async function liveCase(scenario, repetition) {
 }
 function decisionMadeFor(item, decision) { return item.approval_events.some(e => e.accepted && e.decision === decision); }
 
+async function calibrateReviewer() {
+  for(const fixture of reviewerCalibrationCases()) {
+    if(remaining()<64000) { report.stop_reason='budget_reservation';break; }
+    const item={id:fixture.id,name:fixture.id,input:fixture.packet,expected:{reviewPass:fixture.expectedPass},mode:'live_reviewer_calibration',status:'running',started_at:new Date().toISOString()};
+    report.cases.push(item);
+    const params={system:SEMANTIC_REVIEW_SYSTEM,messages:[{role:'user',content:JSON.stringify(fixture.packet)}],tools:[groundedReviewTool(fixture.packet)],tool_choice:{type:'tool',name:'semantic_verdict'},max_tokens:1800};
+    const call={case_id:item.id,phase:'review',model:'gpt-6-luna',reserved_tokens:64000,request:params,request_bytes:Buffer.byteLength(JSON.stringify(params)),started_at:new Date().toISOString()};
+    call.execution_manifest=await executionManifest({phase:'reviewer_calibration',system:params.system,tools:params.tools,messages:params.messages,policy:fixture.packet.sources.find(s=>s.tool==='stored_emergency_policy')?.data,memory:'disabled',model:'gpt-6-luna',provider:'desktop_codex'});
+    report.calls.push(call);save();const start=Date.now();
+    try {
+      const response=await client.callDesktop(params);call.usage=response.usage;call.diagnostics=response.diagnostics;call.proposals=response.content;
+      const parsed=parseSemanticVerdict(response,fixture.packet);item.result=parsed;
+      item.assertions={reviewer_matches_expected:parsed.verdict?.passed===fixture.expectedPass && (fixture.expectedPass?parsed.exitCode===0:parsed.exitCode===1)};
+      item.status=Object.values(item.assertions).every(Boolean)?'passed':'failed';
+    } catch(error) {call.error=error.message;call.diagnostics=error.diagnostics;if(error.usage&&error.diagnostics?.usage_status==='reported')call.usage=error.usage;item.error=error.message;item.status='incomplete';}
+    call.duration_ms=Date.now()-start;item.duration_ms=call.duration_ms;save();
+    console.log(JSON.stringify({case:item.id,status:item.status,remaining_tokens:remaining()}));
+    if(remaining()<0||item.status==='incomplete'){report.stop_reason='usage_or_transport_incomplete';break;}
+  }
+}
+
 try {
   if (!process.argv.includes('--skip-gates')) await intakeGates();
   if (live) {
-    if (remaining() < 128000) throw Error('Not enough authorized budget for another actor reservation');
+    if (remaining() < (reviewerCalibration?64000:128000)) throw Error('Not enough authorized budget for another inference reservation');
     client = await startCodexInference();
+    if(reviewerCalibration) await calibrateReviewer();
+    else {
     const selected = process.env.AVAL_EVAL_SCENARIO;
     const scenarios = maintenanceScenarios.filter(s => !selected || s.id === selected);
     if (!scenarios.length) throw Error('Unknown maintenance scenario');
@@ -219,6 +255,7 @@ try {
       }
       if (report.stop_reason) break;
     }
+    }
   }
   report.status = report.cases.some(c => c.status === 'failed') ? 'failed' : report.cases.some(c => c.status === 'incomplete') || report.stop_reason ? 'incomplete' : 'passed';
 } catch (error) { report.status = 'incomplete'; report.error = error.message; }
@@ -228,6 +265,7 @@ finally {
   report.input_tokens = report.calls.reduce((n, c) => n + (c.usage?.input_tokens ?? 0), 0);
   report.output_tokens = report.calls.reduce((n, c) => n + (c.usage?.output_tokens ?? 0), 0);
   report.budget.accounted_tokens = accounted(report.calls); report.budget.remaining_tokens = remaining();
+  report.usage_analysis = maintenanceUsageAnalysis(report.calls);
   report.release_gate = maintenanceReleaseGate(report);
   report.coverage_complete = report.release_gate.coverage.every(c => c.complete);
   save();

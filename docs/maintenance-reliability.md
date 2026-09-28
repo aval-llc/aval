@@ -6,6 +6,11 @@ Desktop supplies actor/reviewer proposals only; subscription credentials stay lo
 
 ## Runtime contract
 
+- Emergency guidance v1 is configured through owner-only `GET/PUT /api/communications/maintenance-policy`. PUT accepts `company: {en, esMx} | null`, `allowPropertyOverride: boolean`, and `properties: [{propertyId, guidance: {en, esMx}}]`. The server assigns revision, approver and approval time; caller-supplied approval metadata is rejected. Property IDs must belong to the workspace. No production guidance is enabled by default; an operator-facing configuration UI remains follow-up work.
+- A conflicting property rule without explicit override authorization provides no guidance. Latest policy is included in actor receipts and an independent reviewer source. Emergency creation with missing/invalid/conflicting guidance stops for immediate owned human review; policy is rechecked on resumed final verification. Policy text never enables sending, dispatch or spending.
+- Reviewer recommendations are distinct from observed facts and require a citation to current approved emergency guidance. Known-invalid citation and policy fixtures remain deterministic checks; semantic quality still requires live calibration.
+- Failed drafts remain in the transcript and are separately exposed as `draftForReview`, always labeled unverified and unsent. They are never promoted to a completed result. Existing two-review bound and admission-v2 reserves remain unchanged.
+
 - One maintenance tool proposal per actor response. Mixed proposals execute nothing, receive one correction, then hand off if repeated.
 - Maintenance progression v3 performs the first scoped context read deterministically through the same permission-checked executor. It is traced as `context_read_proposed`, not a model call; resumes reuse its stored observation. Classification, proposed creation, the separate final draft, and independent review still use the model.
 - Maintenance review uses source-specific citation path enums where the packet fits the bounded schema. Paths refer to the source data, never an invented `/data` wrapper. The server still validates source existence, failed-source restrictions and claim support; schema constraints do not prove semantic truth. Full evidence is retained, including contradictions.
@@ -39,6 +44,8 @@ Definitions and deterministic assertions live in `evals/maintenance` and `tests`
 Every experiment carries the source-tree fingerprint, dataset fingerprint and scorer version. Raw requests, responses and reviewer evidence are exported only for explicitly synthetic reports. Imported execution spans use measured timestamps. Preserve baseline and failed candidate experiments.
 
 Reports include a separate versioned live-workflow gate with required scenario coverage. Passing a selected subset or deterministic intake tests cannot pass this gate. Unknown usage, missing repetitions, failed attempts and duplicate case rows remain blockers. A passed workflow gate still does not imply that deployment, backup restoration or signing gates passed.
+
+Scorer v6 / live gate v3 add missing-policy and conflicting-policy human handoffs. These cases explicitly do not reach final drafting; they cannot substitute for the three approved-guidance emergency runs. Approved-guidance evaluations configure synthetic policy through the owner endpoint and record it in the report. Older policy-free baselines remain immutable and are not directly equivalent to this changed evidence configuration.
 
 Required release gates include three consecutive English and Mexican Spanish routines, three emergency-triage handoffs, injection/property-conflict/rejection cases, zero observed unsafe or duplicate effects, usage reconciliation, database/migration/Desktop checks, backup restoration, staging, and signed/notarized artifact verification. A safe handoff in a routine case is not a workflow pass. Unknown usage or insufficient evaluation allowance means **incomplete**, not acceptance.
 

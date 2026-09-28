@@ -15,6 +15,7 @@ export interface MaintenanceOutcome {
   reasonCode: string | null;
   ownerUserId: string | null;
   reviewAt: string | null;
+  draftForReview?: { text: string; verified: false };
 }
 
 /** RLS-scoped stored facts, never a model's assertion of authority or success. */
@@ -44,7 +45,7 @@ export async function maintenanceReceipt(session: DbSession, task: TaskRecord, t
   return {
     version: 1, taskId: task.id, conversationId: check.conversationId, messageId: check.messageId,
     evidenceRevision,
-    identityUnchanged, match: context.match,
+    identityUnchanged, match: context.match, emergencyPolicy: context.emergencyPolicy,
     approval: bound ? { id: approval.id, decision: approval.status, approver: approval.decidedByUserId, decidedAt: approval.decidedAt, policyVersion: approval.policyVersion, policyDecision: execution?.policyEffect ?? null, actionDigest: JSON.parse(approval.evidenceJson).payloadHash } : null,
     execution: { verified, executionId: reservation?.idempotencyKey ?? null, workOrderId: order?.id ?? null, workOrderStatus: order?.status ?? null, priority: order?.priority ?? null, recordCount: orders.length, executedAt: execution?.createdAt ?? null },
     communication: { draftOnly: scope.draftOnly === true, deliveryCount: deliveries.length, outboundAttemptCount: outboundAttempts.length, taskSentNoMessage: scope.draftOnly === true && deliveries.length === 0 && outboundAttempts.length === 0 },
@@ -62,5 +63,12 @@ export async function maintenanceOutcome(session: DbSession, task: TaskRecord, t
     ownerUserId = member?.userId ?? org?.owner ?? null;
   }
   return { version: 1, actionState: receipt.execution.verified ? 'executed' : receipt.execution.workOrderId ? 'unknown' : ['rejected', 'expired'].includes(receipt.approval?.decision ?? '') ? 'declined' : receipt.approval?.decision === 'pending' ? 'awaiting_approval' : 'not_started',
-    verificationState: state === 'COMPLETED' ? 'verified' : review ? 'review_required' : 'pending', workOrderId: receipt.execution.workOrderId, reasonCode, ownerUserId, reviewAt: review ? new Date().toISOString() : null };
+    verificationState: state === 'COMPLETED' ? 'verified' : review ? 'review_required' : 'pending', workOrderId: receipt.execution.workOrderId, reasonCode, ownerUserId, reviewAt: review ? new Date().toISOString() : null,
+    ...(review ? unverifiedMaintenanceDraft(transcript) : {}) };
+}
+
+export function unverifiedMaintenanceDraft(transcript: Message[]): { draftForReview?: { text: string; verified: false } } {
+  const proposals = transcript.flatMap(m => m.role === 'assistant' && Array.isArray(m.content) ? m.content.filter((b): b is ToolUseBlock => b.type === 'tool_use' && b.name === 'render_answer') : []);
+  const text = proposals.at(-1)?.input.resident_reply_draft;
+  return typeof text === 'string' && text.trim() ? { draftForReview: { text: text.slice(0,4000), verified: false } } : {};
 }

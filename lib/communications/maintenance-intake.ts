@@ -4,6 +4,7 @@ import { conversations, messages, workOrders } from "@/db/postgres/schema";
 import { createWorkOrder } from "@/lib/operations/maintenance";
 import { digestPayload } from "@/lib/audit/chain";
 import type { WorkOrderPriority } from "@/lib/operations/types";
+import { maintenancePolicy } from './maintenance-policy-store';
 
 export type ResidentMatch = { residentId: string; propertyId: string; unitId: string; leaseId: string };
 export async function maintenanceContext(session: DbSession, org: string, conversationId: string, messageId: string) {
@@ -21,7 +22,8 @@ export async function maintenanceContext(session: DbSession, org: string, conver
     limit 2`) : { rows: [] };
   const match = matches.rows.length === 1 ? matches.rows[0] : null;
   return { conversationId, messageId, message: message.body, newsletter: metadata.newsletter === true,
-    match, status: match ? "matched" : matches.rows.length ? "ambiguous" : "unmatched" };
+    match, status: match ? "matched" : matches.rows.length ? "ambiguous" : "unmatched",
+    emergencyPolicy: match ? await maintenancePolicy(session, org, match.propertyId) : null };
 }
 
 export async function createInboundWorkOrder(session: DbSession, org: string, args: Record<string, unknown>, operationKey: string) {

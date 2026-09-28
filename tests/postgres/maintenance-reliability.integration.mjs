@@ -10,6 +10,13 @@ import { getTask, requestCancel } from '../../lib/agents/tasks.ts';
 import { decideApproval, latestApprovalForTask } from '../../lib/agents/approvals.ts';
 import { maintenanceReceipt, maintenanceOutcome } from '../../lib/agents/maintenance-receipt.ts';
 import { POST as desktop } from '../../app/api/agents/desktop/route.ts';
+import { PUT as configurePolicy } from '../../app/api/communications/maintenance-policy/route.ts';
+import { PUT as configureCalls } from '../../app/api/communications/settings/route.ts';
+import { DEFAULT_COMMUNICATIONS } from '../../lib/communications/config.ts';
+import { maintenanceContext } from '../../lib/communications/maintenance-intake.ts';
+import { syntheticEmergencyPolicy } from '../../evals/maintenance/policy-fixture.mjs';
+import { withVerifiedIdentityHeaders } from '../../lib/auth/request-identity.ts';
+import { upsertMembership } from '../../lib/organizations/membership.ts';
 
 const proposal = (name,input) => ({content:[{type:'tool_use',id:randomUUID(),name,input}],usage:{input_tokens:30,output_tokens:10},stop_reason:'tool_use'});
 async function runCase(options = {}) {
@@ -18,6 +25,10 @@ async function runCase(options = {}) {
     await db.run(s => applyImport(s,db.org,demoPortfolio(new Date()),{sourceProvider:'aval_demo',sourceConnectionId:null,externalId:null}));
     const task = await db.run(s => startDemoWorkflow(s,db.org,db.user,0));
     const scope = JSON.parse(task.executionScopeJson);
+    if(options.emergency && options.policy !== 'missing') {
+      const input = options.policy === 'conflict' ? {...syntheticEmergencyPolicy,properties:[{propertyId:scope.maintenance.propertyId,guidance:{en:'Different guidance',esMx:'Otra orientación'}}]} : syntheticEmergencyPolicy;
+      assert.equal((await configurePolicy(new Request(db.request('/api/communications/maintenance-policy',input),{method:'PUT'}))).status,200);
+    }
     await db.admin.query("UPDATE organizations SET active_model_provider='desktop_codex' WHERE id=$1",[db.org]);
     if(options.budget) await db.admin.query('UPDATE agent_tasks SET max_tokens=100 WHERE id=$1',[task.id]);
     let approved = false, actorCalls = 0, reviewerCalls = 0;
@@ -48,6 +59,8 @@ async function runCase(options = {}) {
         assert.equal(source.data.approval.decision,'approved');
         assert.equal(source.data.communication.taskSentNoMessage,true);
         response=proposal('semantic_verdict',{passed:!options.reviewFails,requirements:[{requirement:'Approved internal work order',satisfied:true,explanation:'Stored approval and execution match.',nodeKeys:[]}],claims:[{claim:'The internal work order was created.',kind:'fact',supported:true,citations:[{sourceId:source.id,pointer:'/execution/verified'}]}],issues:options.reviewFails?['Draft evidence needs human review.']:[]});
+        if(options.reviewOnce && reviewerCalls===1) Object.assign(response.content[0].input,{passed:false,issues:['The draft needs a bounded correction.']});
+        if(options.revokePolicy) assert.equal((await configurePolicy(new Request(db.request('/api/communications/maintenance-policy',{...syntheticEmergencyPolicy,company:null}),{method:'PUT'}))).status,200);
       } else {
         actorCalls++;
         const uses=JSON.parse((await db.run(s=>getTask(s,db.org,task.id))).transcriptJson).flatMap(m=>Array.isArray(m.content)?m.content.filter(b=>b.type==='tool_use'):[]);
@@ -78,6 +91,28 @@ async function runCase(options = {}) {
 }
 
 test('maintenance reliability on PostgreSQL', {skip:!process.env.AVAL_TEST_DATABASE_URL}, async t=>{
+  await t.test('owner policy approval is server stamped, workspace bound and survives call settings saves',async()=>{
+    const db=await postgresEvaluation();
+    try {
+      await db.run(s=>applyImport(s,db.org,demoPortfolio(new Date()),{sourceProvider:'aval_demo',sourceConnectionId:null,externalId:null}));
+      const task=await db.run(s=>startDemoWorkflow(s,db.org,db.user,0)),scope=JSON.parse(task.executionScopeJson);
+      const save=body=>configurePolicy(new Request(db.request('/api/communications/maintenance-policy',body),{method:'PUT'}));
+      assert.equal((await save({...syntheticEmergencyPolicy,approvedBy:'forged'})).status,400);
+      assert.equal((await save({...syntheticEmergencyPolicy,properties:[{propertyId:'foreign',guidance:syntheticEmergencyPolicy.company}]})).status,400);
+      const response=await save(syntheticEmergencyPolicy);assert.equal(response.status,200);const {policy}=await response.json();assert.equal(policy.approvedBy,db.user);assert.ok(policy.revision);
+      assert.equal((await configureCalls(new Request(db.request('/api/communications/settings',DEFAULT_COMMUNICATIONS),{method:'PUT'}))).status,200);
+      assert.equal((await db.run(s=>maintenanceContext(s,db.org,scope.conversationId,scope.messageId))).emergencyPolicy.revision,policy.revision);
+      const changed=await (await save({...syntheticEmergencyPolicy,company:null})).json();assert.notEqual(changed.policy.revision,policy.revision);
+      const member=`member_${randomUUID()}`;
+      await db.session(member,async()=>{});
+      await db.run(s=>upsertMembership(s,{organizationId:db.org,userId:member,role:'member'}));
+      const memberRequest=new Request('https://app.aval.llc/api/communications/maintenance-policy',{method:'PUT',headers:withVerifiedIdentityHeaders(new Headers({'content-type':'application/json',cookie:`aval-active-organization=${db.org}`}),{userId:member,email:`${member}@example.invalid`,displayName:'Member',emailVerified:true}),body:JSON.stringify(syntheticEmergencyPolicy)});
+      assert.equal((await configurePolicy(memberRequest)).status,403);
+    }finally{await db.close();}
+  });
+  for(const policy of ['missing','conflict'])await t.test(`emergency ${policy} policy preserves one order and hands off without further inference`,async()=>{
+    const r=await runCase({emergency:true,policy});assert.equal(r.final.status,'WAITING_FOR_HUMAN');assert.equal(r.outcome.reasonCode,'emergency_policy_required');assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.actorCalls,1);assert.equal(r.reviewerCalls,0);assert.equal(r.outcome.ownerUserId,r.user);
+  });
   await t.test('maintenance protocol requires updated runner and accounts replay once',async()=>{
     const db=await postgresEvaluation();
     try {
@@ -146,7 +181,9 @@ test('maintenance reliability on PostgreSQL', {skip:!process.env.AVAL_TEST_DATAB
   await t.test('one mixed proposal is repaired without executing either proposed tool',async()=>{const r=await runCase({mixed:1});assert.equal(r.final.status,'COMPLETED',r.final.error);assert.equal(r.receipt.execution.recordCount,1);});
   await t.test('repeated malformed proposals hand off without effects',async()=>{const r=await runCase({mixed:2});assert.equal(r.outcome.reasonCode,'invalid_proposal');assert.equal(r.receipt.execution.recordCount,0);});
   await t.test('unchanged reads terminate with owned review',async()=>{const r=await runCase({repeat:true});assert.equal(r.outcome.reasonCode,'no_progress');assert.equal(r.actorCalls,3);});
-  await t.test('review failure preserves the created work order',async()=>{const r=await runCase({reviewFails:true});assert.equal(r.final.status,'WAITING_FOR_HUMAN');assert.equal(r.outcome.actionState,'executed');assert.equal(r.outcome.verificationState,'review_required');assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.reviewerCalls,2);});
+  await t.test('review failure preserves one order and a separately marked unverified draft',async()=>{const r=await runCase({reviewFails:true});assert.equal(r.final.status,'WAITING_FOR_HUMAN');assert.equal(r.outcome.actionState,'executed');assert.equal(r.outcome.verificationState,'review_required');assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.reviewerCalls,2);assert.equal(r.outcome.draftForReview.verified,false);assert.ok(r.outcome.draftForReview.text);assert.equal(r.final.resultJson,null);});
+  await t.test('one rejected draft repairs across invocations without creating another order',async()=>{const r=await runCase({reviewOnce:true});assert.equal(r.final.status,'COMPLETED',r.final.error);assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.reviewerCalls,2);assert.equal(r.actorCalls,3);assert.equal(r.outcome.draftForReview,undefined);});
+  await t.test('policy revocation while review is pending invalidates completion',async()=>{const r=await runCase({emergency:true,revokePolicy:true});assert.equal(r.final.status,'WAITING_FOR_HUMAN');assert.equal(r.outcome.reasonCode,'emergency_policy_required');assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.outcome.draftForReview.verified,false);assert.equal(r.final.resultJson,null);});
   await t.test('saying a draft exists without its text cannot complete maintenance',async()=>{const r=await runCase({missingDraft:true});assert.equal(r.final.status,'WAITING_FOR_HUMAN');assert.equal(r.outcome.reasonCode,'missing_reply_draft');assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.reviewerCalls,0);});
   await t.test('insufficient inference allowance produces an owned handoff',async()=>{const r=await runCase({budget:true});assert.equal(r.outcome.reasonCode,'inference_budget');assert.equal(r.actorCalls,0);assert.equal(r.outcome.ownerUserId,r.user);});
   await t.test('exhaustion after creation preserves the effect for a human',async()=>{const r=await runCase({budgetAfter:true});assert.equal(r.outcome.reasonCode,'inference_budget');assert.equal(r.outcome.actionState,'executed');assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.outcome.ownerUserId,r.user);});
