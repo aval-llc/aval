@@ -32,6 +32,27 @@ test('fresh-thread cumulative usage includes internal requests but never sums re
 test('desktop inference rejects missing usage, unoffered tools and execution',async()=>{
   for(const options of [{usage:false},{tool:'send_money'},{forbidden:true}])await assert.rejects(infer(rpcFixture(options),'/tmp','gpt-6-luna',params));
 });
+test('maintenance proposals use typed arguments and compact final answers use direct output',async()=>{
+  const create={name:'create_maintenance_work_order',input_schema:{type:'object',properties:{summary:{type:'string'}},required:['summary']}};
+  const final={name:'render_answer',input_schema:{type:'object',properties:{headline:{type:'string'},narrative:{type:'string'},confidence:{type:'string'}},required:['headline','narrative','confidence']}};
+  for(const direct of [false,true]) {
+    const rpc=new EventEmitter();const input=direct?{headline:'Recorded',narrative:'Draft only',confidence:'high'}:{summary:'Slow drain'};
+    rpc.request=async(method,args)=>{
+      if(method==='thread/start')return{thread:{id:'thread'}};
+      if(method==='turn/start') {
+        const validate=new (require('../node_modules/ajv'))().compile(args.outputSchema);
+        const output=direct?input:{calls:[{name:create.name,input}]};assert.equal(validate(output),true);
+        if(!direct)assert.equal(validate({calls:[{name:create.name,argumentsJson:'{}'}]}),false);
+        queueMicrotask(()=>{
+          for(const [method,p] of [['thread/tokenUsage/updated',{tokenUsage:{total:{inputTokens:100,outputTokens:20}}}],['item/completed',{item:{type:'agentMessage',text:JSON.stringify(output)}}],['turn/completed',{turn:{id:'turn',status:'completed'}}]])rpc.emit('notification',{method,params:{threadId:'thread',...p}});
+        });return {turn:{id:'turn'}};
+      }
+    };
+    const response=await infer(rpc,'/tmp','gpt-6-luna',{system:'policy',messages:[],tools:direct?[final]:[create,final]});
+    assert.deepEqual(response.content[0].input,input);
+    assert.equal(response.content[0].name,direct?'render_answer':create.name);
+  }
+});
 test('timeout waits for terminal usage and never returns the interrupted proposal',async()=>{
   const rpc=new EventEmitter();
   rpc.request=async(method)=>{
