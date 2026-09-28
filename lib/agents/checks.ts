@@ -4,8 +4,7 @@ import { agentChecks, communicationDeliveries, learnedPreferences, agentPlanNode
 import { implementedTools } from './registry';
 import type { TaskRecord } from './tasks';
 import type { Message } from '@/lib/ask-aval/model-types';
-import { maintenanceContext } from '@/lib/communications/maintenance-intake';
-import { digestPayload } from '@/lib/audit/chain';
+import { maintenanceReceipt } from './maintenance-receipt';
 export type TaskCheck = {
     kind: 'evidence';
     tools: string[];
@@ -133,10 +132,9 @@ export async function checkTask(dbSession: DbSession, task: TaskRecord, messages
             problems.push('The goal needs a persisted plan whose required tasks all pass their independent checks.');
     }
     if(check?.kind==='internal_maintenance') {
-        const context=await maintenanceContext(dbSession,task.organizationId,check.conversationId,check.messageId);
-        const externalId=`inbound_${await digestPayload({org:task.organizationId,conversationId:check.conversationId,messageId:check.messageId})}`;
-        const result=await dbSession.db.execute(sql`SELECT id FROM work_orders WHERE organization_id=${task.organizationId} AND source_provider='manual' AND external_id=${externalId} AND property_id=${context.match?.propertyId??''} AND unit_id=${context.match?.unitId??''}`);
-        if(!context.match||result.rows.length!==1)problems.push('The approved internal work order does not exist for this matched request.');
+        const receipt = await maintenanceReceipt(dbSession, task, messages);
+        if (!receipt?.execution.verified) problems.push('The exact approved internal work order is not verified for this matched request.');
+        if (!receipt?.communication.taskSentNoMessage) problems.push('Task-scoped draft-only execution is not verified.');
     }
     const semantic = !problems.length && review ? await review() : undefined;
     if (semantic) problems.push(...semantic.problems);

@@ -127,14 +127,15 @@ export async function runDesktopInferenceCases(t,{session,userA,userB,administra
           response=proposal('semantic_verdict',{passed:true,requirements:[{requirement:packet.goal,satisfied:true,explanation:'Deterministic transport fixture',nodeKeys:[]}],claims:[{claim:'Internal work order created',kind:'fact',supported:true,citations:[{sourceId:source.id,pointer:'/workOrderId'}]}],issues:[]});
         } else {
           const uses=params.messages.flatMap(m=>Array.isArray(m.content)?m.content.filter(b=>b.type==='tool_use'):[]);
-          response=!uses.some(u=>u.name==='read_maintenance_context')?proposal('read_maintenance_context',{conversation_id:scope.conversationId,message_id:scope.messageId}):!approved?proposal('create_maintenance_work_order',{conversation_id:scope.conversationId,message_id:scope.messageId,resident_id:scope.maintenance.residentId,property_id:scope.maintenance.propertyId,unit_id:scope.maintenance.unitId,summary:'Inspect the reported slow bathroom drain; cause unknown.',priority:'routine'}):proposal('render_answer',{headline:'Internal work order created',narrative:'The approved internal inspection request is recorded. No resident message was sent.',confidence:'high'});
+          response=!uses.some(u=>u.name==='read_maintenance_context')?proposal('read_maintenance_context',{conversation_id:scope.conversationId,message_id:scope.messageId}):!approved?proposal('create_maintenance_work_order',{conversation_id:scope.conversationId,message_id:scope.messageId,resident_id:scope.maintenance.residentId,property_id:scope.maintenance.propertyId,unit_id:scope.maintenance.unitId,summary:'Inspect the reported slow bathroom drain; cause unknown.',priority:'routine'}):proposal('render_answer',{headline:'Internal work order created',narrative:'The approved internal inspection request is recorded. No resident message was sent.',resident_reply_draft:'Thank you for reporting the slow drain. Your internal maintenance request has been recorded.',confidence:'high'});
         }
         await administrator.query("UPDATE desktop_model_jobs SET status='completed',response_json=$2 WHERE id=$1",[job.id,JSON.stringify(response)]);
         await administrator.query("UPDATE agent_tasks SET status='QUEUED' WHERE id=$1 AND status='WAITING_FOR_MODEL'",[current.id]);
       }
       assert.equal((await work((s,o)=>getTask(s,o,current.id))).status,'COMPLETED');assert.equal(reviewCalls,1);
       assert.equal(Number((await administrator.query("SELECT count(*) FROM work_orders WHERE organization_id=$1 AND source_provider='manual'",[target])).rows[0].count),1);
-      const modelCalls=await administrator.query("SELECT count(*) FROM agent_task_steps WHERE task_id=$1 AND kind='model_call'",[current.id]);assert.equal(Number(modelCalls.rows[0].count),4);
+      const modelCalls=await administrator.query("SELECT count(*) FROM agent_task_steps WHERE task_id=$1 AND kind='model_call'",[current.id]);assert.equal(Number(modelCalls.rows[0].count),3,'two actor calls and one independent review');
+      const reads=await administrator.query("SELECT count(*) FROM agent_task_steps WHERE task_id=$1 AND kind='context_read_proposed'",[current.id]);assert.equal(Number(reads.rows[0].count),1,'mandatory context is read once without inference');
     });
   } finally {for(const key of Object.keys(env))delete env[key];Object.assign(env,previous);await administrator.query('UPDATE organizations SET active_model_provider=NULL WHERE id=$1',[org]);}
 }

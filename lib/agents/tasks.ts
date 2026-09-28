@@ -111,6 +111,7 @@ export interface TaskRecord {
   leaseExpiresAt: Date | null;
   lastHeartbeatAt: Date | null;
   resultJson: string | null;
+  maintenanceOutcomeJson?: string | null;
   error: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -252,6 +253,7 @@ export interface TaskUpdate {
   stepCount?: number;
   tokensUsed?: number;
   resultJson?: string | null;
+  maintenanceOutcomeJson?: string | null;
   error?: string | null;
   executionAttempts?: number;
   nextAttemptAt?: Date | null;
@@ -277,6 +279,7 @@ export async function updateTask(dbSession: DbSession, task: TaskRecord, workerI
       ...(update.stepCount !== undefined ? { stepCount: update.stepCount } : {}),
       ...(update.tokensUsed !== undefined ? { tokensUsed: update.tokensUsed } : {}),
       ...(update.resultJson !== undefined ? { resultJson: update.resultJson } : {}),
+      ...(update.maintenanceOutcomeJson !== undefined ? { maintenanceOutcomeJson: update.maintenanceOutcomeJson } : {}),
       ...(update.error !== undefined ? { error: update.error } : {}),
       ...(update.executionAttempts !== undefined ? { executionAttempts: update.executionAttempts } : {}),
       ...(update.nextAttemptAt !== undefined ? { nextAttemptAt: update.nextAttemptAt } : {}),
@@ -353,10 +356,13 @@ export async function requestCancel(dbSession: DbSession, organizationId: string
 
   const now = new Date();
   const unattended = task.status === "QUEUED" || task.status === "WAITING_FOR_APPROVAL" || !task.leaseExpiresAt || task.leaseExpiresAt < now;
+  const outcome = unattended && JSON.parse(task.checkJson ?? '{}').kind === 'internal_maintenance'
+    ? await (await import('./maintenance-receipt')).maintenanceOutcome(dbSession, task, JSON.parse(task.transcriptJson), 'CANCELLED', 'cancelled') : null;
   await dbSession.db
     .update(agentTasks)
     .set({
       cancelRequested: true,
+      ...(outcome ? { maintenanceOutcomeJson: JSON.stringify(outcome) } : {}),
       ...(unattended ? { status: "CANCELLED" as const, leaseOwner: null, leaseExpiresAt: null, finishedAt: now } : {}),
       updatedAt: now,
     })

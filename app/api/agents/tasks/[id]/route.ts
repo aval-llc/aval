@@ -48,6 +48,7 @@ async function GETWithSession(dbSession: DbSession, request: Request, context: {
     delegationDepth: task.delegationDepth,
     parentTaskId: task.parentTaskId,
     result: task.resultJson ? safeParse(task.resultJson) : null,
+    maintenanceOutcome: task.maintenanceOutcomeJson ? safeParse(task.maintenanceOutcomeJson) : null,
     error: task.error,
     createdAt: task.createdAt,
     finishedAt: task.finishedAt,

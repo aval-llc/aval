@@ -1248,6 +1248,7 @@ export const agentTasks = pgTable(
     // Conversation state, so a resumed run continues rather than restarting.
     // Sized by maxSteps and the model's own max_tokens, not unbounded.
     executionScopeJson: jsonText("execution_scope_json").notNull().default("{}"),
+    maintenanceOutcomeJson: jsonText("maintenance_outcome_json"),
     checkJson: jsonText("check_json").notNull().default("{}"),
     deadlineAt: timestamp("deadline_at", { withTimezone: true, mode: "date" }),
     transcriptJson: jsonText("transcript_json").notNull().default("[]"),

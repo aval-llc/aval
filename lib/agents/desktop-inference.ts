@@ -49,5 +49,40 @@ export function validateDesktopResponse(value: unknown, request: { tools?: { nam
         (request.tool_choice?.type === 'tool' && c.name !== request.tool_choice.name) ||
         !c.input || typeof c.input !== 'object' || Array.isArray(c.input) || typeof c.id !== 'string')) throw new Error('Model proposed an unoffered tool');
   if (![response.usage?.input_tokens, response.usage?.output_tokens].every(n => Number.isSafeInteger(n) && n >= 0 && n <= 500000)) throw new Error('Missing measured usage');
-  return { id: crypto.randomUUID(), content: response.content, usage: response.usage, stop_reason: 'tool_use', routing: { providerId: 'desktop_codex', model } };
+  return { id: crypto.randomUUID(), content: response.content, usage: response.usage, diagnostics: sanitizeInferenceDiagnostics(response.diagnostics), stop_reason: 'tool_use', routing: { providerId: 'desktop_codex', model } };
+}
+
+export function sanitizeInferenceDiagnostics(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>, result: Record<string, unknown> = {};
+  for (const key of ['thread_id','turn_id','requested_model','resolved_model','actual_model_status','usage_basis','usage_status','terminal_status','estimate_method','runtime_version','desktop_version','app_server_version']) {
+    if (typeof raw[key] === 'string' && raw[key].length <= 240) result[key] = raw[key];
+  }
+  for (const key of ['protocol_version','request_bytes','estimated_input_tokens','duration_ms','requested_output_tokens']) if (Number.isSafeInteger(raw[key]) && Number(raw[key]) >= 0) result[key] = raw[key];
+  result.hard_output_token_limit = raw.hard_output_token_limit === true;
+  result.terminal_observed = raw.terminal_observed === true;
+  if (Array.isArray(raw.usage_snapshots)) result.usage_snapshots = raw.usage_snapshots.slice(-32).map(snapshot => {
+    const entry: Record<string, unknown> = {};
+    for (const kind of ['total','last']) {
+      const source = snapshot?.[kind], numbers: Record<string, number> = {};
+      for (const key of ['inputTokens','outputTokens','cachedInputTokens','cacheWriteInputTokens','reasoningOutputTokens','totalTokens']) if (Number.isSafeInteger(source?.[key]) && source[key] >= 0) numbers[key] = source[key];
+      entry[kind] = numbers;
+    }
+    return entry;
+  });
+  return result;
+}
+
+/** Failed inference can still have measured usage. Partial snapshots never release a reservation. */
+export function measuredFailureUsage(value: unknown, diagnostics: ReturnType<typeof sanitizeInferenceDiagnostics>) {
+  if (!value || typeof value !== 'object') return null;
+  const usage = value as {input_tokens?: number; output_tokens?: number};
+  if (!diagnostics?.terminal_observed || !['completed','interrupted','failed'].includes(String(diagnostics.terminal_status)) ||
+      diagnostics.usage_status !== 'reported' || diagnostics.usage_basis !== 'fresh_thread_cumulative_total' ||
+      !diagnostics.thread_id || !diagnostics.turn_id) return null;
+  if (![usage.input_tokens,usage.output_tokens].every(n => Number.isSafeInteger(n) && Number(n) >= 0 && Number(n) <= 500000)) return null;
+  const snapshots = diagnostics.usage_snapshots as {total?: {inputTokens?: number;outputTokens?: number}}[] | undefined;
+  const final = snapshots?.at(-1)?.total;
+  if (final?.inputTokens !== usage.input_tokens || final?.outputTokens !== usage.output_tokens) return null;
+  return {input_tokens:usage.input_tokens!,output_tokens:usage.output_tokens!};
 }

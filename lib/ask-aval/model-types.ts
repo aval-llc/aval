@@ -20,6 +20,7 @@ export interface ToolSchema {
 }
 
 export interface MessagesResponse {
+  diagnostics?: Record<string, unknown>;
   executionManifest?: import('../agents/execution-manifest').ExecutionManifest;
   id: string;
   content: ContentBlock[];

@@ -370,7 +370,7 @@ class CodexAppServerService extends EventEmitter {
     child.once("error", (error) => this.#onExit(error));
     child.once("exit", (code, signal) => this.#onExit(new Error(`Codex App Server exited (${code ?? signal ?? "unknown"}).`)));
     try {
-      await rpc.request("initialize", {
+      rpc.serverInfo = await rpc.request("initialize", {
         clientInfo: { name: "aval_desktop", title: "Aval Desktop", version: this.version },
         capabilities: null,
       }, 15_000);
@@ -569,10 +569,16 @@ class CodexAppServerService extends EventEmitter {
   }
 
   async infer(payload) {
+    if (payload?.action === 'capabilities') return require('./inference.cjs').CAPABILITIES;
     if (!this.rpc || this.state.account?.type !== 'chatgpt' || !this.state.active) throw Error('Connect ChatGPT in Aval Desktop');
     if (this.state.rateLimits?.reached) throw Error('ChatGPT subscription limit reached');
     if (!this.state.models.some(m => m.id === payload.model)) throw Error('Requested model is unavailable');
-    return require('./inference.cjs').infer(this.rpc, this.workspaceDir, payload.model, payload.params);
+    try { return await require('./inference.cjs').infer(this.rpc, this.workspaceDir, payload.model, payload.params); }
+    catch (error) {
+      // Electron serializes thrown Errors without custom fields. Return only the
+      // inference error envelope so usage diagnostics survive IPC; never return credentials.
+      return { inferenceError: true, message: error.message, diagnostics: error.diagnostics ?? {usage_status:'unknown'}, usage: error.usage ?? null };
+    }
   }
 
   async cancelTurn({ conversationId }) {
