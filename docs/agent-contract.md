@@ -1,6 +1,6 @@
 # Aval maintenance agent behavioral contract
 
-Contract version: `maintenance-contract-v1`
+Contract version: `maintenance-contract-v2`
 
 Status: product specification; not a claim that every capability below is implemented or live-validated.
 
@@ -28,8 +28,25 @@ communication, spending, scheduling, or PMS writes.
 ## 2. Pilot capability boundary
 
 The current starting slice is message/context inspection and supervised creation
-of one internal maintenance work order. Tenant replies remain drafts in the
-demo. Do not treat this document as enabling vendor outreach or scheduling.
+of one internal maintenance work order. New matched Gmail intake and demo tasks
+share the same draft-only contract. Historical delivery tasks are not silently
+rewritten. Do not treat this document as enabling vendor outreach or scheduling.
+
+Internal creation and repair completion are separate states. The executor records
+an append-only execution snapshot atomically with creation. Later case edits must
+flag drift, not erase the action or authorize a duplicate. Emergency-priority
+creation immediately assigns human review; it never implies acknowledged dispatch.
+
+An owner may opt into the fixed `maintenance-ack-v1` bilingual acknowledgement
+through maintenance policy configuration. Its text is available from the policy
+API before approval. It uses no actor-generated description. Approved emergency
+guidance may be appended only from the current approved policy. Templates remain
+unsent. Free-form replies still require independent semantic review. Template
+shadow reviews are evaluation work, not an automatic extra production model call.
+
+Completed reviews retain their measured usage and valid verdict even when actual
+usage exceeds admission estimates. Cancellation, lease loss and stale evidence
+still withhold completion. Overshoot is recorded, not permission to spend again.
 
 Each capability must have an explicit status: `unavailable`, `simulation_only`,
 `approval_required`, or `policy_authorized`. Keep implementation status,

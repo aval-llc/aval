@@ -1225,9 +1225,8 @@ export const agentTasks = pgTable(
     // The user whose authority the run carries. Every policy check re-reads
     // this rather than trusting anything in the task's own message history.
     userId: text("user_id").notNull(),
-    // The acting actor: Aval One (`general`), a Lead, a Specialist, or a
-    // historical persona id. Resolved to a permission envelope by
-    // lib/agents/organization on every step.
+    // Persona id — a built-in role or a custom persona row. Resolved to a
+    // permission envelope by lib/agents/permissions.ts on every step.
     agentId: text("agent_id").notNull(),
     /**
      * The employee that owns this work.
@@ -1239,8 +1238,7 @@ export const agentTasks = pgTable(
      */
     employeeId: text("employee_id"),
     goal: text("goal").notNull(),
-    // One of TASK_STATES in lib/agents/task-state.ts, enforced by
-    // agent_tasks_status_check (migration 20260925000100).
+    // QUEUED | RUNNING | WAITING_FOR_TOOL | WAITING_FOR_APPROVAL | COMPLETED | FAILED | CANCELLED
     status: text("status").notNull(),
     // The root task of the Work this task belongs to; a root's is its own id.
     // What delegation limits, duplicate detection and peer wake-ups key on.
@@ -1344,6 +1342,8 @@ export const agentTaskSteps = pgTable(
      */
     sourceProvider: text("source_provider"),
     externalRecordId: text("external_record_id"),
+    // Append-only, server-authored internal maintenance execution snapshot.
+    executionReceiptJson: jsonText("execution_receipt_json"),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
   },

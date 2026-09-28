@@ -14,6 +14,21 @@ export function desktopQuery(session: DbSession, text: string, values: unknown[]
 export class DesktopInferencePending extends Error {
   constructor() { super('Waiting for Aval Desktop'); }
 }
+export class DesktopEvidenceChanged extends Error {
+  constructor() { super('Inference evidence changed. The previous attempt is retained; human review is required before spending again.'); }
+}
+
+async function requestKey(params: Parameters<typeof callModel>[3], step: number, phase: string) {
+  const request = {...params}; delete request.timeout_ms;
+  return `${step}:${phase}:${await payloadHash(request)}`;
+}
+
+/** Read-only lookup. A paid, completed answer does not need a new reservation. */
+export async function completedTaskModel(session: DbSession, org: string, params: Parameters<typeof callModel>[3], taskId: string, step: number, phase: string): Promise<MessagesResponse | null> {
+  const result = await desktopQuery(session, `SELECT j.response_json FROM desktop_model_jobs j JOIN organizations o ON o.id=j.organization_id
+    WHERE j.organization_id=$1 AND j.task_id=$2 AND j.request_key=$3 AND j.status='completed' AND o.active_model_provider='desktop_codex'`, [org,taskId,await requestKey(params,step,phase)]);
+  return result.rows[0]?.response_json as MessagesResponse ?? null;
+}
 
 /** The cloud remains the executor. Desktop receives only an inference request. */
 export async function callTaskModel(
@@ -31,6 +46,10 @@ export async function callTaskModel(
   const request = { ...params };
   delete request.timeout_ms;
   const key = `${step}:${phase}:${await payloadHash(request)}`;
+  const previous = await desktopQuery(session, `SELECT j.request_key FROM desktop_model_jobs j JOIN agent_tasks t ON t.id=j.task_id AND t.organization_id=j.organization_id
+    WHERE j.organization_id=$1 AND j.task_id=$2 AND split_part(j.request_key,':',1)=$3
+    AND j.request_key LIKE $4 AND j.request_key<>$5 AND t.check_json->>'kind'='internal_maintenance' LIMIT 1`, [organizationId,taskId,String(step),`${step}:${phase}:%`,key]);
+  if (previous.rows.length) throw new DesktopEvidenceChanged();
   const manifest = await taskManifest(session, organizationId, taskId, { ...params, phase, model: 'pending', provider: 'desktop_codex' });
   await desktopQuery(session, `INSERT INTO desktop_model_jobs(id,organization_id,task_id,request_key,request_json,execution_manifest_json)
     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(organization_id,task_id,request_key) DO NOTHING`,
@@ -55,10 +74,17 @@ export function validateDesktopResponse(value: unknown, request: { tools?: { nam
 export function sanitizeInferenceDiagnostics(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>, result: Record<string, unknown> = {};
-  for (const key of ['thread_id','turn_id','requested_model','resolved_model','actual_model_status','usage_basis','usage_status','terminal_status','estimate_method','runtime_version','desktop_version','app_server_version']) {
+  for (const key of ['thread_id','turn_id','requested_model','resolved_model','actual_model_status','usage_basis','usage_status','terminal_status','estimate_method','runtime_version','desktop_version','app_server_version','response_contract']) {
     if (typeof raw[key] === 'string' && raw[key].length <= 240) result[key] = raw[key];
   }
-  for (const key of ['protocol_version','request_bytes','estimated_input_tokens','duration_ms','requested_output_tokens']) if (Number.isSafeInteger(raw[key]) && Number(raw[key]) >= 0) result[key] = raw[key];
+  for (const key of ['protocol_version','request_bytes','estimated_input_tokens','duration_ms','requested_output_tokens','event_count','agent_message_count','reroute_count','serialized_input_bytes']) if (Number.isSafeInteger(raw[key]) && Number(raw[key]) >= 0) result[key] = raw[key];
+  for (const key of ['instruction_hash','schema_hash','config_hash']) if (typeof raw[key] === 'string' && /^[a-f0-9]{64}$/.test(raw[key])) result[key] = raw[key];
+  if (Array.isArray(raw.event_metadata)) result.event_metadata = raw.event_metadata.slice(-128).map(value => {
+    const event = value && typeof value === 'object' ? value as Record<string, unknown> : {}, safe: Record<string, unknown> = {};
+    for (const key of ['method','item_type','item_id','phase']) if (typeof event[key] === 'string' && event[key].length <= 240) safe[key] = event[key];
+    for (const key of ['elapsed_ms','bytes']) if (Number.isSafeInteger(event[key]) && Number(event[key]) >= 0) safe[key] = event[key];
+    return safe;
+  });
   result.hard_output_token_limit = raw.hard_output_token_limit === true;
   result.terminal_observed = raw.terminal_observed === true;
   if (Array.isArray(raw.usage_snapshots)) result.usage_snapshots = raw.usage_snapshots.slice(-32).map(snapshot => {

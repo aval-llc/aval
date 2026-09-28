@@ -34,7 +34,7 @@ export const POST = withApiSession(async (session, request) => {
       await query(session, `INSERT INTO desktop_model_runners(organization_id,user_id,runner_id,model) VALUES($1,$2,$3,$4)
         ON CONFLICT(organization_id) DO UPDATE SET user_id=$2,runner_id=$3,model=$4,enabled=true,heartbeat_at=now()`, [org, identity.userId, runnerId, body.model]);
       await query(session, `UPDATE organizations SET active_model_provider='desktop_codex',updated_at=now() WHERE id=$1`, [org]);
-      await query(session, 'UPDATE desktop_model_runners SET protocol_version=$2 WHERE organization_id=$1', [org, body.protocolVersion === 2 ? 2 : 1]);
+      await query(session, 'UPDATE desktop_model_runners SET protocol_version=$2 WHERE organization_id=$1', [org, body.protocolVersion === 3 ? 3 : body.protocolVersion === 2 ? 2 : 1]);
       return Response.json({ connected: true, organizationId: org });
     }
     const runner = (await query(session, `SELECT * FROM desktop_model_runners WHERE organization_id=$1 AND user_id=$2 AND runner_id=$3 FOR UPDATE`, [org, identity.userId, runnerId])).rows[0];
@@ -52,14 +52,15 @@ export const POST = withApiSession(async (session, request) => {
       // One in-flight inference per workspace bounds spend and response ordering.
       const busy = await query(session, `SELECT id FROM desktop_model_jobs WHERE organization_id=$1 AND status='claimed' AND lease_until>now() LIMIT 1`, [org]);
       if (busy.rows.length) return Response.json({ job: null });
-      const candidates = await query(session, `SELECT j.*,t.check_json,t.max_tokens,t.tokens_used AS task_tokens_used FROM desktop_model_jobs j JOIN agent_tasks t ON t.id=j.task_id AND t.organization_id=j.organization_id
+      const candidates = await query(session, `SELECT j.*,t.check_json,t.execution_scope_json,t.max_tokens,t.tokens_used AS task_tokens_used FROM desktop_model_jobs j JOIN agent_tasks t ON t.id=j.task_id AND t.organization_id=j.organization_id
         WHERE j.organization_id=$1 AND (j.status='pending' OR (j.status='claimed' AND j.lease_until<=now()))
         AND t.status='WAITING_FOR_MODEL' AND t.cancel_requested=false ORDER BY j.created_at LIMIT 1 FOR UPDATE OF j SKIP LOCKED`, [org]);
       const job = candidates.rows[0];
       if (!job) return Response.json({ job: null });
       // An admission reservation, NOT an enforceable provider ceiling.
       const request = job.request_json as {tool_choice?:{name?:string};tools?:{name:string}[]};
-      if ((job.check_json as {kind?:string})?.kind === 'internal_maintenance' && Number(runner.protocol_version) < 2) return Response.json({ error: 'Update Aval Desktop to run maintenance protocol v2', code: 'desktop_update_required' }, { status: 426 });
+      const requiredProtocol = (job.execution_scope_json as {maintenanceProtocol?:number})?.maintenanceProtocol === 3 ? 3 : 2;
+      if ((job.check_json as {kind?:string})?.kind === 'internal_maintenance' && Number(runner.protocol_version) < requiredProtocol) return Response.json({ error: `Update Aval Desktop to run maintenance protocol v${requiredProtocol}`, code: 'desktop_update_required' }, { status: 426 });
       let admission = null;
       if ((job.check_json as {kind?:string})?.kind === 'internal_maintenance') {
         const measured = await query(session, `SELECT request_json,response_json FROM desktop_model_jobs WHERE organization_id=$1 AND model=$2 AND status='completed' ORDER BY completed_at DESC LIMIT 32`, [org,runner.model]);
@@ -129,7 +130,7 @@ export const POST = withApiSession(async (session, request) => {
         return Response.json({ accepted: true, usageStatus: usage ? 'reported' : 'unknown' });
       }
       const response = validateDesktopResponse(body.response, job.request_json as Parameters<typeof validateDesktopResponse>[1], String(job.model));
-      if (Number(runner.protocol_version) >= 2 && response.diagnostics?.protocol_version !== 2) throw Error('Update Aval Desktop: inference diagnostics are required');
+      if (Number(runner.protocol_version) >= 2 && response.diagnostics?.protocol_version !== Number(runner.protocol_version)) throw Error('Update Aval Desktop: matching inference diagnostics are required');
       const actualTokens = response.usage.input_tokens + response.usage.output_tokens;
       await query(session, `UPDATE desktop_model_jobs SET diagnostics_json=$2,attempt_history_json=attempt_history_json || jsonb_build_array(jsonb_build_object('claimToken',$3::text,'actualTokens',$4::bigint,'completedAt',now(),'usageStatus','reported')) WHERE id=$1`, [job.id, JSON.stringify({ ...job.diagnostics_json as Record<string,unknown>, ...response.diagnostics, reserved_tokens: Number(job.reserved_tokens), actual_tokens: actualTokens, reservation_exceeded: actualTokens > Number(job.reserved_tokens) }), body.claimToken, actualTokens]);
       // Never accept client-supplied provenance; retain the queued server snapshot.

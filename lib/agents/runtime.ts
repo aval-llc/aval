@@ -5,6 +5,7 @@ import { SEMANTIC_REVIEW_SYSTEM, SEMANTIC_REVIEW_TOOL, groundedReviewTool, parse
 import { assembleContext, byteCount, MAX_CONTEXT_BYTES } from './context';
 import { estimateInputTokens, modelBudget, MAINTENANCE_REVIEW_RESERVE } from './inference-budget';
 import { maintenanceReceipt, maintenanceOutcome } from './maintenance-receipt';
+import { maintenanceAcknowledgement } from './maintenance-acknowledgement';
 import { repeatedMaintenanceReads } from './maintenance-progress';
 import { planReadiness, goalPlan, validateGoalPlanProposal } from './goal-plan';
 import { checkDocumentAnswerNumbers } from './document-evidence';
@@ -39,7 +40,7 @@ import { checkTask, failedCheckCount, parseTaskCheck } from './checks';
 import type { AskAvalEnv, ContentBlock, Message, MessagesResponse, ToolSchema, ToolUseBlock } from "@/lib/ask-aval/model-types";
 import { ModelProviderError } from "@/lib/ask-aval/model-types";
 import { workTitle } from "./work-presentation.ts";
-import { callTaskModel, DesktopInferencePending } from './desktop-inference';
+import { callTaskModel, completedTaskModel, DesktopEvidenceChanged, DesktopInferencePending } from './desktop-inference';
 import { TOOLS, TOOL_SCHEMAS } from "@/lib/ask-aval/tools";
 import { resolvePersona } from "@/lib/ask-aval/personas";
 import { withDerivedNumbers, round2 } from "@/lib/ask-aval/faithfulness";
@@ -332,9 +333,10 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
   let inputTokens = 0;
   let outputTokens = 0;
 
-  const finish = async (status: TaskState, extra: { resultJson?: string; error?: string; approvalId?: string; nextAttemptAt?: Date; reasonCode?: string } = {}): Promise<AdvanceOutcome> => {
+  const finish = async (status: TaskState, extra: { resultJson?: string; error?: string; approvalId?: string; nextAttemptAt?: Date; reasonCode?: string; draftVerified?: boolean } = {}): Promise<AdvanceOutcome> => {
     if (isMaintenance && status === 'FAILED' && /budget|step limit|wall-clock/i.test(extra.error ?? '')) { status = 'WAITING_FOR_HUMAN'; extra.reasonCode = 'inference_budget'; }
     const outcome = isMaintenance ? await maintenanceOutcome(dbSession, task!, messages, status, extra.reasonCode ?? (status === 'WAITING_FOR_HUMAN' ? 'verification_rejected' : null)) : null;
+    if (outcome && extra.draftVerified) outcome.draftState = 'verified';
     await Promise.all([
       recordUsage(dbSession, { orgId: organizationId, userId: task!.userId }, inputTokens, outputTokens),
       audit.length ? appendAuditEvents(dbSession, organizationId, audit) : Promise.resolve(null),
@@ -391,9 +393,10 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
     const fresh = await getTask(dbSession, organizationId, taskId);
     const timeout = Math.min(25_000, deadline - Date.now(), (fresh?.deadlineAt?.getTime() ?? 0) - Date.now());
     const remaining = (fresh?.maxTokens ?? 0) - task!.tokensUsed - inputTokens - outputTokens;
+    const completed = await completedTaskModel(dbSession, organizationId, params, taskId, stepIndex, `review:${phase}`);
     if (!fresh || fresh.cancelRequested || fresh.leaseOwner !== workerId || fresh.leaseGeneration !== task!.leaseGeneration || (fresh.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || timeout <= 0 ||
-        byteCount(params) > MAX_CONTEXT_BYTES || estimateInputTokens(params) + params.max_tokens > remaining ||
-        await checkUsageBlocked(dbSession, env, { orgId: organizationId, userId: task!.userId })) {
+        byteCount(params) > MAX_CONTEXT_BYTES || (!completed && (estimateInputTokens(params) + params.max_tokens > remaining ||
+        await checkUsageBlocked(dbSession, env, { orgId: organizationId, userId: task!.userId })))) {
       return { ...scope, exitCode: 1, problems: ['Semantic review could not run within the available lease, time, context, or token budget.'] };
     }
     const frame = async (value: unknown) => {
@@ -402,18 +405,20 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
     };
     await frame({ kind: 'semantic_request', ...scope, ...params });
     try {
-      const response = await callTaskModel(dbSession, env, organizationId, { ...params, timeout_ms: timeout }, taskId, stepIndex, `review:${phase}`);
+      const response = completed ?? await callTaskModel(dbSession, env, organizationId, { ...params, timeout_ms: timeout }, taskId, stepIndex, `review:${phase}`);
       inputTokens += response.usage.input_tokens;
       outputTokens += response.usage.output_tokens;
+      const evidenceUnchanged = !isMaintenance || await digestPayload(packet) === await digestPayload(await semanticPacket(dbSession, task!, messages, phase, proposal));
       await frame({ kind: 'semantic_response', ...scope, response });
       await persistStep(dbSession, { taskId, organizationId, stepIndex, kind: 'model_call', toolName: 'semantic_verdict', executionManifest: response.executionManifest, modelProvider: response.routing?.providerId, modelName: response.routing?.model, resultDigest: await digestPayload(response.content) });
       audit.push({ kind: 'model_call', label: 'semantic_verdict', payloadDigest: await digestPayload(response.content), count: stepIndex });
       const current = await getTask(dbSession, organizationId, taskId);
-      if (!current || current.cancelRequested || current.leaseOwner !== workerId || current.leaseGeneration !== task!.leaseGeneration || (current.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || Date.now() >= Math.min(deadline, current.deadlineAt?.getTime() ?? 0) || task!.tokensUsed + inputTokens + outputTokens > current.maxTokens)
-        return { ...scope, exitCode: 1, problems: ['The task stopped or exhausted its budget during semantic review.'] };
+      if (!current || current.cancelRequested || current.leaseOwner !== workerId || current.leaseGeneration !== task!.leaseGeneration || (current.leaseExpiresAt?.getTime() ?? 0) <= Date.now() || Date.now() >= Math.min(deadline, current.deadlineAt?.getTime() ?? 0) || !evidenceUnchanged)
+        return { ...scope, exitCode: 1, problems: ['The task stopped or its evidence changed during semantic review.'] };
+      if (task!.tokensUsed + inputTokens + outputTokens > current.maxTokens) await persistStep(dbSession, {taskId, organizationId, stepIndex, kind:'inference_budget_overshoot', error:'Completed review usage exceeded admission allowance. Usage retained; no new inference authorized.'});
       return { ...scope, ...parseSemanticVerdict(response, packet) };
     } catch (err) {
-      if (err instanceof DesktopInferencePending) throw err;
+      if (err instanceof DesktopInferencePending || err instanceof DesktopEvidenceChanged) throw err;
       await frame({ kind: 'semantic_error', ...scope, timeoutMs: timeout,
         error: err instanceof ModelProviderError ? err.message : 'Semantic review transport failed.' });
       return { ...scope, exitCode: 1, problems: [err instanceof ModelProviderError ? `Semantic review unavailable: ${err.message}` : 'Semantic review failed; completion was withheld.'] };
@@ -697,10 +702,27 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       // boundary, so nothing is ever interrupted mid-execution.
       if(Date.now() >= (fresh.deadlineAt?.getTime() ?? fresh.createdAt.getTime()+30*60_000))return finish('FAILED',{error:'The task reached its total wall-clock limit.'});
       if (fresh.cancelRequested) return finish("CANCELLED");
+      if (isMaintenance) {
+        // Local receipt reconciliation never needs a further model allowance.
+        // Cancellation and the task deadline above still take precedence.
+        const receipt = await maintenanceReceipt(dbSession, task, messages);
+        if (receipt?.execution.workOrderId && !receipt.execution.verified) return finish('WAITING_FOR_HUMAN', {reasonCode:'existing_work_order', error:'A work order already exists for this request, but this task cannot prove its own approved execution. Reconcile the existing record; do not create another.'});
+        if (receipt?.execution.verified) {
+          const emergency = receipt.execution.priority === 'emergency';
+          if (receipt.execution.recordDrift || !receipt.identityUnchanged) return finish('WAITING_FOR_HUMAN', { reasonCode: emergency ? 'emergency_review' : 'execution_drift', error: 'The recorded action remains executed, but current case records changed. A human must reconcile; no new approval or action was created.' });
+          const acknowledgement = maintenanceAcknowledgement(receipt, JSON.parse(task.executionScopeJson).locale ?? (/español/i.test(task.goal) ? 'es-mx' : 'en'));
+          if (acknowledgement) {
+            await persistStep(dbSession, {taskId, organizationId, stepIndex:task.stepCount + stepsRun, kind:'maintenance_template_verified', policyEffect:'allow', resultDigest:await digestPayload(acknowledgement)});
+            return finish(emergency ? 'WAITING_FOR_HUMAN' : 'COMPLETED', {resultJson:JSON.stringify(acknowledgement), draftVerified:true, ...(emergency ? {reasonCode:'emergency_review', error:'Emergency work order recorded. Immediate human review required; no dispatch or acknowledged handoff is confirmed.'} : {})});
+          }
+          // Emergency ownership cannot depend on composing or reviewing prose.
+          if (emergency) return finish('WAITING_FOR_HUMAN', {reasonCode:receipt.emergencyPolicy?.status === 'approved' ? 'emergency_review' : 'emergency_policy_required', error:'Emergency work order recorded. Immediate human review required. No dispatch or acknowledged handoff is confirmed; any unfinished draft remains unverified.'});
+        }
+      }
       if (!pendingUses.length && task.stepCount + stepsRun >= task.maxSteps) {
         return finish("FAILED", { error: `Reached the ${task.maxSteps}-step limit without a conclusion.` });
       }
-      if (task.tokensUsed + inputTokens + outputTokens >= task.maxTokens) {
+      if (!pendingAnswer && task.tokensUsed + inputTokens + outputTokens >= task.maxTokens) {
         return finish("FAILED", { error: "Exhausted the task's token budget." });
       }
       // The workspace's own spend gates, re-checked every step rather than
@@ -1035,6 +1057,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       if(results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name===PEER_HELP_TOOL&&u.id===r.tool_use_id)))return finish('WAITING_FOR_AGENT',{nextAttemptAt:new Date(Date.now()+DELEGATION_POLICY.peerRecheckMs)});
     }
   } catch (err) {
+    if (err instanceof DesktopEvidenceChanged) return finish('WAITING_FOR_HUMAN', {reasonCode:'evidence_changed', error:err.message});
     if (err instanceof DesktopInferencePending) return finish('WAITING_FOR_MODEL');
     const message = err instanceof ModelProviderError ? err.message : "The agent runtime failed.";
     console.error("agent_runtime_error", { taskId, err });

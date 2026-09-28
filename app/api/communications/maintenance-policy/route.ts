@@ -4,12 +4,13 @@ import { getApiIdentity } from '@/lib/integrations/session';
 import { communicationSettings, properties } from '@/db/postgres/schema';
 import { parseMaintenancePolicy } from '@/lib/communications/maintenance-policy';
 import { readJsonBody } from '@/lib/operations/validation';
+import { MAINTENANCE_ACKNOWLEDGEMENTS } from '@/lib/agents/maintenance-acknowledgement';
 
 export const GET = withApiSession(async (session, request) => {
   const identity = await getApiIdentity(session, request);
   if (!identity || identity.role !== 'owner') return Response.json({ error: 'Owner access required' }, { status: 403 });
   const [row] = await session.db.select().from(communicationSettings).where(eq(communicationSettings.organizationId, identity.organizationId));
-  return Response.json({ policy: JSON.parse(row?.configJson ?? '{}').maintenancePolicy ?? null }, { headers: { 'cache-control': 'no-store' } });
+  return Response.json({ policy: JSON.parse(row?.configJson ?? '{}').maintenancePolicy ?? null, acknowledgementTemplates: MAINTENANCE_ACKNOWLEDGEMENTS }, { headers: { 'cache-control': 'no-store' } });
 });
 
 export const PUT = withApiSession(async (session, request) => {

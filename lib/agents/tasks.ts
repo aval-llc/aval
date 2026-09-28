@@ -49,7 +49,7 @@ export {
 export interface NewTask {
   id?: string;
   executionScope?:
-    | { source: "inbound"; conversationId: string; messageId?: string; draftOnly?: boolean; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } }
+    | { source: "inbound"; conversationId: string; messageId?: string; draftOnly?: boolean; maintenanceProtocol?: number; locale?: 'en' | 'es-mx'; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } }
     // Work created by `lib/agents/intake.ts` from an authorized external
     // event. It carries the provenance the coordinator needs and the identity
     // the intake dedupe is keyed on, so a redelivery reaches the same row.
@@ -457,6 +457,7 @@ export async function resumableApprovalTasks(dbSession: DbSession, limit = 10): 
 /* ── steps ───────────────────────────────────────────────────────────────── */
 
 export interface StepInput {
+  executionReceiptJson?: string;
   executionManifest?: ExecutionManifest;
   taskId: string;
   organizationId: string;
@@ -510,6 +511,7 @@ export async function appendStep(dbSession: DbSession, step: StepInput): Promise
     modelProvider: step.modelProvider ?? null,
     modelName: step.modelName ?? null,
     executionManifestJson: JSON.stringify(step.executionManifest ?? await taskManifest(dbSession, step.organizationId, step.taskId, { phase: step.kind, model: step.modelName, provider: step.modelProvider })),
+    executionReceiptJson: step.executionReceiptJson ?? null,
     toolName: step.toolName ?? null,
     policyEffect: step.policyEffect ?? null,
     denyCode: step.denyCode ?? null,

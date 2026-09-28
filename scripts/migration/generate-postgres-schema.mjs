@@ -24,6 +24,11 @@ source = source
     'import { bigint, boolean, check, date, doublePrecision, foreignKey, index, integer, numeric, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";\nimport { jsonText } from "./json-text.ts";',
   )
   .replaceAll("sqliteTable(", "pgTable(")
+  // Post-cutover fields live in PostgreSQL, not in the frozen D1 inventory.
+  .replace('  aiEmployeeLimit: integer("ai_employee_limit"),', '  aiEmployeeLimit: integer("ai_employee_limit"),\n  // What business this workspace runs — lib/organizations/operating-profile.ts.\n  // Routing reads it to decide which Leads and Specialists work may reach.\n  operatingProfileJson: text("operating_profile_json").notNull().default(\'{"businessModels":[],"assetClasses":[],"version":0}\'),')
+  .replace('    // Conversation state, so a resumed run continues rather than restarting.', '    // The root task of the Work this task belongs to; a root\'s is its own id.\n    // What delegation limits, duplicate detection and peer wake-ups key on.\n    workId: text("work_id"),\n    // Conversation state, so a resumed run continues rather than restarting.')
+  .replace('    index("agent_tasks_parent_idx").on(table.parentTaskId),', '    index("agent_tasks_parent_idx").on(table.parentTaskId),\n    index("agent_tasks_work_idx").on(table.organizationId, table.workId, table.status),')
+  .replace('    externalRecordId: text("external_record_id"),', '    externalRecordId: text("external_record_id"),\n    // Append-only, server-authored internal maintenance execution snapshot.\n    executionReceiptJson: text("execution_receipt_json"),')
   // Post-cutover maintenance outcomes remain absent from historical D1.
   .replace('    checkJson: text("check_json")', '    maintenanceOutcomeJson: text("maintenance_outcome_json"),\n    checkJson: text("check_json")')
   // PostgreSQL-only execution manifests; do not rewrite the historical D1 inventory.

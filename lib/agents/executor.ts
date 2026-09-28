@@ -40,6 +40,7 @@ import type { ToolDescriptor } from "./registry.ts";
 import { redactArguments } from "./redaction.ts";
 import { evaluateFinancialProposal, type FinancialProposalDecision } from "./execution-policy.ts";
 import { recordFinancialToolResult, recordLedgerWriteResult, reserveFinancialOperation } from "./financial-operations.ts";
+import { recordMaintenanceExecution } from './maintenance-execution';
 
 export interface ExecutionRequest {
   toolName: string;
@@ -321,15 +322,19 @@ async function runWithRetries(dbSession: DbSession,
 
   for (let attempt = 1; attempt <= tool.maxRetries + 1; attempt++) {
     try {
-      const out = await withTimeout(
-        runTool(dbSession, tool.name, request.args, request.subject.organizationId, request.task ? `${request.task.id}:${tool.name}:${await digestPayload(canonicalAction(request.args))}` : _key ?? undefined,
+      const run = async () => runTool(dbSession, tool.name, request.args, request.subject.organizationId, request.task ? `${request.task.id}:${tool.name}:${await digestPayload(canonicalAction(request.args))}` : _key ?? undefined,
           // The persona travels with the task coordinates so a PMS write can
           // re-resolve this agent's deployments at execution time, not just at
           // assembly. `approvalId` is already on `task` and reaches the same gate.
-          request.task ? { ...request.task, personaId: request.context?.personaId } : undefined),
-        tool.timeoutMs,
-        tool.name,
-      );
+          request.task ? { ...request.task, personaId: request.context?.personaId } : undefined);
+      // Internal DB-only work is atomic with its receipt. Do not race a timeout
+      // against a still-running transaction or write a receipt after commit.
+      const out = tool.name === 'create_maintenance_work_order' ? await dbSession.atomic(async () => {
+        if (!request.task || !_key) throw Error('Maintenance requires a durable task reservation');
+        const value = await run();
+        await recordMaintenanceExecution(dbSession, request.subject.organizationId, request.task, _key, request.args, value.json);
+        return value;
+      }) : await withTimeout(run(), tool.timeoutMs, tool.name);
       const durationMs = Date.now() - started;
       // Bounded before anything else reads it: the financial recorder, the
       // audit digest and the model all see the same value, and a tenant-sized

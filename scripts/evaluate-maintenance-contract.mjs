@@ -7,7 +7,7 @@ import { braintrustBase } from '../lib/observability/braintrust.ts';
 
 const output = process.argv[2];
 if (!output || output.startsWith('--')) throw Error('Provide a new private output filename');
-const report = { id:randomUUID(),suite:'maintenance-contract-integration-v1',contract_version:'maintenance-contract-v1',
+const report = { id:randomUUID(),suite:'maintenance-contract-integration-v1',contract_version:'maintenance-contract-v2',
   agent_version:agentBuildVersion(),model:'scripted-fixture-not-live',validation:'integration_fixture',
   status:'running',model_calls:0,input_tokens:0,output_tokens:0,cases:[] };
 await writeFile(output,JSON.stringify(report,null,2),{flag:'wx',mode:0o600});

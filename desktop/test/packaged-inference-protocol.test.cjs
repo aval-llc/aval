@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {mkdtempSync,readFileSync,rmSync,existsSync} = require('node:fs');
+const {mkdtempSync,readFileSync,rmSync,existsSync,readdirSync} = require('node:fs');
 const {tmpdir} = require('node:os');
 const {join,resolve} = require('node:path');
 const {execFileSync} = require('node:child_process');
@@ -16,6 +16,12 @@ test('packaged macOS App Server accepts Aval inference and interruption protocol
   const temporary=mkdtempSync(join(tmpdir(),'aval-protocol-'));
   try {
     execFileSync(binary,['app-server','generate-json-schema','--out',temporary],{stdio:['ignore','pipe','pipe']});
+    const protocol = readdirSync(temporary,{recursive:true}).filter(p=>String(p).endsWith('.json')).map(p=>JSON.parse(readFileSync(join(temporary,p),'utf8')));
+    const enumValues = new Set();
+    const collect=value=>{if(!value||typeof value!=='object')return;for(const key of ['enum'])if(Array.isArray(value[key]))for(const entry of value[key])if(typeof entry==='string')enumValues.add(entry);for(const nested of Object.values(value))if(typeof nested==='object')collect(nested);};
+    protocol.forEach(collect);
+    for(const name of ['item/started','item/completed','thread/tokenUsage/updated','agentMessage','commandExecution']) assert.ok(enumValues.has(name),`Reconcile captured metadata with packaged event: ${name}`);
+    console.log(JSON.stringify({packaged_notification_methods:[...enumValues].filter(v=>v.includes('/')).sort(),phase_support:enumValues.has('final_answer'),reroute_support:enumValues.has('model/rerouted')}));
     const ajv=new Ajv({strict:false,validateFormats:false,allowUnionTypes:true});
     const schemas=Object.fromEntries(['ThreadStartParams','TurnStartParams','TurnInterruptParams','ThreadTokenUsageUpdatedNotification'].map(name=>[name,JSON.parse(readFileSync(join(temporary,'v2',`${name}.json`),'utf8'))]));
     const validators=Object.fromEntries(Object.entries(schemas).map(([name,schema])=>[name,ajv.compile(schema)]));
