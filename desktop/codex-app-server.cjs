@@ -402,15 +402,44 @@ class CodexAppServerService extends EventEmitter {
       await this.start();
       return;
     }
-    const accountResult = await this.rpc.request("account/read", { refreshToken: false });
+    // Login notifications and the settings UI can refresh concurrently. In
+    // particular, never rotate a managed session twice at the same time.
+    if (!this.refreshPromise) this.refreshPromise = this.#refreshAccount().finally(() => { this.refreshPromise = null; });
+    return this.refreshPromise;
+  }
+
+  async #refreshAccount() {
+    let accountResult = await this.rpc.request("account/read", { refreshToken: false });
+    let rateResult = null;
+    if (accountResult?.account?.type === "chatgpt") {
+      try {
+        // account/read alone only reads local credentials, even when expired.
+        rateResult = await this.rpc.request("account/rateLimits/read");
+      } catch (error) {
+        if (!/401|unauthorized|invalid_grant|refresh.?token|token.*expired|expired.*token|not authenticated/i.test(String(error?.message))) {
+          this.#setState({ status: "unavailable", active: false, models: [], selectedModel: null, lastError: "Could not verify the ChatGPT connection. Retry when the connection is available." });
+          return;
+        }
+        try {
+          accountResult = await this.rpc.request("account/read", { refreshToken: true });
+          if (accountResult?.account?.type !== "chatgpt") throw new Error("Session unavailable");
+          rateResult = await this.rpc.request("account/rateLimits/read");
+        } catch {
+          this.#setState({ status: "login_failed", account: null, active: false, models: [], selectedModel: null, rateLimits: null, lastError: "Your ChatGPT session expired. Connect your ChatGPT plan again in Settings > Intelligence." });
+          return;
+        }
+      }
+    }
     const account = publicAccount(accountResult?.account);
     let models = [];
     let rateLimits = null;
     if (account) {
-      const [modelResult, rateResult] = await Promise.all([
-        this.rpc.request("model/list", { limit: 100, includeHidden: false }).catch(() => ({ data: [] })),
-        this.rpc.request("account/rateLimits/read").catch(() => null),
-      ]);
+      let modelResult;
+      try { modelResult = await this.rpc.request("model/list", { limit: 100, includeHidden: false }); }
+      catch {
+        this.#setState({ status: "unavailable", active: false, models: [], selectedModel: null, lastError: "Could not load your ChatGPT models. Retry the connection." });
+        return;
+      }
       models = Array.isArray(modelResult?.data) ? modelResult.data
         .filter((model) => model && !model.hidden && typeof model.model === "string")
         .map((model) => ({ id: model.model, displayName: String(model.displayName || model.model), isDefault: model.isDefault === true })) : [];
@@ -498,7 +527,11 @@ class CodexAppServerService extends EventEmitter {
   }
 
   async setModel(modelId) {
-    if (typeof modelId !== "string" || !this.state.models.some((model) => model.id === modelId)) throw new Error("Choose a model from the account model list.");
+    if (typeof modelId !== "string" || !/^[a-zA-Z0-9._-]{1,100}$/.test(modelId)) throw new Error("Choose a model from the account model list.");
+    if (!this.state.models.some((model) => model.id === modelId)) await this.refresh();
+    if (!this.state.models.some((model) => model.id === modelId)) {
+      throw new Error(this.state.lastError || `${modelId} is not in this ChatGPT account's available models. Reconnect your ChatGPT plan to refresh access.`);
+    }
     this.preferences.selectedModel = modelId;
     this.#setState({ selectedModel: modelId });
     this.#persistPreferences();
