@@ -122,6 +122,6 @@
     }
   },
   "dependencies": {
-    "@openai/codex": "0.153.0"
+    "@openai/codex": "0.158.0"
   }
 }
