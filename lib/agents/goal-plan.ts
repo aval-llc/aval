@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, or } from 'drizzle-orm';
 import type { DbSession } from "@/db/postgres/session";
 import { agentChecks, agentPlanNodes, agentTasks } from "@/db/postgres/schema";
 import { createTask, getTask, type TaskRecord } from './tasks';
@@ -18,6 +18,35 @@ import { delegationRefusal } from "./delegation.ts";
 /** Fan-out and total size remain structural caps (delegation-policy.ts). How
  * many times a goal may be rethought is policy — see DEFAULT_ATTEMPT_POLICIES.replan. */
 export const MAX_PLAN_NODES = DELEGATION_POLICY.maxFanout, MAX_GOAL_TASKS = 8;
+// Longer than the one-minute sweep: a one-minute delay would make the same
+// oldest eight nodes eligible again on every real tick and still starve work.
+const PLAN_RECHECK_MS = 120_000;
+
+/** Sleep blocked nodes so the oldest batch cannot monopolize every sweep. */
+export async function deferPlanTask(session: DbSession, task: TaskRecord): Promise<void> {
+    const now = new Date();
+    await session.db.update(agentTasks).set({ nextAttemptAt: new Date(now.getTime() + PLAN_RECHECK_MS) }).where(and(
+        eq(agentTasks.organizationId, task.organizationId), eq(agentTasks.id, task.id),
+        eq(agentTasks.status, task.status), eq(agentTasks.leaseGeneration, task.leaseGeneration),
+        or(isNull(agentTasks.leaseExpiresAt), lte(agentTasks.leaseExpiresAt, now)),
+    ));
+}
+
+/** Wake hints only; readiness, permissions and leases are still rechecked. */
+export async function wakePlanDependents(session: DbSession, settled: TaskRecord): Promise<void> {
+    // A shared node can belong to several plans; do not rely on parentTaskId.
+    const links = await session.db.select({ root: agentPlanNodes.rootTaskId }).from(agentPlanNodes)
+        .where(and(eq(agentPlanNodes.organizationId, settled.organizationId), eq(agentPlanNodes.taskId, settled.id)));
+    const roots = [...new Set([...links.map(link => link.root), ...(settled.parentTaskId ? [settled.parentTaskId] : [])])];
+    if (!roots.length) return;
+    const nodes = await session.db.select({ id: agentPlanNodes.taskId }).from(agentPlanNodes)
+        .where(and(eq(agentPlanNodes.organizationId, settled.organizationId), inArray(agentPlanNodes.rootTaskId, roots)));
+    await session.db.update(agentTasks).set({ nextAttemptAt: new Date() }).where(and(
+        eq(agentTasks.organizationId, settled.organizationId),
+        inArray(agentTasks.id, [...roots, ...nodes.map(node => node.id)]),
+        inArray(agentTasks.status, ['QUEUED', 'WAITING_FOR_TOOL']),
+    ));
+}
 type Node = {
     key: string;
     goal: string;

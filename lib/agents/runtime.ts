@@ -7,7 +7,7 @@ import { estimateInputTokens, modelBudget, MAINTENANCE_REVIEW_RESERVE } from './
 import { maintenanceReceipt, maintenanceOutcome } from './maintenance-receipt';
 import { maintenanceAcknowledgement } from './maintenance-acknowledgement';
 import { repeatedMaintenanceReads } from './maintenance-progress';
-import { planReadiness, goalPlan, validateGoalPlanProposal } from './goal-plan';
+import { planReadiness, goalPlan, validateGoalPlanProposal, deferPlanTask, wakePlanDependents } from './goal-plan';
 import { checkDocumentAnswerNumbers } from './document-evidence';
 import { getTool } from './registry';
 import { checkTask, failedCheckCount, parseTaskCheck } from './checks';
@@ -40,7 +40,7 @@ import { checkTask, failedCheckCount, parseTaskCheck } from './checks';
 import type { AskAvalEnv, ContentBlock, Message, MessagesResponse, ToolSchema, ToolUseBlock } from "@/lib/ask-aval/model-types";
 import { ModelProviderError } from "@/lib/ask-aval/model-types";
 import { workTitle } from "./work-presentation.ts";
-import { callTaskModel, completedTaskModel, DesktopEvidenceChanged, DesktopInferencePending } from './desktop-inference';
+import { callTaskModel, completedTaskModel, DesktopEvidenceChanged, DesktopInferencePending, InferenceDeferred } from './desktop-inference';
 import { TOOLS, TOOL_SCHEMAS } from "@/lib/ask-aval/tools";
 import { resolvePersona } from "@/lib/ask-aval/personas";
 import { withDerivedNumbers, round2 } from "@/lib/ask-aval/faithfulness";
@@ -121,6 +121,8 @@ export interface AdvanceOptions {
   invocationBudgetMs?: number;
   /** Steps to run before yielding, independent of the task's own `maxSteps`. */
   maxStepsThisInvocation?: number;
+  /** HTTP fast path: no hosted model calls or non-maintenance external tools. */
+  deferInference?: boolean;
 }
 
 export type AdvanceOutcome = {
@@ -149,18 +151,25 @@ export async function advanceTask(dbSession: DbSession,
   workerId: string,
   options: AdvanceOptions = {}
 ): Promise<AdvanceOutcome> {
-  const deadline = Date.now() + (options.invocationBudgetMs ?? DEFAULT_INVOCATION_BUDGET_MS);
+  // Leave headroom for persistence/lease release on the HTTP fast path.
+  const deadline = Date.now() + (options.invocationBudgetMs ?? DEFAULT_INVOCATION_BUDGET_MS) - (options.deferInference ? 5_000 : 0);
 
   let task = await getTask(dbSession, organizationId, taskId);
   if (!task) return { taskId, status: "FAILED", stepsRun: 0, error: "No such task in this workspace." };
   if (task.status === "COMPLETED" || task.status === "FAILED" || task.status === "CANCELLED") {
     return { taskId, status: task.status, stepsRun: 0 };
   }
+  if (options.deferInference && JSON.parse(task.checkJson ?? '{}').kind !== 'internal_maintenance') {
+    return { taskId, status: task.status, stepsRun: 0 };
+  }
 
   // What this run is resuming from, before the claim moves it to RUNNING.
   const resumedFrom = task.status;
   const readiness = await planReadiness(dbSession, task);
-  if(readiness.wait)return {taskId,status:task.status,stepsRun:0};
+  if (readiness.wait) {
+    await deferPlanTask(dbSession, task);
+    return { taskId, status: task.status, stepsRun: 0 };
+  }
   // Parked on a peer: runnable only once every peer it asked has settled.
   // Until then it sleeps on its recheck timer rather than being re-selected on
   // every tick; a settling peer wakes it early (wakePeerWaiters).
@@ -358,7 +367,10 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
     }
     // Anyone in this Work waiting on a peer re-checks now rather than on its
     // timer. Only a hint: each re-reads what it actually awaits.
-    if (TERMINAL_STATES.has(status)) await wakePeerWaiters(dbSession, organizationId, task!.workId ?? task!.id);
+    if (TERMINAL_STATES.has(status)) {
+      await wakePeerWaiters(dbSession, organizationId, task!.workId ?? task!.id);
+      await wakePlanDependents(dbSession, task!);
+    }
     return { taskId, status, stepsRun, approvalId: extra.approvalId, error: extra.error };
   };
 
@@ -405,7 +417,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
     };
     await frame({ kind: 'semantic_request', ...scope, ...params });
     try {
-      const response = completed ?? await callTaskModel(dbSession, env, organizationId, { ...params, timeout_ms: timeout }, taskId, stepIndex, `review:${phase}`);
+      const response = completed ?? await callTaskModel(dbSession, env, organizationId, { ...params, timeout_ms: timeout }, taskId, stepIndex, `review:${phase}`, options.deferInference);
       inputTokens += response.usage.input_tokens;
       outputTokens += response.usage.output_tokens;
       const evidenceUnchanged = !isMaintenance || await digestPayload(packet) === await digestPayload(await semanticPacket(dbSession, task!, messages, phase, proposal));
@@ -418,7 +430,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       if (task!.tokensUsed + inputTokens + outputTokens > current.maxTokens) await persistStep(dbSession, {taskId, organizationId, stepIndex, kind:'inference_budget_overshoot', error:'Completed review usage exceeded admission allowance. Usage retained; no new inference authorized.'});
       return { ...scope, ...parseSemanticVerdict(response, packet) };
     } catch (err) {
-      if (err instanceof DesktopInferencePending || err instanceof DesktopEvidenceChanged) throw err;
+      if (err instanceof DesktopInferencePending || err instanceof DesktopEvidenceChanged || err instanceof InferenceDeferred) throw err;
       await frame({ kind: 'semantic_error', ...scope, timeoutMs: timeout,
         error: err instanceof ModelProviderError ? err.message : 'Semantic review transport failed.' });
       return { ...scope, exitCode: 1, problems: [err instanceof ModelProviderError ? `Semantic review unavailable: ${err.message}` : 'Semantic review failed; completion was withheld.'] };
@@ -815,7 +827,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
         tool_choice: remainingSteps <= 1 || maintenanceActionCompleted ? { type: "tool", name: "render_answer" } : { type: "auto" },
         max_tokens: outputBudget,
         timeout_ms: Math.max(1,Math.min(25_000,deadline-Date.now(),(fresh.deadlineAt?.getTime()??Infinity)-Date.now())),
-      }, taskId, stepIndex, 'actor');
+      }, taskId, stepIndex, 'actor', options.deferInference);
       inputTokens += res.usage.input_tokens;
       outputTokens += res.usage.output_tokens;
       if (!replaying) stepsRun++;
@@ -1057,6 +1069,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
       if(results.some(r=>r.type==='tool_result'&&!r.is_error&&toolUses.some(u=>u.name===PEER_HELP_TOOL&&u.id===r.tool_use_id)))return finish('WAITING_FOR_AGENT',{nextAttemptAt:new Date(Date.now()+DELEGATION_POLICY.peerRecheckMs)});
     }
   } catch (err) {
+    if (err instanceof InferenceDeferred) return finish('QUEUED');
     if (err instanceof DesktopEvidenceChanged) return finish('WAITING_FOR_HUMAN', {reasonCode:'evidence_changed', error:err.message});
     if (err instanceof DesktopInferencePending) return finish('WAITING_FOR_MODEL');
     const message = err instanceof ModelProviderError ? err.message : "The agent runtime failed.";

@@ -14,6 +14,8 @@ export function desktopQuery(session: DbSession, text: string, values: unknown[]
 export class DesktopInferencePending extends Error {
   constructor() { super('Waiting for Aval Desktop'); }
 }
+/** An invocation yield, not a model failure or an exhausted task budget. */
+export class InferenceDeferred extends Error {}
 export class DesktopEvidenceChanged extends Error {
   constructor() { super('Inference evidence changed. The previous attempt is retained; human review is required before spending again.'); }
 }
@@ -33,10 +35,11 @@ export async function completedTaskModel(session: DbSession, org: string, params
 /** The cloud remains the executor. Desktop receives only an inference request. */
 export async function callTaskModel(
   session: DbSession, env: Parameters<typeof callModel>[1], organizationId: string,
-  params: Parameters<typeof callModel>[3], taskId: string, step: number, phase: string,
+  params: Parameters<typeof callModel>[3], taskId: string, step: number, phase: string, deferInference = false,
 ): Promise<MessagesResponse> {
   const selected = await desktopQuery(session, 'SELECT active_model_provider FROM organizations WHERE id=$1', [organizationId]);
   if (selected.rows[0]?.active_model_provider !== 'desktop_codex') {
+    if (deferInference) throw new InferenceDeferred('Fresh inference requires the durable worker');
     const manifest = await taskManifest(session, organizationId, taskId, { ...params, phase });
     const started = Date.now();
     const response = await callModel(session, env, organizationId, params);

@@ -63,6 +63,9 @@ registerHooks({
         jsx: "automatic",
         format: "esm",
         target: "es2022",
+        // Node 22+ requires JSON import attributes; do not strip them while
+        // compiling TSX that shares packaged Desktop protocol metadata.
+        supported: { 'import-attributes': true },
         sourcefile: path,
       });
       return { format: "module", source: code, shortCircuit: true };

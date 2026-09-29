@@ -6,7 +6,7 @@ import { maintenanceOutcome } from '@/lib/agents/maintenance-receipt';
 import { maintenanceAdmission, estimateInputTokens } from '@/lib/agents/inference-budget';
 import { readJsonBody } from '@/lib/operations/validation';
 import { withWorkerOrganizationSession } from '@/lib/api/with-session';
-import { runAgentWorkerBatch } from '@/lib/agents/worker';
+import { runTaskInBackground } from '@/lib/agents/worker';
 import { runtimeBindings } from '@/lib/runtime/bindings';
 import { getRequestExecutionContext } from 'vinext/shims/request-context';
 
@@ -143,7 +143,7 @@ export const POST = withApiSession(async (session, request) => {
         await query(session, `UPDATE agent_tasks SET status='QUEUED',next_attempt_at=NULL,
           deadline_at=CASE WHEN deadline_at>=$3::timestamptz THEN deadline_at+(now()-$3::timestamptz) ELSE deadline_at END,
           updated_at=now() WHERE id=$1 AND organization_id=$2 AND status='WAITING_FOR_MODEL' AND cancel_requested=false`, [job.task_id, org,job.created_at]);
-        const work = session.afterCommit(() => withWorkerOrganizationSession(org, worker => runAgentWorkerBatch(worker, runtimeBindings(), 'request')));
+        const work = session.afterCommit(() => withWorkerOrganizationSession(org, worker => runTaskInBackground(worker, runtimeBindings(), org, String(job.task_id), 'request')));
         getRequestExecutionContext()?.waitUntil(work);
       }
       return Response.json({ accepted: !cancelled, taskId: job.task_id });

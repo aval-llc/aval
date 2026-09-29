@@ -1,6 +1,7 @@
 "use strict";
 const crypto = require('node:crypto');
-const CAPABILITIES = { protocolVersion: 3, diagnostics: true, singleMaintenanceProposal: true, hardOutputTokenLimit: false };
+const { DESKTOP_PROTOCOL } = require('./protocol.json');
+const CAPABILITIES = { protocolVersion: DESKTOP_PROTOCOL, diagnostics: true, singleMaintenanceProposal: true, hardOutputTokenLimit: false };
 
 /** Inference only: all actions and permissions stay in Aval's server runtime. */
 async function infer(rpc, workspace, model, params, timing = {}) {
@@ -26,7 +27,7 @@ async function infer(rpc, workspace, model, params, timing = {}) {
   const snapshots = [], snapshotKeys = new Set(), events = [];
   let turnId, text = '', finalText, usage, forbidden = false, interrupted = false, settled = false, terminalStatus = null, graceTimer, agentMessageCount = 0, eventCount = 0, rerouteCount = 0;
   const diagnostics = (usageStatus = 'reported') => ({
-    protocol_version: 3, thread_id: threadId, turn_id: turnId ?? null,
+    protocol_version: DESKTOP_PROTOCOL, thread_id: threadId, turn_id: turnId ?? null,
     requested_model: model, resolved_model: started.model ?? model, actual_model: null,
     actual_model_status: 'not_exposed_by_protocol', request_bytes: requestBytes,
     estimated_input_tokens: Math.ceil(requestBytes / 3), estimate_method: 'utf8-bytes-div-3-v1',
