@@ -54,6 +54,71 @@ test("renderer account shape cannot contain credentials", () => {
   assert.deepEqual(account, { type: "chatgpt", email: "owner@example.com", planType: "plus" });
   assert.equal(JSON.stringify(account).includes("never-render"), false);
 });
+
+function modelDiscoveryService(t, request) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aval-model-discovery-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const service = new CodexAppServerService({ userDataDir: directory });
+  service.rpc = { request };
+  return service;
+}
+
+test('expired sessions refresh once before discovering Luna, including concurrent settings requests', async t => {
+  let renewed = false, rotations = 0;
+  const service = modelDiscoveryService(t, async (method, params) => {
+    if (method === 'account/read') {
+      if (params.refreshToken) { rotations++; renewed = true; }
+      return { account: { type: 'chatgpt', email: 'owner@example.com' } };
+    }
+    if (method === 'account/rateLimits/read') {
+      if (!renewed) throw Error('401 Unauthorized');
+      return { rateLimits: {} };
+    }
+    if (method === 'model/list') {
+      assert.equal(renewed, true);
+      return { data: [{ model: 'gpt-6-luna', displayName: 'GPT-6 Luna' }] };
+    }
+  });
+  await Promise.all([service.refresh(), service.setModel('gpt-6-luna')]);
+  assert.equal(rotations, 1);
+  assert.equal(service.getState().selectedModel, 'gpt-6-luna');
+  assert.equal(service.getState().status, 'connected_chatgpt');
+});
+
+test('invalid refresh credentials clear stale models and request reconnect without a fallback', async t => {
+  const service = modelDiscoveryService(t, async (method, params) => {
+    if (method === 'account/read' && !params.refreshToken) return { account: { type: 'chatgpt' } };
+    if (method === 'account/read') throw Error('refresh token invalid');
+    if (method === 'account/rateLimits/read') throw Error('401 Unauthorized');
+    assert.fail('Expired session must not discover or use models');
+  });
+  service.state.models = [{ id: 'gpt-5.6-sol' }];
+  service.state.active = true;
+  await assert.rejects(service.setModel('gpt-6-luna'), /session expired/);
+  assert.equal(service.getState().status, 'login_failed');
+  assert.equal(service.getState().active, false);
+  assert.equal(service.getState().account, null);
+  assert.deepEqual(service.getState().models, []);
+});
+
+test('a verified account without Luna cannot select it and connection failures do not claim access', async t => {
+  let offline = false;
+  const service = modelDiscoveryService(t, async method => {
+    if (method === 'account/read') return { account: { type: 'chatgpt' } };
+    if (method === 'account/rateLimits/read') {
+      if (offline) throw Error('Network unavailable');
+      return { rateLimits: {} };
+    }
+    if (method === 'model/list') return { data: [{ model: 'gpt-5.6-luna' }] };
+  });
+  await assert.rejects(service.setModel('gpt-6-luna'), /not in this ChatGPT account/);
+  assert.equal(service.getState().selectedModel, 'gpt-5.6-luna');
+  offline = true;
+  await service.refresh();
+  assert.equal(service.getState().status, 'unavailable');
+  assert.equal(service.getState().active, false);
+  assert.deepEqual(service.getState().models, []);
+});
 test('durable inference failures retain measured diagnostics across the IPC value boundary',async()=>{
   const rpc=new EventEmitter();
   rpc.request=async(method)=>{
