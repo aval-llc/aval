@@ -53,6 +53,22 @@ Each capability must have an explicit status: `unavailable`, `simulation_only`,
 provider connectivity, live validation, and business authorization separate.
 Missing policy or capability means unavailable, not unrestricted.
 
+Operational controls preserve evidence rather than retrying blindly. Workspace
+owners can pause agent execution at `/api/agents/pause`; the deployment-wide
+`AVAL_AGENTS_PAUSED=true` control cannot be overridden by a workspace owner.
+Ingestion continues, while new tasks and inference claims stop. An already
+started provider request cannot be recalled; subsequent task actions recheck the
+pause. Mid-run handoffs require human review.
+
+New maintenance approvals bind the observed message history, resolved identity
+and approved maintenance policy. Changed evidence requires a fresh decision;
+historical approvals without that binding do not acquire it retroactively.
+Human approval waiting has a bounded deadline ending thirty minutes after the
+approval expires. New Gmail connections start from the current history watermark,
+not historical inbox mail. An expired history cursor requires explicit recovery.
+New inbound messages invalidate stored conversation drafts, but never erase
+executed work-order receipts.
+
 Progression:
 
 1. Read and triage; produce grounded plans and drafts.

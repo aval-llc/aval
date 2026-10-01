@@ -41,6 +41,7 @@ import { redactArguments } from "./redaction.ts";
 import { evaluateFinancialProposal, type FinancialProposalDecision } from "./execution-policy.ts";
 import { recordFinancialToolResult, recordLedgerWriteResult, reserveFinancialOperation } from "./financial-operations.ts";
 import { recordMaintenanceExecution } from './maintenance-execution';
+import { assertMaintenanceApprovalFresh } from './maintenance-evidence';
 
 export interface ExecutionRequest {
   toolName: string;
@@ -331,6 +332,7 @@ async function runWithRetries(dbSession: DbSession,
       // against a still-running transaction or write a receipt after commit.
       const out = tool.name === 'create_maintenance_work_order' ? await dbSession.atomic(async () => {
         if (!request.task || !_key) throw Error('Maintenance requires a durable task reservation');
+        await assertMaintenanceApprovalFresh(dbSession, request.subject.organizationId, request.task.id, request.task.approvalId, request.args);
         const value = await run();
         await recordMaintenanceExecution(dbSession, request.subject.organizationId, request.task, _key, request.args, value.json);
         return value;

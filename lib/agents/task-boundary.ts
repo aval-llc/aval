@@ -8,6 +8,7 @@ import { MAX_DELEGATION_DEPTH } from './delegation-policy';
 import { actorHolds, actorOrchestrates, isOrchestrator } from './organization/index.ts';
 import { employeeEnvelope } from './policy';
 import { employeeScopes, getEmployee } from './employees';
+import { agentsPaused } from './pause';
 export function inboundToolAllowed(scope: { conversationId?: string; messageId?: string; draftOnly?: boolean; maintenance?: { residentId: string; propertyId: string; unitId: string } }, name: string, args: Record<string, unknown>) {
   if (name === 'request_execution_plan') return false;
   if (args.conversation_id !== scope.conversationId) return false;
@@ -56,6 +57,7 @@ async function authorityOf(dbSession: DbSession, org: string, task: TaskRecord, 
 
 /** Re-read every ancestor: delegation never restores revoked authority or inbound scope. */
 export async function taskBoundary(dbSession: DbSession, org:string,user:string,taskId:string,toolName:string,args:Record<string,unknown>):Promise<string|null>{
+ if(await agentsPaused(dbSession,org))return 'Agent execution is paused by an operator.';
  const tool=getTool(toolName);if(!tool)return null;
  let task=await getTask(dbSession, org,taskId);const seen=new Set<string>();
  // The person this work runs for must still be in the workspace. Revoking

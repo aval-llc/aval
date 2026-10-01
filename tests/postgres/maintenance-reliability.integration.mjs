@@ -52,8 +52,17 @@ async function runCase(options = {}) {
       if(['COMPLETED','FAILED','CANCELLED','WAITING_FOR_HUMAN'].includes(current.status)) break;
       if(current.status==='WAITING_FOR_APPROVAL') {
         const approval = await db.run(s=>latestApprovalForTask(s,db.org,task.id));
+        if(options.lateApproval) {
+          assert.ok(new Date(current.deadlineAt).getTime() >= approval.expiresAt.getTime() + 30 * 60_000);
+          // Shift the whole waiting interval back two hours, retaining the
+          // relative deadline that requestApproval actually persisted.
+          await db.admin.query("UPDATE agent_tasks SET created_at=created_at-interval '2 hours', deadline_at=deadline_at-interval '2 hours' WHERE id=$1",[task.id]);
+          await db.admin.query("UPDATE agent_approvals SET requested_at=requested_at-interval '2 hours',expires_at=expires_at-interval '2 hours' WHERE id=$1",[approval.id]);
+        }
         if(options.expire) await db.admin.query("UPDATE agent_approvals SET status='expired' WHERE id=$1",[approval.id]);
         else { const result=await db.run(s=>decideApproval(s,db.org,approval.id,options.reject?'rejected':'approved',db.user,db.user,'owner')); assert.equal(result.ok,true); }
+        if(options.staleMessage) await db.admin.query("INSERT INTO messages(id,conversation_id,external_message_id,direction,body,payload_json,created_at) VALUES($1,$2,$3,'inbound','Actually this is a different issue.', '{}', now())",[randomUUID(),scope.conversationId,randomUUID()]);
+        if(options.stalePolicy) await configurePolicy(new Request(db.request('/api/communications/maintenance-policy',syntheticEmergencyPolicy),{method:'PUT'}));
         approved = !options.reject && !options.expire;
       }
       await db.run(s=>advanceTask(s,{},db.org,task.id,randomUUID(),{invocationBudgetMs:45000,maxStepsThisInvocation:2}));
@@ -116,10 +125,11 @@ test('maintenance reliability on PostgreSQL', {skip:!process.env.AVAL_TEST_DATAB
       t.mock.method(globalThis,'fetch',async input=>{
         const url=new URL(input);
         if(url.pathname.endsWith('/profile')) return Response.json({historyId:'1'});
-        if(url.pathname.endsWith('/messages')) return Response.json({messages:[{id:'live-path-message'}]});
-        if(url.pathname.endsWith('/history')) return Response.json({historyId:'2',history:[]});
+        if(url.pathname.endsWith('/messages')) throw Error('First sync must not list historical inbox messages');
+        if(url.pathname.endsWith('/history')) return Response.json({historyId:'2',history:[{messagesAdded:[{message:{id:'live-path-message'}}]}]});
         return Response.json({id:'live-path-message',threadId:'live-path-thread',labelIds:['INBOX'],internalDate:String(Date.now()),payload:{mimeType:'text/plain',headers:[{name:'From',value:'resident-0-0@example.invalid'}],body:{data:Buffer.from(untrusted).toString('base64url')}}});
       });
+      assert.equal((await db.run(s=>syncGmail(s,db.org,connection,'fixture'))).imported,0,'first connection saves only the current watermark');
       assert.equal((await db.run(s=>syncGmail(s,db.org,connection,'fixture'))).imported,1);
       assert.equal((await db.run(s=>syncGmail(s,db.org,connection,'fixture'))).imported,0);
       const rows=(await db.admin.query("SELECT * FROM agent_tasks WHERE organization_id=$1 AND id LIKE 'inbound_%'",[db.org])).rows;
@@ -221,6 +231,12 @@ test('maintenance reliability on PostgreSQL', {skip:!process.env.AVAL_TEST_DATAB
   });
   await t.test('approved work has a bound receipt, one order and an open repair',async()=>{
     const r=await runCase({tamper:true});assert.equal(r.final.status,'COMPLETED',r.final.error);assert.equal(r.receipt.execution.recordCount,1);assert.equal(r.outcome.actionState,'executed');assert.equal(r.outcome.verificationState,'verified');assert.notEqual(r.receipt.execution.workOrderStatus,'completed');assert.equal(r.reviewerCalls,1);assert.equal(r.actorCalls,2,'server context read saves an actor call');assert.equal(r.prefetchCount,1,'resumes preserve the mandatory observation');
+  });
+  await t.test('an approval two hours later still executes one authorized order',async()=>{
+    const r=await runCase({lateApproval:true,template:true});assert.equal(r.final.status,'COMPLETED',r.final.error);assert.equal(r.receipt.execution.recordCount,1);
+  });
+  for (const option of ['staleMessage','stalePolicy']) await t.test(`${option} invalidates the approved action before execution`,async()=>{
+    const r=await runCase({[option]:true});assert.equal(r.final.status,'WAITING_FOR_HUMAN');assert.equal(r.receipt.execution.recordCount,0);
   });
   for(const option of ['reject','expire'])await t.test(`${option} creates no work order and assigns human ownership`,async()=>{
     const r=await runCase({[option]:true});assert.equal(r.final.status,'WAITING_FOR_HUMAN',r.final.error);assert.equal(r.receipt.execution.recordCount,0);assert.equal(r.outcome.actionState,'declined');assert.equal(r.outcome.ownerUserId,r.user);assert.ok(r.outcome.reviewAt);assert.equal(r.final.nextAttemptAt,null);assert.equal(r.reviewerCalls,0);

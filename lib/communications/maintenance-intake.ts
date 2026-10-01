@@ -21,9 +21,16 @@ export async function maintenanceContext(session: DbSession, org: string, conver
       and ${metadata.resolvedMatch ? sql`r.id = ${metadata.resolvedMatch.residentId} and l.id = ${metadata.resolvedMatch.leaseId}` : sql`lower(btrim(r.email)) = ${metadata.sender}`}
     limit 2`) : { rows: [] };
   const match = matches.rows.length === 1 ? matches.rows[0] : null;
+  const history = await session.db.execute<{ revision: string }>(sql`
+    select encode(sha256(convert_to(coalesce(jsonb_agg(jsonb_build_array(id, external_message_id, body, payload_json, created_at) order by created_at, id)::text, '[]'), 'UTF8')), 'hex') as revision
+    from ${messages} where conversation_id = ${conversationId} and direction = 'inbound'
+  `);
+  const emergencyPolicy = match ? await maintenancePolicy(session, org, match.propertyId) : null;
+  const evidenceRevision = await digestPayload({ version: 1, conversationId, messageId, history: history.rows[0]?.revision, match, emergencyPolicy });
   return { conversationId, messageId, message: message.body, newsletter: metadata.newsletter === true,
+    evidenceRevision,
     match, status: match ? "matched" : matches.rows.length ? "ambiguous" : "unmatched",
-    emergencyPolicy: match ? await maintenancePolicy(session, org, match.propertyId) : null };
+    emergencyPolicy };
 }
 
 export async function createInboundWorkOrder(session: DbSession, org: string, args: Record<string, unknown>, operationKey: string) {

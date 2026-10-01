@@ -61,6 +61,7 @@ export async function maintenanceReceipt(session: DbSession, task: TaskRecord, t
   return {
     version: 1, taskId: task.id, conversationId: check.conversationId, messageId: check.messageId,
     evidenceRevision,
+    evidenceUnchanged: approval ? JSON.parse(approval.evidenceJson).maintenanceEvidenceRevision === context.evidenceRevision : false,
     identityUnchanged, match: context.match, emergencyPolicy: context.emergencyPolicy,
     approval: bound || snapshotVerified ? { id: approval.id, decision: approval.status, approver: approval.decidedByUserId, decidedAt: approval.decidedAt, policyVersion: approval.policyVersion, policyDecision: snapshotVerified ? 'allow' : execution?.policyEffect ?? null, actionDigest: JSON.parse(approval.evidenceJson).payloadHash } : null,
     execution: { verified, executionId: snapshotVerified ? historical!.executionId : reservation?.idempotencyKey ?? null, workOrderId: snapshotVerified ? historical!.order.id : order?.id ?? null, workOrderStatus: order?.status ?? null, priority: snapshotVerified ? historical!.order.priority : order?.priority ?? null, recordCount: orders.length, executedAt: snapshotVerified ? historical!.executedAt : execution?.createdAt ?? null, recordDrift, historical: snapshotVerified ? historical : null },

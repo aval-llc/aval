@@ -8,6 +8,7 @@ import { readJsonBody } from '@/lib/operations/validation';
 import { withWorkerOrganizationSession } from '@/lib/api/with-session';
 import { runTaskInBackground } from '@/lib/agents/worker';
 import { runtimeBindings } from '@/lib/runtime/bindings';
+import { agentsPaused } from '@/lib/agents/pause';
 import { getRequestExecutionContext } from 'vinext/shims/request-context';
 
 /** A runner's token allowance is per day, not for its life. */
@@ -41,6 +42,7 @@ export const POST = withApiSession(async (session, request) => {
     if (!runner) return Response.json({ error: 'Desktop runner disconnected' }, { status: 409 });
     await query(session, 'UPDATE desktop_model_runners SET heartbeat_at=now() WHERE organization_id=$1', [org]);
     if (body.action === 'claim') {
+      if (await agentsPaused(session, org)) return Response.json({ job: null, paused: true });
       if (!runner.enabled) return Response.json({ error:'Desktop runner paused' },{status:409});
       // The allowance is per day (20260928000200_desktop_runner_daily_allowance.sql).
       // A new window keeps only the reservations of claims that are still live.

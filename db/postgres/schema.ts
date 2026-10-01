@@ -91,6 +91,7 @@ export const organizations = pgTable("organizations", {
   // How many AI employees this workspace may have. Null means no limit, which
   // is the architecture's own position: a ceiling is a commercial decision, not
   // a property of the runtime, so nothing below this column assumes a number.
+  agentsPaused: boolean("agents_paused").notNull().default(false),
   aiEmployeeLimit: integer("ai_employee_limit"),
   // What business this workspace runs — lib/organizations/operating-profile.ts.
   // Routing reads it to decide which Leads and Specialists work may reach.

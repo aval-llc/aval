@@ -65,7 +65,12 @@ jobs:
           AVAL_POSTGRES_CLIENT_IMAGE: postgres:17
           AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
       - name: Browser to Desktop to PostgreSQL maintenance regression (synthetic model)
-        run: xvfb-run --auto-servernum node --import ./tests/integration/module-hooks.mjs scripts/verify-desktop-runner.mjs
+        run: |
+          # Electron's setuid helper must be installed correctly on the hosted
+          # Linux runner. Keep Chromium sandboxing enabled.
+          sudo chown root:root desktop/node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 desktop/node_modules/electron/dist/chrome-sandbox
+          xvfb-run --auto-servernum node --import ./tests/integration/module-hooks.mjs scripts/verify-desktop-runner.mjs
         env:
           AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
       # This job verifies real PostgreSQL behavior. It does not satisfy the hosted Hyperdrive gate.

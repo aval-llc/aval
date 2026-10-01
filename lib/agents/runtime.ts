@@ -50,6 +50,8 @@ import { appendAuditEvents } from "@/lib/audit/log";
 import { digestPayload, type AuditEvent } from "@/lib/audit/chain";
 import { executeApprovedTool, executeTool, redactArguments } from "./executor.ts";
 import { requestApproval, latestApprovalForTask, type ApprovalRecord } from "./approvals.ts";
+import { agentsPaused } from './pause';
+import { observedMaintenanceRevision } from './maintenance-evidence';
 import { approvalMatchesToolUse } from "./approval-binding.ts";
 import { pendingExecutions, unverifiedExternalEffects, verifyExternalEffects } from "./verification.ts";
 import { claimFromState } from "./task-state.ts";
@@ -156,6 +158,7 @@ export async function advanceTask(dbSession: DbSession,
 
   let task = await getTask(dbSession, organizationId, taskId);
   if (!task) return { taskId, status: "FAILED", stepsRun: 0, error: "No such task in this workspace." };
+  if (await agentsPaused(dbSession, organizationId)) return { taskId, status: task.status, stepsRun: 0 };
   if (task.status === "COMPLETED" || task.status === "FAILED" || task.status === "CANCELLED") {
     return { taskId, status: task.status, stepsRun: 0 };
   }
@@ -702,6 +705,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
     while (true) {
       const fresh = await getTask(dbSession, organizationId, taskId);
       if (!fresh) return { taskId, status: "FAILED", stepsRun, error: "Task disappeared mid-run." };
+      if (await agentsPaused(dbSession, organizationId)) return finish('WAITING_FOR_HUMAN', { reasonCode: 'agents_paused', error: 'An operator paused agent execution. Saved progress requires human review before resuming.' });
 
       task.maxSteps = fresh.maxSteps;
       task.maxTokens = fresh.maxTokens;
@@ -721,7 +725,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
         if (receipt?.execution.workOrderId && !receipt.execution.verified) return finish('WAITING_FOR_HUMAN', {reasonCode:'existing_work_order', error:'A work order already exists for this request, but this task cannot prove its own approved execution. Reconcile the existing record; do not create another.'});
         if (receipt?.execution.verified) {
           const emergency = receipt.execution.priority === 'emergency';
-          if (receipt.execution.recordDrift || !receipt.identityUnchanged) return finish('WAITING_FOR_HUMAN', { reasonCode: emergency ? 'emergency_review' : 'execution_drift', error: 'The recorded action remains executed, but current case records changed. A human must reconcile; no new approval or action was created.' });
+          if (receipt.execution.recordDrift || !receipt.identityUnchanged || !receipt.evidenceUnchanged) return finish('WAITING_FOR_HUMAN', { reasonCode: emergency ? 'emergency_review' : receipt.execution.recordDrift || !receipt.identityUnchanged ? 'execution_drift' : 'evidence_changed', error: 'The recorded action remains executed, but current case records changed. A human must reconcile; no new approval or action was created.' });
           const acknowledgement = maintenanceAcknowledgement(receipt, JSON.parse(task.executionScopeJson).locale ?? (/español/i.test(task.goal) ? 'es-mx' : 'en'));
           if (acknowledgement) {
             await persistStep(dbSession, {taskId, organizationId, stepIndex:task.stepCount + stepsRun, kind:'maintenance_template_verified', policyEffect:'allow', resultDigest:await digestPayload(acknowledgement)});
@@ -971,7 +975,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
             // Bind the human decision to this exact model proposal. Tool name
             // alone is insufficient because one assistant message may contain
             // two calls to the same financial tool with different arguments.
-            evidence: { toolUseId: use.id, payloadHash: await payloadHash(use.input), goal: workTitle(task.goal), agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
+            evidence: { toolUseId: use.id, payloadHash: await payloadHash(use.input), ...(use.name === 'create_maintenance_work_order' ? { maintenanceEvidenceRevision: observedMaintenanceRevision(messages) } : {}), goal: workTitle(task.goal), agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
             amountCents: typeof use.input.amount_cents === "number" ? use.input.amount_cents : undefined,
             currency: typeof use.input.currency === "string" ? use.input.currency : undefined,
             tier: result.tier,

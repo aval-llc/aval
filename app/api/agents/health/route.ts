@@ -1,19 +1,12 @@
-import { withApiSession } from "@/lib/api/with-session";
+import { withApiSession, withSystemSession } from "@/lib/api/with-session";
 import type { DbSession } from "@/db/postgres/session";
-import { env } from "cloudflare:workers";
+import { runtimeBindings } from '@/lib/runtime/bindings';
 import { getApiIdentity, isGuestIdentity } from "@/lib/integrations/session";
 import { ensureOrganization } from "@/lib/integrations/organizations";
 import { getAgentHealth, getGlobalAgentHealth } from "@/lib/agents/health";
 import { canManageFinancialPolicy } from "@/lib/agents/execution-policy";
 
 async function GETWithSession(dbSession: DbSession, request: Request) {
-  const configuredToken = (env as unknown as { AGENT_HEALTH_TOKEN?: string }).AGENT_HEALTH_TOKEN;
-  const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  if (configuredToken && constantTimeEqual(configuredToken, suppliedToken)) {
-    const health = await getGlobalAgentHealth(dbSession);
-    return present(health, "global", health.assessment.status === "critical" ? 503 : 200);
-  }
-
   const identity = await getApiIdentity(dbSession, request);
   if (!identity) return Response.json({ error: "Authentication required" }, { status: 401 });
   await ensureOrganization(dbSession, identity);
@@ -50,4 +43,17 @@ function constantTimeEqual(expected: string, supplied: string): boolean {
   return mismatch === 0;
 }
 
-export const GET = withApiSession(GETWithSession);
+const workspaceHealth = withApiSession(GETWithSession);
+export async function GET(request: Request) {
+  const configuredToken = runtimeBindings().AGENT_HEALTH_TOKEN;
+  const suppliedToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+  // Authenticate the monitor before the browser-session wrapper. The scoped
+  // worker calls an aggregate-only function, not a cross-tenant SELECT grant.
+  if (configuredToken && constantTimeEqual(configuredToken, suppliedToken)) {
+    return withSystemSession('worker', async session => {
+      const health = await getGlobalAgentHealth(session);
+      return present(health, 'global', health.assessment.status === 'critical' ? 503 : 200);
+    });
+  }
+  return workspaceHealth(request, undefined);
+}

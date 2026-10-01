@@ -8,6 +8,7 @@ import { digestPayload } from '@/lib/audit/chain';
 import { routeToPersona } from '@/lib/ask-aval/agent-router';
 import { readOnboarding } from '@/lib/onboarding/storage';
 import { isRateLimited, recordAttempt } from '@/lib/security/rate-limit';
+import { agentsPaused } from '@/lib/agents/pause';
 /** Only signed, tenant-resolved events reach here. Dedupe is backed by the task primary key. */
 export async function queueInboundTask(dbSession: DbSession, org:string, conversationId:string, messageId:string, body:string) {
   const [organization] = await dbSession.db.select().from(organizations).where(eq(organizations.id,org)).limit(1);
@@ -25,6 +26,7 @@ export async function queueInboundTask(dbSession: DbSession, org:string, convers
   const maintenance = thread.channel === 'gmail' ? await maintenanceContext(dbSession, org, conversationId, messageId) : null;
   if (maintenance?.newsletter) { await mark('filtered', 'Mailing-list message; excluded before model execution'); return null; }
   if (maintenance && !maintenance.match) { await mark('review_required', `Resident match ${maintenance.status}; resolve before processing`); return null; }
+  if (await agentsPaused(dbSession, org)) { await mark('pending', 'Agent execution paused; message retained'); return null; }
   const [administrator] = await dbSession.db.select({ principalId: accessGrants.principalId }).from(accessGrants).where(and(
     eq(accessGrants.organizationId, org),
     eq(accessGrants.role, 'org_admin'),

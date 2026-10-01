@@ -24,6 +24,7 @@ source = source
     'import { bigint, boolean, check, date, doublePrecision, foreignKey, index, integer, numeric, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";\nimport { jsonText } from "./json-text.ts";',
   )
   .replaceAll("sqliteTable(", "pgTable(")
+  .replace('  aiEmployeeLimit: integer("ai_employee_limit"),', '  agentsPaused: boolean("agents_paused").notNull().default(false),\n  aiEmployeeLimit: integer("ai_employee_limit"),')
   // Post-cutover fields live in PostgreSQL, not in the frozen D1 inventory.
   .replace('  aiEmployeeLimit: integer("ai_employee_limit"),', '  aiEmployeeLimit: integer("ai_employee_limit"),\n  // What business this workspace runs — lib/organizations/operating-profile.ts.\n  // Routing reads it to decide which Leads and Specialists work may reach.\n  operatingProfileJson: text("operating_profile_json").notNull().default(\'{"businessModels":[],"assetClasses":[],"version":0}\'),')
   .replace('    // Conversation state, so a resumed run continues rather than restarting.', '    // The root task of the Work this task belongs to; a root\'s is its own id.\n    // What delegation limits, duplicate detection and peer wake-ups key on.\n    workId: text("work_id"),\n    // Conversation state, so a resumed run continues rather than restarting.')

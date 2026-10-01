@@ -33,28 +33,14 @@ export async function getAgentHealth(dbSession: DbSession, organizationId: strin
 
 /** Aggregate, payload-free health for a bearer-authenticated uptime monitor. */
 export async function getGlobalAgentHealth(dbSession: DbSession, now = new Date()) {
-  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const [worker, oldestQueued, expired, failures, approvals, discrepancies, overdue] = await Promise.all([
-    dbSession.db.select({ finishedAt: agentWorkerRuns.finishedAt }).from(agentWorkerRuns)
-      .where(eq(agentWorkerRuns.status, "completed")).orderBy(desc(agentWorkerRuns.finishedAt)).limit(1),
-    dbSession.db.select({ createdAt: agentTasks.createdAt }).from(agentTasks)
-      .where(inArray(agentTasks.status, ["QUEUED", "WAITING_FOR_TOOL"]))
-      .orderBy(asc(agentTasks.createdAt)).limit(1),
-    count(dbSession, agentTasks, and(eq(agentTasks.status, "RUNNING"), lt(agentTasks.leaseExpiresAt, now))),
-    count(dbSession, agentTasks, and(eq(agentTasks.status, "FAILED"), gte(agentTasks.finishedAt, dayAgo))),
-    count(dbSession, agentApprovals, eq(agentApprovals.status, "pending")),
-    count(dbSession, agentFinancialOperations, inArray(agentFinancialOperations.reconciliationStatus, ["mismatch", "manual_review"])),
-    count(dbSession, agentFinancialOperations, and(ne(agentFinancialOperations.reconciliationStatus, "matched"), lt(agentFinancialOperations.nextReconcileAt, new Date(now.getTime() - 10 * 60_000)))),
-  ]);
+  const result = await dbSession.db.execute<{ snapshot: Omit<AgentHealthSnapshot, 'now' | 'lastWorkerCompletedAt' | 'oldestQueuedAt'> & { lastWorkerCompletedAt: string | null; oldestQueuedAt: string | null } }>(sql`select aval_private.agent_health_snapshot() as snapshot`);
+  const row = result.rows[0]?.snapshot;
+  if (!row) throw new Error('Agent health aggregate unavailable');
   const snapshot: AgentHealthSnapshot = {
+    ...row,
     now,
-    lastWorkerCompletedAt: worker[0]?.finishedAt ?? null,
-    oldestQueuedAt: oldestQueued[0]?.createdAt ?? null,
-    expiredRunningLeases: expired,
-    failedTasks24h: failures,
-    pendingApprovals: approvals,
-    reconciliationDiscrepancies: discrepancies,
-    reconciliationOverdue: overdue,
+    lastWorkerCompletedAt: row.lastWorkerCompletedAt ? new Date(row.lastWorkerCompletedAt) : null,
+    oldestQueuedAt: row.oldestQueuedAt ? new Date(row.oldestQueuedAt) : null,
   };
   return { snapshot, assessment: assessAgentHealth(snapshot) };
 }

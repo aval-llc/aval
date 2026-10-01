@@ -23,7 +23,10 @@ export async function syncGmail(session: DbSession, org: string, connection: { i
   const cursor: Cursor = { ...state.rows[0]?.cursor_json };
   const page = await session.outsideTransaction(async () => {
     const get = async (path: string) => record(await providerJson(`${root}/${path}`, { headers: { authorization: `Bearer ${accessToken}` } }));
-    if (!cursor.mode) { cursor.mode = "bootstrap"; cursor.anchor = requiredString((await get("profile")).historyId); }
+    // First connection starts at the provider's current history watermark. Do
+    // not turn a customer's existing inbox into new autonomous work. Save the
+    // watermark atomically; changes after it are picked up on the next poll.
+    if (!cursor.mode) return { incoming: [], next: { mode: 'history', historyId: requiredString((await get('profile')).historyId) } as Cursor, anchored: true };
     const query = new URLSearchParams({ maxResults: "20" });
     if (cursor.pageToken) query.set("pageToken", cursor.pageToken);
     let listing: Record<string, unknown>;
@@ -33,7 +36,10 @@ export async function syncGmail(session: DbSession, org: string, connection: { i
       try { listing = await get(`history?${query}`); }
       catch (error) {
         if (!(error instanceof ProviderHttpError) || error.status !== 404) throw error;
-        return { incoming: [], next: {} as Cursor, rescan: true };
+        // Resetting to "now" would lose unseen mail; scanning the whole inbox
+        // would silently queue old requests. Preserve the checkpoint and expose
+        // the recovery requirement through the sync worker's error state.
+        throw new Error('Gmail history expired. The checkpoint was preserved; an operator must reconcile the missing interval before resuming.');
       }
     }
     const ids = new Set<string>();
@@ -49,7 +55,7 @@ export async function syncGmail(session: DbSession, org: string, connection: { i
     }
     const next: Cursor = listing.nextPageToken ? { ...cursor, pageToken: requiredString(listing.nextPageToken) }
       : { mode: "history", historyId: cursor.mode === "bootstrap" ? cursor.anchor : requiredString(listing.historyId) };
-    return { incoming, next, rescan: false };
+    return { incoming, next, anchored: false };
   });
   let imported = 0;
   await session.atomic(async () => {
@@ -84,5 +90,5 @@ export async function syncGmail(session: DbSession, org: string, connection: { i
       values (${connection.id}, ${org}, ${connection.externalAccountId}, ${JSON.stringify(page.next)}::jsonb)
       on conflict (connection_id) do update set cursor_json = excluded.cursor_json, updated_at = now()`);
   });
-  return { imported, complete: false, note: page.rescan ? "Gmail history expired; durable inbox rescan queued" : "Checkpoint saved; continuous inbox synchronization enabled" };
+  return { imported, complete: false, note: page.anchored ? 'Inbox connected from now; existing mail was not queued' : 'Checkpoint saved; continuous inbox synchronization enabled' };
 }

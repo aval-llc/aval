@@ -55,6 +55,7 @@ try {
   browser = spawn(electron, [resolve('desktop/fixtures/runner-browser.cjs'), fixture], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
   let browserError;
   browser.on('error', error => { browserError = error; });
+  browser.on('exit', (code, signal) => { browserError = new Error(`Desktop regression browser exited early (${signal ?? code})`); });
   browser.stdout.on('data', data => process.stdout.write(data));
   browser.stderr.on('data', data => process.stderr.write(data));
   const deadline = Date.now() + 45000;
