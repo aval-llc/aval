@@ -7,11 +7,16 @@ import { DELEGATION_POLICY } from './delegation-policy';
 import { getTask, type TaskRecord } from './tasks';
 import { reviewSources, type ReviewPacket } from './semantic-review';
 import { maintenanceReceipt } from './maintenance-receipt';
+import { maintenancePolicy } from '@/lib/communications/maintenance-policy-store';
 
 export async function semanticPacket(dbSession: DbSession, task: TaskRecord, messages: Message[], phase: ReviewPacket['phase'], proposal: unknown): Promise<ReviewPacket> {
     const sources = reviewSources(messages, task.id);
     const receipt = await maintenanceReceipt(dbSession, task, messages);
     if (receipt) sources.push({ id: `maintenance:${task.id}`, tool: 'stored_maintenance_receipt', arguments: {}, data: receipt, failed: false });
+    if (receipt) {
+        const scope = JSON.parse(task.executionScopeJson);
+        sources.push({ id: `maintenance-policy:${task.id}`, tool: 'stored_emergency_policy', arguments: {}, data: await maintenancePolicy(dbSession, task.organizationId, scope.maintenance.propertyId), failed: false });
+    }
     const completedTasks: unknown[] = [];
     const evidenceTasks = [task.id];
     // A planner is judged on its own plan — the root's, or a Lead's for its

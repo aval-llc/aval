@@ -1,5 +1,5 @@
 import { withApiSession } from "@/lib/api/with-session";
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DbSession } from "@/db/postgres/session";
 import { communicationSettings, integrationConnections } from "@/db/postgres/schema";
 import { getApiIdentity } from '@/lib/integrations/session';
@@ -21,7 +21,7 @@ async function PUTWithSession(dbSession: DbSession, request: Request) {
   try {
     const config = parseCommunicationsConfig(await request.json());
     await ensureOrganization(dbSession, identity);
-    await dbSession.db.insert(communicationSettings).values({ organizationId: identity.organizationId, configJson: JSON.stringify(config), updatedBy: identity.userId, updatedAt: new Date() }).onConflictDoUpdate({ target: communicationSettings.organizationId, set: { configJson: JSON.stringify(config), updatedBy: identity.userId, updatedAt: new Date() } });
+    await dbSession.db.insert(communicationSettings).values({ organizationId: identity.organizationId, configJson: JSON.stringify(config), updatedBy: identity.userId, updatedAt: new Date() }).onConflictDoUpdate({ target: communicationSettings.organizationId, set: { configJson: sql`${communicationSettings.configJson} || ${JSON.stringify(config)}::jsonb`, updatedBy: identity.userId, updatedAt: new Date() } });
     return Response.json({ config });
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Could not save call routing.' }, { status: 400 }); }
 }

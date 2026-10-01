@@ -27,7 +27,7 @@ export async function executionManifest(input: {
 }): Promise<ExecutionManifest> {
   const hash = (value: unknown) => payloadHash(value ?? null);
   return {
-    schema_version: 1, contract_version: 'maintenance-contract-v1', agent_version: AGENT_BUILD,
+    schema_version: 1, contract_version: 'maintenance-contract-v2', agent_version: AGENT_BUILD,
     prompt_version: input.system === undefined ? 'not-invoked' : `sha256:${await hash(input.system)}`,
     model: input.model ?? 'not-invoked', model_provider: input.provider ?? 'not-invoked',
     tool_schema_version: input.tools === undefined ? 'not-invoked' : `sha256:${await hash(input.tools)}`,

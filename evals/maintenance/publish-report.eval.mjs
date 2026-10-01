@@ -13,20 +13,20 @@ const project = process.env.BRAINTRUST_DEFAULT_PROJECT;
 if (!projectId || !project) throw Error('Select the Braintrust project explicitly');
 const version = createHash('sha256').update(JSON.stringify(report.cases.map(c => ({ id: c.id, input: c.input, expected: c.expected })))).digest('hex').slice(0, 16);
 const dataset = initDataset(project, { projectId, dataset: `maintenance-behavior-${report.validation}-${version}`,
-  description: 'Synthetic maintenance inputs and expected outcomes. Run through the actual PostgreSQL task engine.' });
+  description: report.validation === 'live_reviewer_calibration' ? 'Synthetic fixed evidence packets for live reviewer calibration only; not end-to-end workflow results.' : 'Synthetic maintenance inputs and expected outcomes. Run through the actual PostgreSQL task engine.' });
 for (const c of cases) dataset.insert({ id: c.id, input: { case_id: c.id, scenario: c.name, message: c.input ?? null },
   expected: c.expected ?? { runtime_assertions: true }, metadata: { mode: c.mode, suite: report.suite } });
 await dataset.flush();
 const scoreNames = [...new Set(cases.flatMap(c => Object.keys(c.assertions ?? {})))];
-const experimentName = `maintenance-${report.validation === 'live_subscription' ? 'Luna' : 'fixtures'}-${report.started_at.slice(0,10)}-${report.id.slice(0,8)}-${maintenanceScorerVersion}`;
+const experimentName = `maintenance-${report.validation === 'live_subscription' ? 'Luna' : report.validation === 'live_reviewer_calibration' ? 'Luna-reviewer' : 'fixtures'}-${report.started_at.slice(0,10)}-${report.id.slice(0,8)}-${maintenanceScorerVersion}`;
 const rowId = c => `${report.id}-${c.id}`;
 const caseLinks = new Map();
 await Eval(project, {
   projectId, experimentName, isPublic: false,
-  description: 'Measured synthetic engine results. Execution spans use recorded execution times. Scoring runs during import, without model calls. Workflow completion, human handoff and coverage are separate measures, not an average of all scores.',
+  description: report.validation === 'live_reviewer_calibration' ? 'Live reviewer calibration against fixed synthetic evidence. No operational actions; this experiment does not establish workflow success.' : 'Measured synthetic engine results. Execution spans use recorded execution times. Scoring runs during import, without model calls. Workflow completion, human handoff and coverage are separate measures, not an average of all scores.',
   metadata: { source_report: report.id, validation: report.validation, agent_version: report.agent_version,
     contract_version: report.contract_version, model: report.model, status: report.status, coverage_complete: report.coverage_complete === true, release_gate: report.release_gate ?? null,
-    dataset_version: version, scorer_version: maintenanceScorerVersion, upload_model_calls: 0, model_calls: report.model_calls, input_tokens: report.input_tokens, output_tokens: report.output_tokens, capability_gaps: report.capability_gaps },
+    dataset_version: version, scorer_version: maintenanceScorerVersion, upload_model_calls: 0, model_calls: report.model_calls, input_tokens: report.input_tokens, output_tokens: report.output_tokens, capability_gaps: report.capability_gaps, usage_analysis: report.usage_analysis ?? null },
   data: (async function* () { for await (const datum of dataset) yield { ...datum, upsert_id: rowId({id:datum.input.case_id}) }; })(),
   task: async (input, { span }) => {
     const c = cases.find(item => item.id === input.case_id);

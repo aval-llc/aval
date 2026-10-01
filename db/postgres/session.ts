@@ -121,6 +121,13 @@ export async function withDbSession<T>(
 
   try {
     await client.connect();
+    // SET LOCAL ROLE is not a security boundary when the login can RESET ROLE
+    // back to a superuser/BYPASSRLS identity. Runtime connections must use the
+    // scoped role provisioned by configure-runtime-role, never migration creds.
+    const login = await client.query<{ privileged: boolean }>(
+      'SELECT rolsuper OR rolbypassrls AS privileged FROM pg_roles WHERE rolname = session_user',
+    );
+    if (login.rows[0]?.privileged !== false) throw new Error('Unsafe database runtime login: use a NOSUPERUSER NOBYPASSRLS role');
     await begin();
     const session: DbSession = Object.freeze({
       db: drizzle(client, { schema }),

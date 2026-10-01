@@ -113,13 +113,14 @@ export async function runPilotCases(t, {session,userA,userB,config,administrator
     t.mock.method(globalThis,'fetch',async input=>{
       const url=new URL(input);
       if(url.pathname.endsWith('/profile'))return Response.json({historyId:'100'});
-      if(url.pathname.endsWith('/messages'))return Response.json({messages:[{id:'first'},{id:'second'}]});
-      if(url.pathname.endsWith('/history'))return Response.json({historyId:'101',history:[{messagesAdded:[{message:{id:'first'}}]}]});
+      if(url.pathname.endsWith('/messages'))throw Error('Historical inbox listing is not permitted on first connect');
+      if(url.pathname.endsWith('/history'))return Response.json({historyId:'101',history:[{messagesAdded:[{message:{id:'first'}},{message:{id:'second'}}]}]});
       if(url.pathname.endsWith('/second')&&fail)return new Response('',{status:429});
       return Response.json(fixture(url.pathname.split('/').at(-1)));
     });
+    assert.equal((await run(s=>syncGmail(s,org,connection,'fixture'))).imported,0);
     await assert.rejects(run(s=>syncGmail(s,org,connection,'fixture')),/rate limiting/);
-    assert.equal((await run(s=>s.db.execute(sql`select 1 from communication_inbox_state where connection_id=${connection.id}`))).rows.length,0);
+    assert.equal((await run(s=>s.db.execute(sql`select cursor_json from communication_inbox_state where connection_id=${connection.id}`))).rows[0].cursor_json.historyId,'100');
     fail=false;
     assert.equal((await run(s=>syncGmail(s,org,connection,'fixture'))).imported,2);
     assert.equal((await run(s=>syncGmail(s,org,connection,'fixture'))).imported,0);

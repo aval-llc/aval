@@ -1,11 +1,13 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { DbSession } from '@/db/postgres/session';
-import { agentApprovals, agentTaskSteps, communicationDeliveries, organizationMembers, organizations, workOrders } from '@/db/postgres/schema';
+import { agentApprovals, agentTaskSteps, communicationDeliveries, organizations, workOrders } from '@/db/postgres/schema';
 import type { Message, ToolUseBlock } from '@/lib/ask-aval/model-types';
 import type { TaskRecord } from './tasks';
 import { maintenanceContext } from '@/lib/communications/maintenance-intake';
 import { digestPayload } from '@/lib/audit/chain';
 import { approvalMatchesToolUse } from './approval-binding';
+import type { MaintenanceExecutionReceipt } from './maintenance-execution';
+import { roleFor } from '@/lib/organizations/membership';
 
 export interface MaintenanceOutcome {
   version: 1;
@@ -15,6 +17,11 @@ export interface MaintenanceOutcome {
   reasonCode: string | null;
   ownerUserId: string | null;
   reviewAt: string | null;
+  priority?: string | null;
+  recordDrift?: boolean;
+  draftState?: 'not_started' | 'unverified' | 'verified';
+  repairState?: 'open' | 'closed' | 'unknown';
+  draftForReview?: { text: string; verified: false };
 }
 
 /** RLS-scoped stored facts, never a model's assertion of authority or success. */
@@ -36,17 +43,28 @@ export async function maintenanceReceipt(session: DbSession, task: TaskRecord, t
   const order = orders.length === 1 ? orders[0] : undefined;
   const reservation = approval && steps.find(s => s.kind === 'mutation_reserved' && s.stepIndex === approval.stepIndex && s.toolName === approval.toolName && s.policyEffect === 'allow' && !s.error);
   const execution = approval && steps.find(s => s.kind === 'approval_decided' && s.stepIndex === approval.stepIndex && s.toolName === approval.toolName && s.policyEffect === 'allow' && !s.error);
-  const verified = !!(bound && approval?.status === 'approved' && approval.decidedByUserId && approval.decidedAt && approval.approvalsReceived >= approval.requiredApprovals && reservation && execution && order &&
+  const legacyVerified = !!(bound && approval?.status === 'approved' && approval.decidedByUserId && approval.decidedAt && approval.approvalsReceived >= approval.requiredApprovals && reservation && execution && order &&
     order.propertyId === context.match?.propertyId && order.unitId === context.match?.unitId && order.leaseId === context.match?.leaseId && order.summary === proposal?.input.summary && order.priority === proposal?.input.priority);
+  const snapshots = steps.filter(s => s.kind === 'maintenance_execution' && s.executionReceiptJson).map(s => ({step:s, receipt:JSON.parse(s.executionReceiptJson!) as MaintenanceExecutionReceipt}));
+  const stored = snapshots.length === 1 ? snapshots[0] : undefined;
+  const historical = stored?.receipt;
+  const snapshotVerified = !!(historical?.version === 1 && historical.effect === 'created' && historical.order && historical.approval && historical.organizationId === task.organizationId && historical.taskId === task.id && `${historical.executionId}:receipt` === stored?.step.idempotencyKey &&
+    historical.conversationId === check.conversationId && historical.messageId === check.messageId && historical.residentId === scope.maintenance?.residentId &&
+    historical.order.propertyId === scope.maintenance?.propertyId && historical.order.unitId === scope.maintenance?.unitId && historical.order.leaseId === scope.maintenance?.leaseId &&
+    approval?.id === historical.approval.id && approval.status === 'approved' && proposal && historical.actionDigest === JSON.parse(approval.evidenceJson).payloadHash &&
+    historical.approval.decidedBy === approval.decidedByUserId && historical.approval.decidedAt === approval.decidedAt?.toISOString());
+  const verified = snapshots.length ? snapshotVerified : legacyVerified;
+  const recordDrift = !!(snapshotVerified && (!order || order.id !== historical!.order.id || ['propertyId','unitId','leaseId','summary','priority','status'].some(k => order[k as keyof typeof order] !== historical!.order[k as keyof typeof historical.order])));
   const deliveries = await session.db.select({ id: communicationDeliveries.id }).from(communicationDeliveries).where(and(eq(communicationDeliveries.organizationId, task.organizationId), sql`substr(${communicationDeliveries.requestKey},1,${task.id.length + 1})=${task.id + ':'}`));
   const outboundAttempts = steps.filter(s => ['send_external_message', 'place_call', 'publish_listing'].includes(s.toolName ?? '') && ['mutation_reserved', 'tool_call', 'approval_decided'].includes(s.kind) && s.policyEffect === 'allow');
   const evidenceRevision = await digestPayload({ context, approvals, orders, steps: steps.map(s => ({ id: s.id, kind: s.kind, error: s.error, resultDigest: s.resultDigest })), deliveries });
   return {
     version: 1, taskId: task.id, conversationId: check.conversationId, messageId: check.messageId,
     evidenceRevision,
-    identityUnchanged, match: context.match,
-    approval: bound ? { id: approval.id, decision: approval.status, approver: approval.decidedByUserId, decidedAt: approval.decidedAt, policyVersion: approval.policyVersion, policyDecision: execution?.policyEffect ?? null, actionDigest: JSON.parse(approval.evidenceJson).payloadHash } : null,
-    execution: { verified, executionId: reservation?.idempotencyKey ?? null, workOrderId: order?.id ?? null, workOrderStatus: order?.status ?? null, priority: order?.priority ?? null, recordCount: orders.length, executedAt: execution?.createdAt ?? null },
+    evidenceUnchanged: approval ? JSON.parse(approval.evidenceJson).maintenanceEvidenceRevision === context.evidenceRevision : false,
+    identityUnchanged, match: context.match, emergencyPolicy: context.emergencyPolicy,
+    approval: bound || snapshotVerified ? { id: approval.id, decision: approval.status, approver: approval.decidedByUserId, decidedAt: approval.decidedAt, policyVersion: approval.policyVersion, policyDecision: snapshotVerified ? 'allow' : execution?.policyEffect ?? null, actionDigest: JSON.parse(approval.evidenceJson).payloadHash } : null,
+    execution: { verified, executionId: snapshotVerified ? historical!.executionId : reservation?.idempotencyKey ?? null, workOrderId: snapshotVerified ? historical!.order.id : order?.id ?? null, workOrderStatus: order?.status ?? null, priority: snapshotVerified ? historical!.order.priority : order?.priority ?? null, recordCount: orders.length, executedAt: snapshotVerified ? historical!.executedAt : execution?.createdAt ?? null, recordDrift, historical: snapshotVerified ? historical : null },
     communication: { draftOnly: scope.draftOnly === true, deliveryCount: deliveries.length, outboundAttemptCount: outboundAttempts.length, taskSentNoMessage: scope.draftOnly === true && deliveries.length === 0 && outboundAttempts.length === 0 },
   };
 }
@@ -57,10 +75,19 @@ export async function maintenanceOutcome(session: DbSession, task: TaskRecord, t
   const review = state === 'WAITING_FOR_HUMAN';
   let ownerUserId: string | null = null;
   if (review) {
-    const [member] = await session.db.select({ userId: organizationMembers.userId }).from(organizationMembers).where(and(eq(organizationMembers.organizationId, task.organizationId), eq(organizationMembers.userId, task.userId)));
+    const member = await roleFor(session, task.userId, task.organizationId);
     const [org] = await session.db.select({ owner: organizations.ownerUserId }).from(organizations).where(eq(organizations.id, task.organizationId));
-    ownerUserId = member?.userId ?? org?.owner ?? null;
+    ownerUserId = member ? task.userId : org?.owner ?? null;
   }
   return { version: 1, actionState: receipt.execution.verified ? 'executed' : receipt.execution.workOrderId ? 'unknown' : ['rejected', 'expired'].includes(receipt.approval?.decision ?? '') ? 'declined' : receipt.approval?.decision === 'pending' ? 'awaiting_approval' : 'not_started',
-    verificationState: state === 'COMPLETED' ? 'verified' : review ? 'review_required' : 'pending', workOrderId: receipt.execution.workOrderId, reasonCode, ownerUserId, reviewAt: review ? new Date().toISOString() : null };
+    verificationState: state === 'COMPLETED' ? 'verified' : review ? 'review_required' : 'pending', workOrderId: receipt.execution.workOrderId, reasonCode, ownerUserId, reviewAt: review ? new Date().toISOString() : null,
+    priority: receipt.execution.priority, recordDrift: receipt.execution.recordDrift,
+    draftState: state === 'COMPLETED' ? 'verified' : unverifiedMaintenanceDraft(transcript).draftForReview ? 'unverified' : 'not_started', repairState: !receipt.execution.verified || !receipt.execution.workOrderStatus ? 'unknown' : ['completed','cancelled','closed'].includes(receipt.execution.workOrderStatus) ? 'closed' : 'open',
+    ...(review ? unverifiedMaintenanceDraft(transcript) : {}) };
+}
+
+export function unverifiedMaintenanceDraft(transcript: Message[]): { draftForReview?: { text: string; verified: false } } {
+  const proposals = transcript.flatMap(m => m.role === 'assistant' && Array.isArray(m.content) ? m.content.filter((b): b is ToolUseBlock => b.type === 'tool_use' && b.name === 'render_answer') : []);
+  const text = proposals.at(-1)?.input.resident_reply_draft;
+  return typeof text === 'string' && text.trim() ? { draftForReview: { text: text.slice(0,4000), verified: false } } : {};
 }

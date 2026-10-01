@@ -2,7 +2,7 @@ const {EventEmitter}=require('node:events');
 const test=require('node:test');const assert=require('node:assert/strict');
 const {infer}=require('../inference.cjs');
 const params={system:'test',messages:[],tools:[{name:'read_evidence',input_schema:{type:'object'}}]};
-function rpcFixture({usage=true,tool='read_evidence',forbidden=false, repeatedUsage=false}={}) {
+function rpcFixture({usage=true,tool='read_evidence',forbidden=false, repeatedUsage=false,reroute=false}={}) {
   const rpc=new EventEmitter();rpc.request=async(method,args)=>{
     if(method==='thread/start'){assert.equal(args.model,'gpt-6-luna');assert.equal(args.ephemeral,true);return{thread:{id:'thread'}};}
     if(method==='turn/start'){
@@ -10,6 +10,7 @@ function rpcFixture({usage=true,tool='read_evidence',forbidden=false, repeatedUs
       queueMicrotask(()=>{
         const emit=(method,extra)=>rpc.emit('notification',{method,params:{threadId:'thread',...extra}});
         if(forbidden)emit('item/started',{item:{type:'commandExecution'}});
+        if(reroute)emit('model/rerouted',{reason:'private details'});
         if(usage)emit('thread/tokenUsage/updated',{tokenUsage:{total:{inputTokens:123,outputTokens:45}}});
         if(repeatedUsage) for(let i=0;i<2;i++) emit('thread/tokenUsage/updated',{tokenUsage:{total:{inputTokens:200,outputTokens:60},last:{inputTokens:77,outputTokens:15}}});
         emit('item/completed',{item:{type:'agentMessage',text:JSON.stringify({calls:[{name:tool,argumentsJson:'{}'}]})}});
@@ -30,7 +31,7 @@ test('fresh-thread cumulative usage includes internal requests but never sums re
   assert.equal(result.diagnostics.actual_model_status,'not_exposed_by_protocol');
 });
 test('desktop inference rejects missing usage, unoffered tools and execution',async()=>{
-  for(const options of [{usage:false},{tool:'send_money'},{forbidden:true}])await assert.rejects(infer(rpcFixture(options),'/tmp','gpt-6-luna',params));
+  for(const options of [{usage:false},{tool:'send_money'},{forbidden:true},{reroute:true}])await assert.rejects(infer(rpcFixture(options),'/tmp','gpt-6-luna',params));
 });
 test('maintenance proposals use typed arguments and compact final answers use direct output',async()=>{
   const create={name:'create_maintenance_work_order',input_schema:{type:'object',properties:{summary:{type:'string'}},required:['summary']}};
@@ -82,4 +83,26 @@ test('timeout without acknowledgement preserves unknown usage despite a partial 
     assert.equal(error.usage,undefined);assert.equal(error.diagnostics.usage_status,'unknown');assert.equal(error.diagnostics.terminal_observed,false);return true;
   });
   assert.equal(rpc.listenerCount('notification'),0);
+});
+test('direct assessment has no fictional tool catalogue and final-answer phase wins over commentary',async()=>{
+  const rpc=new EventEmitter();
+  rpc.request=async(method,args)=>{
+    if(method==='thread/start') {assert.doesNotMatch(args.developerInstructions,/call semantic_verdict/);return{thread:{id:'thread'}};}
+    if(method==='turn/start') {
+      assert.deepEqual(Object.keys(JSON.parse(args.input[0].text)),['messages']);
+      queueMicrotask(()=>{
+        const emit=(method,extra)=>rpc.emit('notification',{method,params:{threadId:'thread',turnId:'turn',...extra}});
+        emit('thread/tokenUsage/updated',{tokenUsage:{total:{inputTokens:100,outputTokens:20}}});
+        emit('item/completed',{item:{id:'a',type:'agentMessage',phase:'final_answer',text:'{"passed":true}'}});
+        emit('item/completed',{item:{id:'b',type:'agentMessage',phase:'commentary',text:'private commentary'}});
+        emit('turn/completed',{turn:{id:'turn',status:'completed'}});
+      });return{turn:{id:'turn'}};
+    }
+  };
+  const result=await infer(rpc,'/tmp','gpt-6-luna',{...params,tools:[{name:'semantic_verdict',input_schema:{type:'object',properties:{passed:{type:'boolean'}},required:['passed']}}]});
+  assert.deepEqual(result.content[0].input,{passed:true});
+  assert.equal(result.diagnostics.agent_message_count,2);assert.equal(result.diagnostics.reroute_count,0);
+  assert.equal(result.diagnostics.event_metadata.length,4);
+  assert.match(result.diagnostics.schema_hash,/^[a-f0-9]{64}$/);
+  assert.doesNotMatch(JSON.stringify(result.diagnostics),/private commentary|private reroute details/);
 });

@@ -82,7 +82,7 @@ for KEY in CFBundleIconName CFBundleURLTypes ElectronAsarIntegrity GranolaManage
   /usr/libexec/PlistBuddy -c "Delete :${KEY}" "${PLIST}" 2>/dev/null || true
 done
 
-/bin/cp "${DESKTOP_DIR}/main.cjs" "${DESKTOP_DIR}/preload.cjs" "${DESKTOP_DIR}/codex-app-server.cjs" "${DESKTOP_DIR}/inference.cjs" "${DESKTOP_DIR}/chat-window.cjs" "${DESKTOP_DIR}/package.json" "${APP_SOURCE}/"
+/bin/cp "${DESKTOP_DIR}/main.cjs" "${DESKTOP_DIR}/preload.cjs" "${DESKTOP_DIR}/codex-app-server.cjs" "${DESKTOP_DIR}/inference.cjs" "${DESKTOP_DIR}/protocol.json" "${DESKTOP_DIR}/chat-window.cjs" "${DESKTOP_DIR}/package.json" "${APP_SOURCE}/"
 ASAR_HASH="$(node "${ASAR_PACKER}" "${APP_SOURCE}" "${STAGED_APP}/Contents/Resources/app.asar")"
 /usr/libexec/PlistBuddy -c 'Add :ElectronAsarIntegrity dict' "${PLIST}"
 /usr/libexec/PlistBuddy -c 'Add :ElectronAsarIntegrity:Resources/app.asar dict' "${PLIST}"

@@ -32,6 +32,7 @@
       "preload.cjs",
       "codex-app-server.cjs",
       "inference.cjs",
+      "protocol.json",
       "pms-provider.cjs",
       "providers/**/*.cjs",
       "package.json",
@@ -121,6 +122,6 @@
     }
   },
   "dependencies": {
-    "@openai/codex": "0.153.0"
+    "@openai/codex": "0.158.0"
   }
 }

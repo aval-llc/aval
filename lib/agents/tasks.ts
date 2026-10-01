@@ -34,6 +34,7 @@ import { DEFAULT_MAX_STEPS, DEFAULT_MAX_TOKENS } from "./task-state.ts";
 import { retryJitterMs, taskRetryDelayMs } from "./retry-policy.ts";
 import { DELEGATION_POLICY } from "./delegation-policy.ts";
 import { payloadHash } from './canonical-payload';
+import { agentsPaused, AgentsPausedError } from './pause';
 
 export {
   TASK_STATES,
@@ -49,7 +50,7 @@ export {
 export interface NewTask {
   id?: string;
   executionScope?:
-    | { source: "inbound"; conversationId: string; messageId?: string; draftOnly?: boolean; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } }
+    | { source: "inbound"; conversationId: string; messageId?: string; draftOnly?: boolean; maintenanceProtocol?: number; locale?: 'en' | 'es-mx'; maintenance?: { residentId: string; propertyId: string; unitId: string; leaseId: string } }
     // Work created by `lib/agents/intake.ts` from an authorized external
     // event. It carries the provenance the coordinator needs and the identity
     // the intake dedupe is keyed on, so a redelivery reaches the same row.
@@ -119,6 +120,7 @@ export interface TaskRecord {
 }
 
 export async function createTask(dbSession: DbSession, input: NewTask): Promise<TaskRecord> {
+  if (await agentsPaused(dbSession, input.organizationId)) throw new AgentsPausedError();
   const check = parseTaskCheck(input.check);
   const now = new Date();
   const id = input.id ?? crypto.randomUUID();
@@ -209,6 +211,7 @@ export async function listTasks(dbSession: DbSession, organizationId: string, li
  * read-then-write window for them to race inside.
  */
 export async function claimTask(dbSession: DbSession, taskId: string, workerId: string, from: TaskState): Promise<boolean> {
+  if (await agentsPaused(dbSession, dbSession.identity.organizationId)) return false;
   const now = new Date();
   const expiresAt = new Date(now.getTime() + LEASE_MS);
   const result = await dbSession.db.execute(sql`
@@ -411,6 +414,7 @@ const WAKE_ONLY: readonly TaskState[] = [...SCHEDULED_WAKE_ONLY_STATES];
 
 /** Tasks that are runnable now: queued, abandoned by a worker whose lease expired, or due for a scheduled wake-up. */
 export async function claimableTasks(dbSession: DbSession, limit = 5): Promise<TaskRecord[]> {
+  if (await agentsPaused(dbSession, dbSession.identity.organizationId)) return [];
   const now = new Date();
   const rows = await dbSession.db
     .select()
@@ -443,6 +447,7 @@ export async function claimableTasks(dbSession: DbSession, limit = 5): Promise<T
 
 /** Approval-parked tasks whose latest request was decided or has expired. */
 export async function resumableApprovalTasks(dbSession: DbSession, limit = 10): Promise<TaskRecord[]> {
+  if (await agentsPaused(dbSession, dbSession.identity.organizationId)) return [];
   const now = new Date();
   const rows = await dbSession.db.select().from(agentTasks)
     .where(and(
@@ -457,6 +462,7 @@ export async function resumableApprovalTasks(dbSession: DbSession, limit = 10): 
 /* ── steps ───────────────────────────────────────────────────────────────── */
 
 export interface StepInput {
+  executionReceiptJson?: string;
   executionManifest?: ExecutionManifest;
   taskId: string;
   organizationId: string;
@@ -510,6 +516,7 @@ export async function appendStep(dbSession: DbSession, step: StepInput): Promise
     modelProvider: step.modelProvider ?? null,
     modelName: step.modelName ?? null,
     executionManifestJson: JSON.stringify(step.executionManifest ?? await taskManifest(dbSession, step.organizationId, step.taskId, { phase: step.kind, model: step.modelName, provider: step.modelProvider })),
+    executionReceiptJson: step.executionReceiptJson ?? null,
     toolName: step.toolName ?? null,
     policyEffect: step.policyEffect ?? null,
     denyCode: step.denyCode ?? null,

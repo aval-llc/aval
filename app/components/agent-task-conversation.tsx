@@ -57,6 +57,9 @@ export function AgentTaskConversation({taskId,onActivity}: {taskId:string;onActi
     {task?.maintenanceOutcome && <div role="status" className="agent-window-message">
       <p>{task.maintenanceOutcome.actionState === 'executed' ? (task.maintenanceOutcome.verificationState === 'verified' ? (es ? 'Orden interna creada. La reparación sigue abierta.' : 'Internal work order created. The repair remains open.') : (es ? 'Orden creada: requiere revisión.' : 'Created—review required.')) : task.maintenanceOutcome.actionState === 'declined' ? (es ? 'Acción rechazada o vencida. Requiere decisión humana.' : 'Action declined or expired. Human decision required.') : (es ? 'Solicitud de mantenimiento pendiente.' : 'Maintenance request pending.')}</p>
       {task.maintenanceOutcome.ownerUserId && <p>{es ? 'Responsable' : 'Responsible user'}: {task.maintenanceOutcome.ownerUserId} · {es ? 'Revisión requerida ahora' : 'Review due now'}</p>}
+      {task.maintenanceOutcome.priority === 'emergency' && <p>{es ? 'Emergencia: revisión humana inmediata. No se ha confirmado el envío de ayuda.' : 'Emergency: immediate human review. Dispatch is not confirmed.'}</p>}
+      {task.maintenanceOutcome.recordDrift && <p>{es ? 'El registro cambió después de la ejecución. Requiere conciliación.' : 'The record changed after execution. Reconciliation required.'}</p>}
+      {task.maintenanceOutcome.draftForReview && <details><summary>{es ? 'Borrador sin verificar: no enviado' : 'Unverified draft—not sent'}</summary><p className="whitespace-pre-wrap">{task.maintenanceOutcome.draftForReview.text}</p></details>}
     </div>}
     {task?.result?.narrative&&<p>{task.result.narrative}</p>}
     {task?.error&&<p role="alert" className="onboarding-error">{task.error}</p>}

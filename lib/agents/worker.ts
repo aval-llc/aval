@@ -102,8 +102,12 @@ export async function runAgentWorkerBatch(dbSession: DbSession, env: AgentWorker
 export async function runTaskInBackground(dbSession: DbSession, env: AgentWorkerEnv, organizationId: string, taskId: string, trigger: "request" | "approval"): Promise<AdvanceOutcome> {
   const started = Date.now();
   const outcome = await advanceTask(dbSession, env, organizationId, taskId, newWorkerId(), {
-    invocationBudgetMs: 35_000,
-    maxStepsThisInvocation: 3,
+    invocationBudgetMs: 20_000,
+    maxStepsThisInvocation: 1,
+    // Fresh inference (and its retry/cleanup) cannot be guaranteed to finish
+    // inside HTTP waitUntil. Saved Desktop responses may be consumed here;
+    // new calls stay queued for the durable worker, never an aborted race.
+    deferInference: true,
   });
   console.log(JSON.stringify({ event: "agent_task_background", trigger, taskId, organizationId, status: outcome.status, stepsRun: outcome.stepsRun, durationMs: Date.now() - started }));
   if (outcome.status === "FAILED") {

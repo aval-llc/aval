@@ -17,7 +17,7 @@
 
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
-import { agentApprovalDecisions, agentApprovals } from "@/db/postgres/schema";
+import { agentApprovalDecisions, agentApprovals, agentTasks } from "@/db/postgres/schema";
 import { approvalTierFor, requiredApprovalsFor, type ApprovalTier } from "./financial.ts";
 import type { ToolDescriptor } from "./registry.ts";
 
@@ -111,7 +111,14 @@ export async function requestApproval(dbSession: DbSession, request: ApprovalReq
   };
 
   const inserted = await dbSession.db.insert(agentApprovals).values(row).onConflictDoNothing().returning({ id: agentApprovals.id });
-  if (inserted.length) return row;
+  if (inserted.length) {
+    // Human decision time is not agent execution time. Bound the extension by
+    // the persisted approval expiry, not by each retry or polling invocation.
+    await dbSession.db.update(agentTasks).set({
+      deadlineAt: sql`greatest(${agentTasks.deadlineAt}, ${new Date(row.expiresAt.getTime() + 30 * 60_000)})`,
+    }).where(and(eq(agentTasks.id, request.taskId), eq(agentTasks.organizationId, request.organizationId)));
+    return row;
+  }
   const existing = await findByStep(dbSession, request.organizationId, request.taskId, request.stepIndex);
   if (existing) return existing;
   throw new Error("Could not open an approval request for this step.");

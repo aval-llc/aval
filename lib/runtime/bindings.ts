@@ -14,6 +14,7 @@ export interface AvalRuntimeBindings extends SupabaseAuthBindings {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   AGENT_HEALTH_TOKEN?: string;
+  AVAL_AGENTS_PAUSED?: string;
   AGENT_ALERT_WEBHOOK_URL?: string;
   AGENT_ALERT_WEBHOOK_TOKEN?: string;
   AVAL_PUBLIC_URL?: string;

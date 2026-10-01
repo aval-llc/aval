@@ -16,6 +16,10 @@ on:
       - 'package*.json'
       - 'desktop/package*.json'
       - 'desktop/test/**'
+      - 'desktop/inference.cjs'
+      - 'desktop/protocol.json'
+      - 'desktop/fixtures/**'
+      - 'scripts/verify-desktop-runner.mjs'
       - '.github/workflows/postgres-foundation.yml'
       - 'eslint.config.mjs'
       - '.node-version'
@@ -59,5 +63,19 @@ jobs:
       - run: npm run test:postgres
         env:
           AVAL_POSTGRES_CLIENT_IMAGE: postgres:17
+          AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
+      - name: Browser to Desktop to PostgreSQL maintenance regression (synthetic model)
+        run: |
+          # Electron's setuid helper must be installed correctly on the hosted
+          # Linux runner. Keep Chromium sandboxing enabled.
+          # Electron 44 downloads its executable lazily on first require; do
+          # that explicitly before resolving a path or capturing stdout.
+          node desktop/node_modules/electron/install.js
+          desktop_sandbox="$(node -p 'require("node:path").join(require("node:path").dirname(require("node:fs").realpathSync(require("./desktop/node_modules/electron"))), "chrome-sandbox")')"
+          test -f "$desktop_sandbox"
+          sudo chown root:root "$desktop_sandbox"
+          sudo chmod 4755 "$desktop_sandbox"
+          xvfb-run --auto-servernum node --import ./tests/integration/module-hooks.mjs scripts/verify-desktop-runner.mjs
+        env:
           AVAL_TEST_DATABASE_URL: postgresql://postgres:aval-ci-disposable-only@127.0.0.1:5432/aval_test
       # This job verifies real PostgreSQL behavior. It does not satisfy the hosted Hyperdrive gate.
