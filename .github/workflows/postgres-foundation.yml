@@ -68,6 +68,9 @@ jobs:
         run: |
           # Electron's setuid helper must be installed correctly on the hosted
           # Linux runner. Keep Chromium sandboxing enabled.
+          # Electron 44 downloads its executable lazily on first require; do
+          # that explicitly before resolving a path or capturing stdout.
+          node desktop/node_modules/electron/install.js
           desktop_sandbox="$(node -p 'require("node:path").join(require("node:path").dirname(require("node:fs").realpathSync(require("./desktop/node_modules/electron"))), "chrome-sandbox")')"
           test -f "$desktop_sandbox"
           sudo chown root:root "$desktop_sandbox"
