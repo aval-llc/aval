@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { once } from 'node:events';
 import { build } from 'esbuild';
 import { postgresEvaluation } from './lib/postgres-evaluation.mjs';
 import { applyImport } from '../lib/operations/import-apply.ts';
@@ -80,10 +81,18 @@ try {
   assert.equal(JSON.parse(final.maintenanceOutcomeJson).draftState, 'verified');
   console.log(JSON.stringify({ status: 'passed', transport: 'real React/Electron IPC/API/PostgreSQL', model: 'synthetic RPC, not live validated', paidCalls: 0, workOrders: Number(count), taskStatus: final.status }));
 } finally {
-  browser?.kill();
+  if (browser && browser.exitCode === null && browser.signalCode === null) {
+    // Electron may still flush its user-data directory after SIGTERM. Wait
+    // for the child before removing the isolated profile; otherwise Linux
+    // races those writes and reports ENOTEMPTY after a successful workflow.
+    const exited = once(browser, 'exit');
+    const forceStop = setTimeout(() => browser.kill('SIGKILL'), 5_000);
+    browser.kill();
+    try { await exited; } finally { clearTimeout(forceStop); }
+  }
   if (server) await new Promise(resolve => server.close(resolve));
   await Promise.allSettled(backgrounds);
   globalThis.__REQUEST_CONTEXT__ = priorContext;
   await db.close();
-  await rm(temporary, { recursive: true, force: true });
+  await rm(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
