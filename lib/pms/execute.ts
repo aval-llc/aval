@@ -21,13 +21,15 @@
 
 import { and, eq } from "drizzle-orm";
 import type { DbSession } from "@/db/postgres/session";
-import { pmsWriteQueue } from "@/db/postgres/schema";
+import { pmsWriteQueue, agentApprovals } from "@/db/postgres/schema";
 import { pmsProvider } from "./providers/index.ts";
 import { pmsWriteAllowed } from "./assembly.ts";
 import { activeFlow } from "./flows.ts";
 import { writeAdapter } from "./flows.ts";
 import { actionForTool } from "./tool-map.ts";
 import { ensurePmsAdaptersRegistered } from "./register.ts";
+import { enqueueBrowserWrite, BrowserProtocolError, type BrowserManifest } from './browser/protocol.ts';
+import { payloadHash } from '../agents/canonical-payload.ts';
 
 export type PmsWriteResult =
   | { status: "done"; externalId?: string; provider: string }
@@ -69,6 +71,33 @@ export async function executePmsWrite(dbSession: DbSession, request: PmsWriteReq
 
   const descriptor = pmsProvider(request.providerId);
   if (!descriptor) return { status: "denied", reason: `No capability descriptor for "${request.providerId}".` };
+
+  // A connection-specific, server-prepared browser approval takes precedence
+  // over a provider's default API mechanism. No model argument selects this.
+  if(request.approvalId && request.toolName==='create_work_order') {
+    const [approval]=await dbSession.db.select({evidence:agentApprovals.evidenceJson}).from(agentApprovals)
+      .where(and(eq(agentApprovals.organizationId,request.organizationId),eq(agentApprovals.id,request.approvalId))).limit(1);
+    const evidence=approval?.evidence?JSON.parse(approval.evidence) as {pmsBrowser?:BrowserManifest}:null;
+    const manifest=evidence?.pmsBrowser;
+    if(manifest) {
+      const expected={...manifest.payload};delete expected.reference;delete expected.requestId;delete expected.vendorId;delete expected.vendorName;
+      if(manifest.provider!==request.providerId || await payloadHash(expected)!==await payloadHash(request.payload))
+        return {status:'denied',reason:'The requested PMS fields differ from the approved connection-bound action.'};
+      try {
+        const queueId=await enqueueBrowserWrite(dbSession,request.organizationId,request.approvalId,manifest);
+        const [queue]=await dbSession.db.select({status:pmsWriteQueue.status,externalId:pmsWriteQueue.externalId})
+          .from(pmsWriteQueue).where(and(eq(pmsWriteQueue.organizationId,request.organizationId),eq(pmsWriteQueue.id,queueId))).limit(1);
+        if(queue?.status==='confirmed' && queue.externalId)return{status:'done',provider:request.providerId,externalId:queue.externalId};
+        return{status:'queued',queueId,provider:request.providerId,runnerOnline:false};
+      } catch(error) {
+        if(error instanceof BrowserProtocolError)return{status:'denied',reason:error.message};
+        throw error;
+      }
+    }
+  }
+
+  if(request.providerId==='buildium'&&request.toolName==='create_work_order')
+    return{status:'denied',reason:'Buildium creation requires a connection-bound protocol-2 approval manifest.'};
 
   // Re-resolve rather than trust assembly. Assembly ran at the top of a turn
   // that may have been running for minutes, and an authorization can be

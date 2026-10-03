@@ -133,6 +133,7 @@ async function claim(dbSession: DbSession, organizationId: string, runnerId: str
       select id
       from ${pmsWriteQueue}
       where ${pmsWriteQueue.organizationId} = ${organizationId}
+        and ${pmsWriteQueue.protocolJson} is null
         and ${pmsWriteQueue.status} in ('pending', 'leased')
         and (${pmsWriteQueue.leaseExpiresAt} is null or ${pmsWriteQueue.leaseExpiresAt} < ${now})
         and ${pmsWriteQueue.attempts} < ${MAX_ATTEMPTS}
@@ -201,7 +202,7 @@ async function settle(
     // which is an argument for it being hard to reach another tenant's row and
     // not an argument for the query being allowed to. `tests/org-scoping-isolation.test.ts`
     // enforces the difference, and it caught this one.
-    .where(and(eq(pmsWriteQueue.organizationId, organizationId), eq(pmsWriteQueue.id, queueId)));
+    .where(and(eq(pmsWriteQueue.organizationId, organizationId), eq(pmsWriteQueue.id, queueId), sql`${pmsWriteQueue.protocolJson} is null`));
 }
 
 /**
@@ -349,7 +350,7 @@ export async function reportRunnerResult(
       status: pmsWriteQueue.status,
     })
     .from(pmsWriteQueue)
-    .where(and(eq(pmsWriteQueue.organizationId, organizationId), eq(pmsWriteQueue.id, report.queueId)))
+    .where(and(eq(pmsWriteQueue.organizationId, organizationId), eq(pmsWriteQueue.id, report.queueId), sql`${pmsWriteQueue.protocolJson} is null`))
     .limit(1);
 
   if (!row) return { status: "denied", reason: "No such queued write for this workspace." };

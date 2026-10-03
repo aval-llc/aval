@@ -16,17 +16,20 @@ export const buildium: ProviderDescriptor = {
   senderDomains: ["buildium.com"],
 
   read: {
-    mechanisms: ["api"],
+    mechanisms: ["api", "manual_export"],
     supported: true,
     permitted: true,
     note: "Server-to-server authentication using Buildium's required client headers.",
   },
 
   write: {
-    mechanisms: ["api"],
-    runner: "cloud",
+    // The official API remains a future route. The first executable route is
+    // the supervised customer Desktop session, so it is first and therefore
+    // selected by capability resolution until an API adapter is certified.
+    mechanisms: ["ui", "api"],
+    runner: "desktop",
     supported: true,
     permitted: true,
-    note: "Buildium scopes per endpoint, so a narrow key is genuinely narrow — prefer it over a broad one.",
+    note: "The pilot uses a restricted staff session on the customer's Desktop. An official API adapter can replace it when that account has API entitlement.",
   },
 };

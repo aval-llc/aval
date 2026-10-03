@@ -1674,6 +1674,7 @@ export const pmsActionFlows = pgTable(
     /** The canonical capability this workflow implements, e.g. maintenance.work_order.create. */
     action: text("action").notNull(),
     version: integer("version").notNull().default(1),
+    connectionId: text("connection_id").references(() => integrationConnections.id),
     /** Which access mode this workflow drives. A `ui` flow is meaningless to an API connection. */
     accessMode: text("access_mode").notNull().default("customer_desktop_session"),
     // Ordered, declarative steps — selectors and values, no executable code.
@@ -1746,6 +1747,15 @@ export const pmsWriteQueue = pgTable(
     organizationId: text("organization_id").notNull().references(() => organizations.id),
     provider: text("provider").notNull(),
     action: text("action").notNull(),
+    connectionId: text("connection_id").references(() => integrationConnections.id),
+    protocolJson: jsonText("protocol_json"),
+    leaseGeneration: integer("lease_generation").notNull().default(0),
+    submittedAt: timestamp("submitted_at", {withTimezone:true,mode:"date"}),
+    verifyAfter: timestamp("verify_after", {withTimezone:true,mode:"date"}),
+    reviewDueAt: timestamp("review_due_at", {withTimezone:true,mode:"date"}),
+    responsibleUserId: text("responsible_user_id"),
+    verificationAttempts: integer("verification_attempts").notNull().default(0),
+    externalId: text("external_id"),
     // The approval that authorized this write. Null is only valid for actions
     // whose resolution did not require one; the drainer re-checks either way.
     approvalId: text("approval_id"),
@@ -2473,3 +2483,21 @@ export const utilitySites = pgTable("utility_sites", {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 }, t => [uniqueIndex("utility_sites_org_id_uq").on(t.organizationId,t.id),
   foreignKey({ columns: [t.organizationId,t.propertyId], foreignColumns: [properties.organizationId,properties.id], name: "utility_sites_property_fk" })]);
+
+export const pmsBrowserDevices = pgTable('pms_browser_devices', {
+  id: text('id').primaryKey(), organizationId: text('organization_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull(), tokenHash: text('token_hash').notNull(),
+  revoked: boolean('revoked').notNull().default(false), createdAt: timestamp('created_at', {withTimezone:true,mode:'date'}).notNull().defaultNow(),
+});
+export const pmsBrowserBindings = pgTable('pms_browser_bindings', {
+  id:text('id').primaryKey().references(() => integrationConnections.id), organizationId:text('organization_id').notNull().references(() => organizations.id),
+  deviceId:text('device_id').notNull().references(() => pmsBrowserDevices.id), provider:text('provider').notNull(),
+  identityJson:jsonText('identity_json').notNull(), feasibilityJson:jsonText('feasibility_json').notNull(),
+  enabled:boolean('enabled').notNull().default(false), updatedAt:timestamp('updated_at',{withTimezone:true,mode:'date'}).notNull().defaultNow(),
+});
+export const pmsBrowserReports = pgTable('pms_browser_reports', {
+  id:text('id').primaryKey(), organizationId:text('organization_id').notNull().references(() => organizations.id),
+  queueId:text('queue_id').notNull().references(() => pmsWriteQueue.id), deviceId:text('device_id').notNull().references(() => pmsBrowserDevices.id),
+  leaseGeneration:integer('lease_generation').notNull(), reportJson:jsonText('report_json').notNull(),
+  createdAt:timestamp('created_at',{withTimezone:true,mode:'date'}).notNull().defaultNow(),
+}, table => [index('pms_browser_reports_queue').on(table.organizationId,table.queueId,table.createdAt)]);

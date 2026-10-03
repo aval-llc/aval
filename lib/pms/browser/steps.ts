@@ -34,6 +34,8 @@ export type FlowStep =
   | { kind: "choose"; label: string; from: string }
   /** Press the button with this visible name. */
   | { kind: "click"; button: string }
+  /** The one externally visible write. Only the privileged runner may commit. */
+  | { kind: "commit"; button: string }
   /** Assert the page says this, so a workflow that has drifted stops here. */
   | { kind: "expect"; text: string }
   /** Read the field labelled `label` out of the page and keep it as `as`. */
@@ -47,6 +49,7 @@ const SHAPES: Record<FlowStepKind, readonly string[]> = {
   fill: ["kind", "label", "from"],
   choose: ["kind", "label", "from"],
   click: ["kind", "button"],
+  commit: ["kind", "button"],
   expect: ["kind", "text"],
   capture: ["kind", "label", "as"],
 };
@@ -76,8 +79,8 @@ export function parseFlowSteps(value: unknown): FlowStep[] {
     const step = raw as Record<string, unknown>;
 
     const kind = step.kind;
-    if (typeof kind !== "string" || !(kind in SHAPES)) {
-      throw new FlowStepError(`${at} has no known kind. A flow may only open, fill, choose, click, expect or capture.`);
+    if (typeof kind !== "string" || !Object.hasOwn(SHAPES,kind)) {
+      throw new FlowStepError(`${at} has no known kind. A flow may only open, fill, choose, click, commit, expect or capture.`);
     }
     const allowed = SHAPES[kind as FlowStepKind];
     for (const key of Object.keys(step)) {
@@ -123,4 +126,17 @@ export async function flowDigest(steps: readonly FlowStep[]): Promise<string> {
   const bytes = new TextEncoder().encode(canonicalize(steps));
   const hash = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** Legacy flows remain readable, but cannot authorize the new write protocol. */
+export function parseCommitFlow(value: unknown): FlowStep[] {
+  const steps = parseFlowSteps(value);
+  if (steps.filter(step => step.kind === "commit").length !== 1) {
+    throw new FlowStepError("A supervised write flow requires exactly one commit step.");
+  }
+  const after = steps.slice(steps.findIndex(step => step.kind === "commit") + 1);
+  if (after.some(step => !["expect", "capture"].includes(step.kind))) {
+    throw new FlowStepError("Only read-back steps may follow commit.");
+  }
+  return steps;
 }

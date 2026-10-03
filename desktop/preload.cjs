@@ -30,9 +30,9 @@ contextBridge.exposeInMainWorld("avalDesktop", Object.freeze({
     discoverCapabilities: (input) => ipcRenderer.invoke("aval:pms:discover-capabilities", input),
     recoverSession: (input) => ipcRenderer.invoke("aval:pms:recover-session", input),
     healthCheck: (input) => ipcRenderer.invoke("aval:pms:health-check", input),
-    reconcile: (input) => ipcRenderer.invoke("aval:pms:reconcile", input),
-    execute: (input) => ipcRenderer.invoke("aval:pms:execute", input),
-    verify: (input) => ipcRenderer.invoke("aval:pms:verify", input),
+    setup: (input) => ipcRenderer.invoke("aval:pms:setup", input),
+    run: () => ipcRenderer.invoke("aval:pms:run"),
+    status: () => ipcRenderer.invoke("aval:pms:status"),
   }),
   onEvent: (listener) => {
     if (typeof listener !== "function") return () => {};

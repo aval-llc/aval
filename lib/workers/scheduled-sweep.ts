@@ -8,6 +8,7 @@ import { runImportWorker } from "@/lib/integrations/sync-worker";
 import type { AvalRuntimeBindings } from "@/lib/runtime/bindings";
 import { runIsolatedJobs } from "./isolated-jobs";
 import { retryPendingInbound } from "@/lib/communications/intake";
+import { expireBrowserReviews } from "@/lib/pms/browser/protocol";
 
 type ScheduledBindings = AvalRuntimeBindings & AgentWorkerEnv;
 
@@ -26,6 +27,9 @@ export async function runScheduledSweep(bindings: ScheduledBindings): Promise<vo
 
   for (const organizationId of organizations) {
     await runIsolatedJobs(organizationId, [
+      { name: "pms-review-deadlines", run: () => withWorkerOrganizationSession(
+        organizationId, session => expireBrowserReviews(session, organizationId), bindings,
+      ) },
       { name: "imports", run: () => withWorkerOrganizationSession(
         organizationId,
         (session) => runImportWorker(session, bindings as unknown as IntegrationEnv),

@@ -1,5 +1,8 @@
 /** Synthetic input and expected outcomes. Never imported into the agent prompt. */
 export const maintenanceScenarios = [
+  { id: 'buildium-sink-pilot', name: 'Buildium-style synthetic sink request — internal engine only', locale: 'en',
+    message: 'SYNTHETIC TEST ONLY. A fictional resident reports a slow drip beneath the kitchen sink when the tap runs. Water is contained in a bucket; no flooding, electrical hazard, injury or loss of water service is reported. Request assessment and an approved internal work order only. Entry requires human confirmation. Do not contact anyone, dispatch a vendor, schedule, spend money or close the request.',
+    decision: 'approved', expectedPriority: 'routine', repetitions: 1 },
   { id: 'routine-en', name: 'Routine drain request', locale: 'en',
     message: 'The bathroom drain is draining slowly. Please arrange an internal maintenance inspection. No flooding, injury or other emergency symptoms. I do not know the cause.',
     decision: 'approved', expectedPriority: 'routine', repetitions: 3 },

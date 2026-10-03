@@ -1,4 +1,20 @@
 {
+  "PmsOperations": {
+    "title": "Supervised PMS actions",
+    "explanation": "An approved attempt is not proof that a work order exists. Confirmation requires a fresh read-back.",
+    "loadError": "PMS status could not be refreshed. The last displayed state may be out of date.",
+    "waiting": "Waiting for Desktop",
+    "preparing": "Preparing — not submitted",
+    "unknown": "Result unconfirmed — checking",
+    "review": "Human review required",
+    "confirmed": "Work order confirmed",
+    "notSubmitted": "Aval has not authorized submission for this attempt.",
+    "mayHaveSubmitted": "Submission was authorized. Do not repeat creation while the result is unresolved.",
+    "reference": "Aval reference",
+    "workOrder": "Verified PMS work-order ID",
+    "reviewDue": "Review due",
+    "responsible": "Responsible user"
+  },
   "MinimalChat": {
     "actionCompleted": "Completed an action",
     "tools": {

@@ -141,11 +141,20 @@ app.whenReady().then(async () => {
   for (const [channel, method] of [
     ["supported", "supported"], ["session-status", "sessionStatus"], ["recover-session", "recoverSession"],
     ["health-check", "healthCheck"], ["discover-capabilities", "discoverCapabilities"],
-    ["reconcile", "reconcile"], ["execute", "execute"], ["verify", "verify"],
   ]) {
     ipcMain.handle(`aval:pms:${channel}`, async (event, payload) => {
       if (!isTrustedSender(event)) throw new Error("Untrusted Aval Desktop request.");
       return pmsProvider[method](payload || {});
+    });
+  }
+  const { createPmsRuntime } = require('./pms-runtime.cjs');
+  const pmsRuntime = createPmsRuntime({ app, session, origin: allowedOrigin });
+  for (const channel of ['run', 'status', 'setup']) {
+    ipcMain.handle(`aval:pms:${channel}`, async (event,payload) => {
+      if (event.sender !== mainWindow?.webContents || !isTrustedSender(event)) throw Error('Untrusted PMS request');
+      if(channel==='run')return pmsRuntime.tick();
+      if(channel==='status')return pmsRuntime.status();
+      return pmsRuntime.setup(payload?.provider);
     });
   }
   registerIpc("cancel-turn", async (payload) => { await service.cancelTurn(payload || {}); return null; });

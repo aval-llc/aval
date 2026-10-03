@@ -77,11 +77,10 @@ test("the desktop surface exposes provider operations and no browser primitives"
   const exposed = [...surface.matchAll(/^\s{4}(\w+):/gm)].map((match) => match[1]);
 
   assert.deepEqual(exposed.sort(), [
-    "discoverCapabilities", "execute", "healthCheck",
-    "reconcile", "recoverSession", "sessionStatus", "supported", "verify",
+    "discoverCapabilities", "healthCheck", "recoverSession", "run", "sessionStatus", "setup", "status", "supported",
   ], "the whole surface, and nothing else");
 
-  for (const forbidden of ["navigate", "evaluate", "executeJavaScript", "runScript", "click", "type", "goto"]) {
+  for (const forbidden of ["execute", "reconcile", "verify", "navigate", "evaluate", "executeJavaScript", "runScript", "click", "type", "goto"]) {
     assert.ok(!exposed.includes(forbidden), `${forbidden} must never be on this boundary`);
   }
 });
@@ -95,8 +94,8 @@ test("no IPC channel offers a raw browser command", () => {
   // so the table is what has to be read.
   const table = main.slice(main.indexOf("for (const [channel, method] of ["));
   const channels = [...table.slice(0, table.indexOf("]) {")).matchAll(/\["([a-z-]+)"/g)].map((match) => match[1]);
-  assert.ok(channels.length >= 8, `every provider operation is registered: ${channels.join(", ")}`);
+  assert.equal(channels.length, 5, `only non-writing legacy operations remain: ${channels.join(", ")}`);
   for (const channel of channels) {
-    assert.ok(!/navigate|evaluate|script|eval|dom/.test(channel), `${channel} is not a structured provider operation`);
+    assert.ok(!/execute|reconcile|verify|navigate|evaluate|script|eval|dom/.test(channel), `${channel} is not a permitted operation`);
   }
 });

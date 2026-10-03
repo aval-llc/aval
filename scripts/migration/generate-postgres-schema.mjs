@@ -107,6 +107,18 @@ source = source.replace('    extractionConfidence: text("extraction_confidence")
     supersededAt: timestamp("superseded_at", { withTimezone: true, mode: "date" }),
     extractionConfidence: text("extraction_confidence"),`);
 source += await readFile(path.join(root, "db/postgres/utility-schema.fragment"), "utf8");
+source = source.replace('    // The approval that authorized this write.', `    connectionId: text("connection_id").references(() => integrationConnections.id),
+    protocolJson: jsonText("protocol_json"),
+    leaseGeneration: integer("lease_generation").notNull().default(0),
+    submittedAt: timestamp("submitted_at", {withTimezone:true,mode:"date"}),
+    verifyAfter: timestamp("verify_after", {withTimezone:true,mode:"date"}),
+    reviewDueAt: timestamp("review_due_at", {withTimezone:true,mode:"date"}),
+    responsibleUserId: text("responsible_user_id"),
+    verificationAttempts: integer("verification_attempts").notNull().default(0),
+    externalId: text("external_id"),
+    // The approval that authorized this write.`)
+  .replace('    /** Which access mode this workflow drives.', '    connectionId: text("connection_id").references(() => integrationConnections.id),\n    /** Which access mode this workflow drives.');
+source += await readFile(path.join(root, "db/postgres/pms-browser-schema.fragment"), "utf8");
 
 if (!source.includes('from "drizzle-orm/pg-core"') || source.includes("sqliteTable(") || source.includes("timestamp_ms") || /\w+Json:\s*text\(/.test(source)) {
   throw new Error("PostgreSQL schema conversion left an unsupported SQLite construct");

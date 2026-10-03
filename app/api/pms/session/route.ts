@@ -71,7 +71,7 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
 
   await ensureOrganization(dbSession, identity);
   const [connection] = await dbSession.db
-    .select({ status: integrationConnections.status, authMode: integrationConnections.authMode })
+    .select({ status: integrationConnections.status, authMode: integrationConnections.authMode, metadataJson: integrationConnections.metadataJson })
     .from(integrationConnections)
     .where(and(
       eq(integrationConnections.organizationId, identity.organizationId),
@@ -87,9 +87,18 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
   ]);
   const role = await roleFor(dbSession, identity.userId, identity.organizationId).catch(() => null);
   const active = workflows.filter((flow) => flow.status === "active");
+  let setup: Record<string, unknown> = {};
+  try {
+    const metadata = JSON.parse(connection?.metadataJson ?? '{}');
+    const stored = metadata.pmsDesktop ?? {};
+    for (const key of ['origin', 'preflightRequestId', 'allowedPropertyId']) {
+      if (typeof stored[key] === 'string') setup[key] = stored[key];
+    }
+  } catch { /* Historical metadata may be absent. Never expose other fields. */ }
 
   return Response.json({
     provider: providerId,
+    setup,
     displayName: descriptor.displayName,
     connected: Boolean(connection),
     accessMode: connection?.authMode ?? "customer_desktop_session",
@@ -158,6 +167,18 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
     : null;
   if (!session) return Response.json({ error: "A known provider session state is required" }, { status: 422 });
   const state: ConnectionState = stateForSession(session);
+  let desktopSetup: {origin:string;preflightRequestId:string;allowedPropertyId:string}|null=null;
+  if(providerId==='buildium') {
+    const origin=typeof body.origin==='string'?body.origin.trim():'';
+    let parsed:URL;
+    try { parsed=new URL(origin); } catch { return Response.json({error:'Enter the exact Buildium tenant address'},{status:422}); }
+    if(parsed.protocol!=='https:'||parsed.origin!==origin||!/^[a-z0-9-]+\.managebuilding\.com$/i.test(parsed.hostname))
+      return Response.json({error:'Use the exact HTTPS Buildium tenant address'},{status:422});
+    const preflightRequestId=String(body.preflightRequestId??''),allowedPropertyId=String(body.allowedPropertyId??'');
+    if(!/^\d{1,20}$/.test(preflightRequestId)||!/^\d{1,20}$/.test(allowedPropertyId))
+      return Response.json({error:'Choose a synthetic Buildium request and its demo property ID'},{status:422});
+    desktopSetup={origin,preflightRequestId,allowedPropertyId};
+  }
 
   // What the device says it can reach, bounded by what the provider actually
   // has a path for. Discovery is a fact, and a fact about a capability the
@@ -188,12 +209,13 @@ async function POSTWithSession(dbSession: DbSession, request: Request) {
     probed: state === "CONNECTED",
     probedAt: state === "CONNECTED" ? now.toISOString() : null,
   };
+  if(desktopSetup) metadata.pmsDesktop=desktopSetup;
 
   const values = {
     // `connected` describes the connection, not the session. A laptop that is
     // closed has not disconnected the PMS, and the session state is where the
     // difference is recorded.
-    status: "connected" as const,
+    status: state === "CONNECTED" ? "connected" : "verification_required",
     authMode: "customer_desktop_session",
     scopesJson: JSON.stringify(descriptor.read.mechanisms),
     metadataJson: JSON.stringify(metadata),

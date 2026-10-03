@@ -7,6 +7,7 @@ import { BrandMark } from './brand-mark';
 import { PmsSeat } from './pms-seat';
 import type { Provider } from './connection-dialog';
 import { PmsReportImport } from './pms-report-import';
+import { PmsDesktopSession } from './pms-desktop-session';
 
 export function PmsConnectDialog({ provider, onClose }: { provider: Provider; onClose: () => void }) {
   const es = useLocale() === 'es-mx';
@@ -30,11 +31,13 @@ export function PmsConnectDialog({ provider, onClose }: { provider: Provider; on
         ['api', es ? 'Conectar API aprobada' : 'Connect approved API'],
         ['notifications', es ? 'Recibir notificaciones' : 'Receive notifications'],
         ['reports', es ? 'Importar reportes' : 'Import reports'],
+        ...(provider.id==='buildium'?[['desktop',es?'Conectar usuario restringido':'Connect restricted staff']]:[]),
       ].map(([id,label]) => <button key={id} className={path === id ? 'primary-button' : 'soft-button'} onClick={() => setPath(id)}>{label}</button>)}</div>
       {path === 'api' && <p role="status">{es ? 'Pendiente de acceso aprobado por el proveedor. Puedes empezar con reportes o notificaciones; la sincronización API aún no está habilitada.' : 'Awaiting approved vendor access. Start with reports or notifications; API synchronization is not enabled yet.'}</p>}
       {path === 'notifications' && <><p>{es ? 'Las notificaciones cubren los eventos recibidos, no todo tu portafolio.' : 'Notifications cover received events, not your complete portfolio.'}</p><PmsSeat initialProvider={provider.id} /></>}
       {path === 'reports' && <PmsReportImport provider={provider.id} />}
+      {path === 'desktop' && <PmsDesktopSession provider={provider.id}/>}
       {error && <p role="alert">{error}</p>}
-      <div className="dialog-actions"><span>{es ? 'Solo lectura' : 'Read-only access'}</span><button className="primary-button" disabled={busy} onClick={() => void demo()}>{busy ? (es ? 'Preparando…' : 'Preparing…') : (es ? 'Probar portafolio de ejemplo' : 'Try sample portfolio')}</button></div>
+      <div className="dialog-actions"><span>{provider.id==='buildium'?(es?'Escritura supervisada; sin pagos':'Supervised write; no payments'):(es ? 'Solo lectura' : 'Read-only access')}</span><button className="primary-button" disabled={busy} onClick={() => void demo()}>{busy ? (es ? 'Preparando…' : 'Preparing…') : (es ? 'Probar portafolio de ejemplo' : 'Try sample portfolio')}</button></div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>;
 }

@@ -92,6 +92,7 @@ import { PERSON_RESUMABLE, WAIT_TOOL, wakeContext } from "./waits.ts";
 import { assignableActorsPrompt } from "./organization/prompt.ts";
 import { builtInActor } from "./organization/index.ts";
 import { getOperatingProfile } from "@/lib/organizations/operating-profile-store";
+import { browserEvidenceForProposal } from "@/lib/pms/browser/protocol";
 
 /**
  * Framing that turns the question-answering prompt into a goal-pursuing one.
@@ -968,6 +969,9 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
         }
 
         if (result.status === "needs_approval") {
+          const pmsEvidence=use.name==='create_work_order'
+            ? await browserEvidenceForProposal(dbSession,organizationId,use.input,`${taskId}:${stepIndex}:${use.id}`)
+            : {};
           const approval = await requestApproval(dbSession, {
             taskId, organizationId, stepIndex,
             propertyId: typeof use.input.property_id === "string" ? use.input.property_id : undefined,
@@ -975,7 +979,7 @@ Use these exact tool names in check.tools; do not invent search tools.${assignab
             // Bind the human decision to this exact model proposal. Tool name
             // alone is insufficient because one assistant message may contain
             // two calls to the same financial tool with different arguments.
-            evidence: { toolUseId: use.id, payloadHash: await payloadHash(use.input), ...(use.name === 'create_maintenance_work_order' ? { maintenanceEvidenceRevision: observedMaintenanceRevision(messages) } : {}), goal: workTitle(task.goal), agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
+            evidence: { toolUseId: use.id, payloadHash: await payloadHash(use.input), ...pmsEvidence, ...(use.name === 'create_maintenance_work_order' ? { maintenanceEvidenceRevision: observedMaintenanceRevision(messages) } : {}), goal: workTitle(task.goal), agent: task.agentId, arguments: redactArguments(use.input, TOOL_SCHEMAS.get(use.name)), review: ["request_execution_plan", "create_maintenance_work_order", "send_external_message", "place_call", "publish_listing"].includes(use.name) ? use.input : undefined, ...(use.name === "request_execution_plan" ? await planEvidence(dbSession, use.input, task.userId, organizationId) : {}), reason: result.reason },
             amountCents: typeof use.input.amount_cents === "number" ? use.input.amount_cents : undefined,
             currency: typeof use.input.currency === "string" ? use.input.currency : undefined,
             tier: result.tier,

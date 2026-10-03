@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, Computer, Refresh, ShieldCheck, WarningTriangle } from "iconoir-react";
-import { desktopBridge } from "@/lib/pms/browser/desktop-runner";
+import { desktopBridge, type DesktopProviderBridge } from "@/lib/pms/browser/desktop-runner";
 
 /**
  * Connecting a PMS by signing into it yourself.
@@ -34,6 +34,7 @@ interface SupportView {
 }
 
 interface SessionView {
+  setup?: {origin?: string; preflightRequestId?: string; allowedPropertyId?: string};
   displayName: string;
   connected: boolean;
   session: { state: SessionState; detail?: string; lastVerifiedAt?: string | null };
@@ -61,6 +62,9 @@ export function PmsDesktopSession({ provider }: { provider: string }) {
   const [view, setView] = useState<SessionView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [origin,setOrigin]=useState('');
+  const [preflightRequestId,setPreflightRequestId]=useState('');
+  const [allowedPropertyId,setAllowedPropertyId]=useState('');
   const bridge = desktopBridge();
 
   // A liveness flag rather than a bare call, so a slow response for a provider
@@ -70,7 +74,12 @@ export function PmsDesktopSession({ provider }: { provider: string }) {
     let live = true;
     void (async () => {
       const next = await fetchView(provider);
-      if (live && next) setView(next);
+      if (live && next) {
+        setView(next);
+        setOrigin(next.setup?.origin ?? '');
+        setPreflightRequestId(next.setup?.preflightRequestId ?? '');
+        setAllowedPropertyId(next.setup?.allowedPropertyId ?? '');
+      }
     })();
     return () => { live = false; };
   }, [provider]);
@@ -92,22 +101,32 @@ export function PmsDesktopSession({ provider }: { provider: string }) {
     setBusy(true);
     setError(null);
     try {
-      const recovery = await bridge.recoverSession({ provider });
-      const preflight = recovery.recovered
+      const setup={provider,origin:origin.trim(),preflightRequestId:preflightRequestId.trim(),allowedPropertyId:allowedPropertyId.trim()};
+      if(provider==='buildium') {
+        const prepared=await fetch('/api/pms/session',{method:'POST',headers:{'content-type':'application/json'},
+          body:JSON.stringify({...setup,session:'NEW',discovered:[]})});
+        const preparedBody=await prepared.json() as {error?:string};
+        if(!prepared.ok)throw Error(preparedBody.error??t('PmsSession.couldNotConnect'));
+      }
+      const recovery = (provider==='buildium'&&bridge.setup?await bridge.setup({provider}):await bridge.recoverSession({ provider })) as
+        Awaited<ReturnType<DesktopProviderBridge['recoverSession']>> & {discovered?:string[]};
+      const preflight = provider==='buildium'
+        ? {ready:recovery.recovered,session:recovery.session,reason:recovery.reason}
+        : recovery.recovered
         ? await bridge.sessionStatus({ provider })
         : { ready: false, session: recovery.session, reason: recovery.reason };
 
       // Discovery only means anything against a session that is actually up,
       // and it asks the driver what this login reaches rather than what Aval
       // implemented — those differ, and the difference is the customer's role.
-      const discovered = preflight.ready
+      const discovered = provider==='buildium'&&Array.isArray(recovery.discovered)?recovery.discovered:preflight.ready
         ? (await bridge.discoverCapabilities({ provider })).available
         : [];
 
       const response = await fetch("/api/pms/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider, session: preflight.session, discovered }),
+        body: JSON.stringify({ ...setup, session: preflight.session, discovered }),
       });
       const body = await response.json() as SessionView & { error?: string };
       if (!response.ok) {
@@ -121,7 +140,7 @@ export function PmsDesktopSession({ provider }: { provider: string }) {
     } finally {
       setBusy(false);
     }
-  }, [bridge, provider, load, t]);
+  }, [bridge, provider, load, t, origin, preflightRequestId, allowedPropertyId]);
 
   if (!view) return null;
 
@@ -164,6 +183,11 @@ export function PmsDesktopSession({ provider }: { provider: string }) {
     {view.session.detail && !healthy && <p className="pms-session-detail">{view.session.detail}</p>}
 
     {view.canEdit && <div className="pms-session-actions">
+      {provider==='buildium'&&<div className="credential-form">
+        <label>Buildium tenant address<input value={origin} onChange={event=>setOrigin(event.target.value)} placeholder="https://company.managebuilding.com" autoComplete="off"/></label>
+        <label>Synthetic request ID<input value={preflightRequestId} onChange={event=>setPreflightRequestId(event.target.value)} inputMode="numeric" autoComplete="off"/></label>
+        <label>Demo property ID<input value={allowedPropertyId} onChange={event=>setAllowedPropertyId(event.target.value)} inputMode="numeric" autoComplete="off"/></label>
+      </div>}
       <button className="primary-button" onClick={() => void connect()} disabled={busy}>
         {busy ? <Refresh width={15} height={15}/> : <Computer width={15} height={15}/>}
         {busy

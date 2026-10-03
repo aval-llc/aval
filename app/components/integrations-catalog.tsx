@@ -2,6 +2,7 @@
 import { ConnectionOperations } from "./connection-operations";
 import { CommunicationSettings } from "./communication-settings";
 import { PmsMatrix } from "./pms-matrix";
+import { PmsOperations } from "./pms-operations";
 import { PmsSeat } from "./pms-seat";
 import { PmsDesktopSession } from "./pms-desktop-session";
 import { PmsWorkflows } from "./pms-workflows";
@@ -29,7 +30,7 @@ type RowState = "connected" | "attention" | "blocked" | "available";
  * button, so every row ends in the next action rather than in a status.
  */
 function rowState(provider: Provider): RowState {
-  if (['appfolio','yardi'].includes(provider.id)) return 'available';
+  if (['appfolio','yardi','buildium'].includes(provider.id)) return 'available';
   // A blocker is Aval's side of the connection being unfinished; a provider
   // that is not configured is the same problem seen from the other end.
   // Neither is something pressing "connect" can solve, so both say so.
@@ -97,6 +98,7 @@ export function IntegrationsCatalog({
         </span>
       </header>
       <DemoPortfolioPanel />
+      <PmsOperations />
 
       {/* Built and testable, but not something a customer should meet here
           yet. See `internal-preview.ts`. */}

@@ -34,6 +34,8 @@
       "inference.cjs",
       "protocol.json",
       "pms-provider.cjs",
+      "pms-broker.cjs",
+      "pms-runtime.cjs",
       "providers/**/*.cjs",
       "package.json",
       "!node_modules/**",

@@ -1,4 +1,20 @@
 {
+  "PmsOperations": {
+    "title": "Acciones supervisadas en el PMS",
+    "explanation": "Autorizar un intento no confirma que exista una orden de trabajo. Aval debe volver a consultarla para confirmarla.",
+    "loadError": "No se pudo actualizar el estado del PMS. El último estado mostrado podría estar desactualizado.",
+    "waiting": "Esperando a Aval Desktop",
+    "preparing": "En preparación — sin enviar",
+    "unknown": "Resultado sin confirmar — verificando",
+    "review": "Requiere revisión humana",
+    "confirmed": "Orden de trabajo confirmada",
+    "notSubmitted": "Aval no ha autorizado el envío de este intento.",
+    "mayHaveSubmitted": "El envío fue autorizado. No repitas la creación mientras el resultado siga sin resolverse.",
+    "reference": "Referencia de Aval",
+    "workOrder": "ID verificado de la orden en el PMS",
+    "reviewDue": "Fecha límite de revisión",
+    "responsible": "Usuario responsable"
+  },
   "MinimalChat": {
     "actionCompleted": "Se completó una acción",
     "tools": {

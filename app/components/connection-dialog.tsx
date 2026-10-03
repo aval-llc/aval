@@ -102,7 +102,7 @@ function QrPlaceholder() {
 }
 
 export function ConnectionDialog(props: { provider: Provider | null; onClose: () => void; onRefresh: () => void }) {
-  if (props.provider && ['appfolio','yardi'].includes(props.provider.id)) return <PmsConnectDialog key={props.provider.id} provider={props.provider} onClose={props.onClose} />;
+  if (props.provider && ['appfolio','yardi','buildium'].includes(props.provider.id)) return <PmsConnectDialog key={props.provider.id} provider={props.provider} onClose={props.onClose} />;
   if (props.provider?.id === "sap_bydesign") return <SapConnectionDialog key={props.provider.id} provider={props.provider} onClose={props.onClose} onRefresh={props.onRefresh} />;
   return <StandardConnectionDialog {...props} />;
 }

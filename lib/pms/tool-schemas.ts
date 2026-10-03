@@ -66,6 +66,10 @@ const SPECS: readonly PmsWriteToolSpec[] = [
         type: "object",
         properties: {
           provider,
+          request_id: {...text(100),description:"Stable Buildium maintenance-request ID when the source is Buildium."},
+          request_status: {...text(40),description:"Current source request status, read from the PMS immediately before proposing."},
+          access_restrictions: {type:"string",maxLength:1000,description:"Exact entry/access restrictions shown on the source request."},
+          linked_work_order_ids: {type:"array",items:text(100),maxItems:100,description:"Work-order IDs already linked to the source request."},
           property_id: text(100),
           unit_id: text(100),
           summary: text(200),

@@ -11,15 +11,14 @@
  *
  * What the renderer may ask for is a closed list of provider operations. There
  * is deliberately no `navigate(url)` and no `evaluate(script)`, so neither a
- * compromised page nor a compromised cloud can turn this into a general-purpose
- * browser. A step arrives as one of six named kinds against a labelled target,
- * and a provider driver decides what that means for its own app.
+ * compromised page can hand the main process a write payload. The broker fetches
+ * approved instructions directly from Aval and validates their commit boundary.
  *
- * Session isolation is per provider (`persist:pms-<provider>`), which keeps a
- * PMS session out of the Aval session and out of every other provider's.
+ * Session isolation is per workspace, connection and provider.
  */
 
 const { BrowserWindow, session } = require("electron");
+const { partitionFor: boundPartitionFor } = require('./pms-broker.cjs');
 
 /** Where a provider lives. A connection supplies the customer's own host. */
 const drivers = new Map();
@@ -37,14 +36,34 @@ function registerProviderDriver(provider, driver) {
   drivers.set(provider, driver);
 }
 
-function partitionFor(provider) {
-  return `persist:pms-${String(provider).replace(/[^a-z0-9_-]/gi, "")}`;
+function partitionFor(binding) {
+  return boundPartitionFor(binding);
 }
 
 const windows = new Map();
+const observers = new Map();
 
-function sessionWindow(provider, { show = false } = {}) {
-  const existing = windows.get(provider);
+/** Separate read-only surface: identity/request refreshes cannot unload an
+ * already prepared form. It shares only the connection's isolated session. */
+function observationWindow(binding) {
+  const key=partitionFor(binding);
+  const existing=observers.get(key);
+  if(existing&&!existing.isDestroyed())return existing;
+  const observer=new BrowserWindow({show:false,webPreferences:{partition:key,contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  observer.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  const guard=(event,url)=>{try{if(new URL(url).origin!==binding.identity.origin)event.preventDefault();}catch{event.preventDefault();}};
+  observer.webContents.on('will-navigate',guard);
+  observer.webContents.on('will-redirect',guard);
+  observers.set(key,observer);
+  observer.on('closed',()=>observers.delete(key));
+  const parent=sessionWindow(binding);
+  parent.once('closed',()=>{if(!observer.isDestroyed())observer.close();});
+  return observer;
+}
+
+function sessionWindow(binding, { show = false } = {}) {
+  const key = partitionFor(binding);
+  const existing = windows.get(key);
   if (existing && !existing.isDestroyed()) {
     if (show) existing.show();
     return existing;
@@ -53,9 +72,9 @@ function sessionWindow(provider, { show = false } = {}) {
     show,
     width: 1180,
     height: 820,
-    title: `Sign in to ${provider}`,
+    title: `Sign in to ${binding.provider}`,
     webPreferences: {
-      partition: partitionFor(provider),
+      partition: key,
       // The provider's own page. It gets no Aval bridge, no node, and no
       // access to anything of ours.
       contextIsolation: true,
@@ -64,9 +83,30 @@ function sessionWindow(provider, { show = false } = {}) {
       preload: undefined,
     },
   });
-  windows.set(provider, window);
-  window.on("closed", () => windows.delete(provider));
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-navigate', (event, url) => {
+    const destination = new URL(url).origin;
+    // Authentication may leave the tenant; execution still checks its exact
+    // bound origin in the provider driver. Never allow arbitrary subdomains.
+    if(destination !== binding.identity.origin && !(binding.provider === 'buildium' && destination === 'https://signin.managebuilding.com')) event.preventDefault();
+  });
+  windows.set(key, window);
+  window.on("closed", () => windows.delete(key));
   return window;
+}
+
+/** Only the main-process broker can construct a session from a server binding. */
+function protocolDriverFor(binding) {
+  const driver = driverFor(binding.provider);
+  if(!driver || typeof driver.createProtocolSession !== 'function') return null;
+  return driver.createProtocolSession(binding, {window: () => sessionWindow(binding),observationWindow:()=>observationWindow(binding)});
+}
+
+/** Setup is also main-process owned: the renderer names only a provider. */
+function setupDriverFor(binding) {
+  const driver = driverFor(binding.provider);
+  if(!driver || typeof driver.setup !== 'function') return null;
+  return { driver, run: () => driver.setup(binding, {window: () => sessionWindow(binding,{show:true}),observationWindow:()=>observationWindow(binding)}) };
 }
 
 function driverFor(provider) {
@@ -93,15 +133,11 @@ const pms = {
    * login may is a question only the provider can answer.
    */
   async discoverCapabilities({ provider } = {}) {
-    const driver = driverFor(provider);
-    if (!driver) return { available: [], error: NO_DRIVER };
-    return driver.discoverCapabilities({ window: () => sessionWindow(provider) });
+    return { available: [], error: `${provider}: reconnect a verified restricted staff account in Aval Desktop.` };
   },
 
   async sessionStatus({ provider } = {}) {
-    const driver = driverFor(provider);
-    if (!driver) return { ready: false, session: "BLOCKED", reason: NO_DRIVER };
-    return driver.sessionStatus({ window: () => sessionWindow(provider) });
+    return { ready: false, session: "BLOCKED", reason: `${provider}: a connection-specific session is required.` };
   },
 
   /**
@@ -114,50 +150,48 @@ const pms = {
    * for a person rather than being worked around.
    */
   async recoverSession({ provider } = {}) {
-    const driver = driverFor(provider);
-    if (!driver) return { session: "BLOCKED", recovered: false, reason: NO_DRIVER };
-    return driver.recoverSession({ window: () => sessionWindow(provider, { show: true }) });
+    return { session: "BLOCKED", recovered: false, reason: `${provider}: complete restricted staff setup before sign-in.` };
   },
 
   async healthCheck({ provider } = {}) {
-    const driver = driverFor(provider);
-    if (!driver) return { session: "BLOCKED", usable: false, detail: NO_DRIVER, checkedAt: new Date() };
-    return driver.healthCheck({ window: () => sessionWindow(provider) });
+    return { session: "BLOCKED", usable: false, detail: `${provider}: connection verification required`, checkedAt: new Date() };
   },
 
-  async reconcile({ provider, action, payload } = {}) {
+  async reconcile({ provider } = {}) {
     const driver = driverFor(provider);
     // Throws rather than answering "none found". A duplicate check that did not
     // happen must never look like one that found nothing, or the first retry
     // after a lost outcome creates a second record.
     if (!driver) throw new Error(NO_DRIVER);
-    return driver.reconcile({ action, payload, window: () => sessionWindow(provider) });
+    throw new Error('Use the privileged PMS protocol broker');
   },
 
-  async execute({ provider, action, steps, payload } = {}) {
+  async execute({ provider } = {}) {
     const driver = driverFor(provider);
     if (!driver) return { ok: false, error: NO_DRIVER, retryable: false, session: "BLOCKED" };
-    return driver.execute({ action, steps, payload, window: () => sessionWindow(provider) });
+    return { ok: false, error: 'Use the privileged PMS protocol broker', retryable: false, session: 'BLOCKED' };
   },
 
-  async verify({ provider, action, execution, payload } = {}) {
+  async verify({ provider } = {}) {
     const driver = driverFor(provider);
     if (!driver) return { confirmed: false, detail: NO_DRIVER };
-    return driver.verify({ action, execution, payload, window: () => sessionWindow(provider) });
+    return { confirmed: false, detail: 'Use the privileged PMS protocol broker' };
   },
 };
 
-/** Drop every provider session on this device. Used when a connection is revoked. */
-async function clearProviderSession(provider) {
-  const window = windows.get(provider);
+/** Drop only this connection's session. Used when a connection is revoked. */
+async function clearProviderSession(binding) {
+  const key = partitionFor(binding);
+  const window = windows.get(key);
   if (window && !window.isDestroyed()) window.destroy();
-  windows.delete(provider);
-  await session.fromPartition(partitionFor(provider)).clearStorageData();
+  windows.delete(key);
+  await session.fromPartition(key).clearStorageData();
 }
 
 // The drivers this build ships with. Registered here rather than discovered,
 // so what a desktop can drive is a reviewed list rather than whatever happens
 // to be on disk.
 registerProviderDriver("appfolio", require("./providers/appfolio.cjs").driver);
+registerProviderDriver("buildium", require("./providers/buildium.cjs").driver);
 
-module.exports = { pms, registerProviderDriver, clearProviderSession, partitionFor };
+module.exports = { pms, registerProviderDriver, clearProviderSession, partitionFor, protocolDriverFor, setupDriverFor };

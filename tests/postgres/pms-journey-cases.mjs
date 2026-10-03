@@ -19,9 +19,7 @@ import { discoverGrants } from '../../lib/pms/grants.ts';
 import { listWorkflows, promoteFlow, recordFlow } from '../../lib/pms/flows.ts';
 import { BrowserSimulator } from '../../lib/pms/browser/simulator.ts';
 import { clearBrowserAdapters, registerBrowserAdapter } from '../../lib/pms/browser/adapter.ts';
-import { runInstruction } from '../../lib/pms/browser/drain.ts';
-import { POST as runnerRoute } from '../../app/api/pms/runner/route.ts';
-import { withVerifiedIdentityHeaders } from '../../lib/auth/request-identity.ts';
+import { drainOneWrite } from '../../lib/pms/browser/drain.ts';
 import { env } from 'cloudflare:workers';
 import { readConnectionHealth } from '../../lib/pms/browser/health.ts';
 
@@ -34,9 +32,10 @@ import { readConnectionHealth } from '../../lib/pms/browser/health.ts';
  * then takes a resident's problem all the way to a verified work order inside
  * the customer's PMS — without Aval ever holding a PMS credential.
  *
- * Every step below is the production path. The provider is simulated and says
- * nothing about any real system; the certification for this work stays
- * `SIMULATOR_E2E_TESTED`.
+ * This preserves legacy domain/deployment/health simulator coverage. The v1
+ * HTTP endpoint and renderer executor are retired. Production broker/API and
+ * PostgreSQL authority tests live in pms-browser-protocol.integration.mjs.
+ * Nothing in this test certifies a real provider.
  */
 
 const PROVIDER = 'appfolio';
@@ -62,31 +61,8 @@ export async function runPmsJourneyCases(t, { session, administrator, propertyId
   clearBrowserAdapters();
   registerBrowserAdapter(provider);
 
-  // The desktop talks to cloud over HTTP and nothing else. Calling the drain
-  // helper directly here would test a composition the product does not use.
-  const runnerCall = async (body) => {
-    const request = new Request('https://app.aval.llc/api/pms/runner', {
-      method: 'POST',
-      headers: withVerifiedIdentityHeaders(
-        new Headers({ 'content-type': 'application/json', cookie: `aval-active-organization=${org}` }),
-        { userId: customer, email: `${customer}@example.test`, displayName: customer, emailVerified: true },
-      ),
-      body: JSON.stringify(body),
-    });
-    const response = await runnerRoute(request, undefined);
-    return [response.status, await response.json()];
-  };
-
-  /** Exactly what the desktop runner does: claim over HTTP, act, report over HTTP. */
-  const runnerPass = async (runnerId) => {
-    const [, claimed] = await runnerCall({ intent: 'claim', runner: runnerId });
-    if (!claimed.instruction) return claimed.outcome;
-    const report = await runInstruction(claimed.instruction, {
-      organizationId: org, providerId: claimed.instruction.provider, runnerId,
-    });
-    const [, reported] = await runnerCall({ intent: 'result', runner: runnerId, ...report });
-    return reported.outcome;
-  };
+  // Legacy simulation only; there is no HTTP or Desktop path to this drain.
+  const runnerPass = runnerId => run((s,organizationId)=>drainOneWrite(s,organizationId,runnerId));
 
   const previousEnv = { ...env };
   env.DATABASE_URL = config.connectionString;
