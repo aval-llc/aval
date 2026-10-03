@@ -87,7 +87,7 @@ async function GETWithSession(dbSession: DbSession, request: Request) {
   ]);
   const role = await roleFor(dbSession, identity.userId, identity.organizationId).catch(() => null);
   const active = workflows.filter((flow) => flow.status === "active");
-  let setup: Record<string, unknown> = {};
+  const setup: Record<string, unknown> = {};
   try {
     const metadata = JSON.parse(connection?.metadataJson ?? '{}');
     const stored = metadata.pmsDesktop ?? {};
